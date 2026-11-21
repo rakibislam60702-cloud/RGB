@@ -1,0 +1,113 @@
+<resources>
+    <string name="app_name">Pro RGB Keyboard</string>
+    <string name="subtype_en_us">English (QWERTY)</string>
+    <string name="subtype_bn_bd">বাংলা (Bengali)</string>
+    <string name="quick_language_label">KEYBOARD LANGUAGE</string>
+    <string name="label_default_language">Active Input Language</string>
+    <string name="cd_switch_language">Switch keyboard language</string>
+
+    <!-- Navigation -->
+    <string name="nav_studio">Studio</string>
+    <string name="nav_languages">Languages</string>
+    <string name="nav_effects">Effects</string>
+    <string name="nav_feel">Hardware</string>
+
+    <!-- Hero & Status -->
+    <string name="studio_tagline">PRO RGB KEYBOARD</string>
+    <string name="studio_title">Rakib official</string>
+    <string name="studio_subtitle">Gboard-clean ergonomics fused with Touch Spark multicolor rising key lights.</string>
+    <string name="status_active">Active Keyboard</string>
+    <string name="status_enabled">Enabled · Tap to Select</string>
+    <string name="status_not_enabled">Setup Required</string>
+    <string name="action_enable_ime">Enable in Settings</string>
+    <string name="action_select_ime">Switch Keyboard</string>
+    <string name="action_active_ready">Active System-Wide</string>
+    <string name="action_open_settings">Keyboard Settings</string>
+
+    <!-- Live Playground -->
+    <string name="playground_title">LIVE PLAYGROUND</string>
+    <string name="playground_hint">Tap the RGB keys below or type with the system IME...</string>
+    <string name="playground_clear">Clear text</string>
+    <string name="playground_system_ime">System Test Field</string>
+    <string name="playground_system_hint">Tap here to test the real system IME overlay</string>
+    <string name="quick_effects_label">LIGHTING MODE</string>
+    <string name="quick_palettes_label">COLOR SPECTRUM</string>
+
+    <!-- Effects Tab -->
+    <string name="effects_header">Lighting Studio</string>
+    <string name="effects_subtitle">Customize real-time shaders, palettes, and keycap optics.</string>
+    <string name="section_lighting_mode">Lighting Animation</string>
+    <string name="section_color_palette">RGB Color Palette</string>
+    <string name="section_keycap_style">Keycap Architecture</string>
+    <string name="section_tuning">Optical Tuning</string>
+    <string name="label_animation_speed">Wave &amp; Pulse Speed</string>
+    <string name="label_glow_intensity">Underglow Brightness</string>
+    <string name="label_corner_radius">Keycap Corner Radius</string>
+    <string name="label_legend_glow">Illuminated RGB Legends</string>
+    <string name="label_legend_glow_desc">Sync keycap letter color with live RGB spectrum</string>
+    <string name="label_underglow_bar">Chassis Perimeter Aura</string>
+    <string name="label_underglow_bar_desc">Cast neon light along the top &amp; bottom keyboard frame</string>
+
+    <!-- Hardware / Feel Tab -->
+    <string name="feel_header">Hardware &amp; Feel</string>
+    <string name="feel_subtitle">Dial in switch acoustics, tactile haptics, and ergonomic layout.</string>
+    <string name="section_switch_acoustics">Mechanical Switch Profile</string>
+    <string name="switch_test_prompt">Tap switch cap to audition acoustic &amp; haptic response</string>
+    <string name="section_haptics">Haptic Feedback</string>
+    <string name="label_haptic_enabled">Tactile Key Vibration</string>
+    <string name="label_haptic_strength">Actuation Strength</string>
+    <string name="section_layout">Ergonomics &amp; Layout</string>
+    <string name="label_keyboard_height">Key Row Height</string>
+    <string name="label_number_row">Dedicated Number Row</string>
+    <string name="label_number_row_desc">Always display 1–0 numeric row above QWERTY</string>
+    <string name="label_show_toolbar">Quick RGB Toolbar</string>
+    <string name="label_show_toolbar_desc">Show lighting switcher, emoji &amp; settings bar on IME</string>
+    <string name="label_auto_caps">Auto-Capitalization</string>
+    <string name="label_auto_caps_desc">Automatically capitalize after sentence punctuation</string>
+    <string name="label_double_space_period">Double-Space Period</string>
+    <string name="label_double_space_period_desc">Insert a period when double-tapping Space</string>
+    <string name="section_setup_guide">System IME Setup</string>
+    <string name="setup_step_1_title">1. Enable Pro RGB Keyboard</string>
+    <string name="setup_step_1_desc">Toggle Pro RGB Keyboard on inside Android On-Screen Keyboard settings.</string>
+    <string name="setup_step_2_title">2. Select as Default IME</string>
+    <string name="setup_step_2_desc">Pick Pro RGB Keyboard from the system input switcher to type anywhere.</string>
+    <string name="reset_defaults">Reset to Factory Defaults</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_hero_banner">Pro RGB mechanical keyboard hardware banner</string>
+    <string name="cd_shift">Shift</string>
+    <string name="cd_backspace">Backspace</string>
+    <string name="cd_enter">Enter</string>
+    <string name="cd_space">Spacebar</string>
+    <string name="cd_emoji">Emoji panel</string>
+    <string name="cd_cycle_effect">Cycle RGB lighting effect</string>
+    <string name="cd_cycle_palette">Cycle RGB color palette</string>
+    <string name="cd_open_app">Open Pro RGB Keyboard studio</string>
+    <string name="cd_switch_ime">Switch input method</string>
+    <string name="cd_hide_keyboard">Hide keyboard</string>
+    <string name="cd_clear_text">Clear playground text</string>
+    <string name="cd_clipboard">Clipboard &amp; feature menu</string>
+    <string name="cd_gif_reactions">GIF &amp; quick reactions</string>
+    <string name="cd_voice_mic">Voice typing</string>
+    <string name="brand_header_title">Rakib official</string>
+    <string name="clipboard_title">Clipboard</string>
+    <string name="reactions_title">Quick Reactions &amp; Stickers</string>
+    <string name="clipboard_empty">Copied text snippets will appear here. Tap any clip to paste instantly.</string>
+    <string name="clipboard_clear_all">Clear</string>
+    <string name="clipboard_add_sample">Copy Playground</string>
+
+    <!-- Download Languages Tab -->
+    <string name="languages_header">Languages</string>
+    <string name="languages_subtitle">Download compact dynamic JSON key layouts on demand and cycle them effortlessly with the Globe key.</string>
+    <string name="section_active_languages">Globe Key Cycle</string>
+    <string name="section_downloadable_languages">Download Language Packs</string>
+    <string name="action_download_enable">Download</string>
+    <string name="action_downloading">Saving…</string>
+    <string name="action_use_layout">Use Now</string>
+    <string name="badge_active_layout">Active</string>
+    <string name="badge_built_in">Built-in</string>
+    <string name="badge_saved_local">Saved in layouts/</string>
+    <string name="add_languages_chip">+ Languages</string>
+    <string name="cd_delete_language">Remove downloaded language pack</string>
+    <string name="globe_cycle_tip">Tap the Globe icon on the keyboard to switch smoothly between all enabled languages.</string>
+</resources>

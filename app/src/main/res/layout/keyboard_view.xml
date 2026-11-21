@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#11131A"
+    android:clipChildren="false"
+    android:clipToPadding="false"
+    android:orientation="vertical"
+    android:paddingHorizontal="2dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="4dp">
+
+    <!-- Gboard-style evenly-spaced 7-icon top toolbar (no branding text) -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:clipChildren="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="4dp">
+
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_clipboard"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_grid_menu" />
+
+        <ImageButton
+            android:id="@+id/btnEmoji"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_emoji"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_emoji" />
+
+        <ImageButton
+            android:id="@+id/btnGif"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_gif_reactions"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_gif" />
+
+        <ImageButton
+            android:id="@+id/btnSettings"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_open_app"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_settings" />
+
+        <ImageButton
+            android:id="@+id/btnLang"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_switch_language"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_translate" />
+
+        <ImageButton
+            android:id="@+id/btnTheme"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_cycle_effect"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_palette" />
+
+        <ImageButton
+            android:id="@+id/btnMic"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_voice_mic"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_kb_mic" />
+    </LinearLayout>
+
+    <!-- In-keyboard Clipboard Manager panel (opened via Feature Grid icon) -->
+    <LinearLayout
+        android:id="@+id/clipboardPanel"
+        android:layout_width="match_parent"
+        android:layout_height="232dp"
+        android:background="#11131A"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/clipboard_title"
+                android:textColor="#4285F4"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnClipboardClear"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:backgroundTint="#1E212E"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="10dp"
+                android:text="@string/clipboard_clear_all"
+                android:textAllCaps="false"
+                android:textColor="#FF5277"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnClipboardClose"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#1E212E"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="10dp"
+                android:text="⌨"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvClipboardEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:padding="16dp"
+            android:text="@string/clipboard_empty"
+            android:textColor="#8A94B0"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/clipboardContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- In-keyboard Quick Reactions & GIF-style Stickers panel (opened via GIF icon) -->
+    <LinearLayout
+        android:id="@+id/reactionsPanel"
+        android:layout_width="match_parent"
+        android:layout_height="232dp"
+        android:background="#11131A"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/reactions_title"
+                android:textColor="#00E5FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnReactionsClose"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:backgroundTint="#1E212E"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="10dp"
+                android:text="⌨"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/reactionsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- 4-Row Gboard Layout + Touch Spark RGB Canvas Keyboard -->
+    <com.example.rgbkeyboard.RgbKeyboardView
+        android:id="@+id/rgbKeyboardView"
+        android:layout_width="match_parent"
+        android:layout_height="232dp" />
+
+</LinearLayout>

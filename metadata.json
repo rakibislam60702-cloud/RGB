@@ -1,0 +1,6 @@
+{
+  "name": "Pro RGB Keyboard",
+  "description": "A customizable Android RGB mechanical keyboard input method (IME) with real-time wave, ripple, breathing, matrix, and starlight lighting effects, mechanical switch acoustics, haptic feedback, and a live studio preview.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
