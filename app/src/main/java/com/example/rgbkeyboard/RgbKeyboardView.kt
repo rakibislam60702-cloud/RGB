@@ -2,11 +2,14 @@ package com.example.rgbkeyboard
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RadialGradient
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.SweepGradient
@@ -20,6 +23,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
 import androidx.compose.ui.graphics.toArgb
+import com.example.data.CustomBackgroundManager
+import com.example.data.CustomPhotoTheme
 import com.example.data.LanguagePackManager
 import com.example.engine.RgbLightingEngine
 import com.example.keyboard.KeyboardLayoutData
@@ -33,14 +38,8 @@ import kotlin.math.hypot
 import kotlin.math.min
 
 /**
- * Gboard-styled custom Canvas Keyboard View fused with Samsung Keys Cafe Touch Spark RGB
- * and dynamic on-demand JSON language packs loaded from `filesDir/layouts/`:
- * - Built-in lightweight 4-row English QWERTY with 1-0 long-press sub-labels.
- * - Dynamically loads downloaded JSON language layouts (5-row Bengali alphabetical + Kar bar,
- *   5-row Hindi alphabetical + Matra bar, 4-row Arabic, 4-row Urdu) from local storage.
- * - Gboard bottom row: ?123 | , (long-press emoji) | Globe | wide Spacebar | . | Circular Blue Enter/Search.
- * - Default "Touch Spark" mode: clean stealth semi-transparent dark keycaps at rest; touching any key
- *   triggers its own distinct vibrant neon glow + rising luminous pop-up bubble with smooth fade-out.
+ * Gboard-styled custom Canvas Keyboard View fused with Samsung Keys Cafe Touch Spark RGB,
+ * persistent custom photo backgrounds, proper Shift/Caps Lock, and dynamic JSON language packs.
  */
 class RgbKeyboardView @JvmOverloads constructor(
     context: Context,
@@ -51,20 +50,47 @@ class RgbKeyboardView @JvmOverloads constructor(
     var onKeyAction: ((String) -> Unit)? = null
     var onKeyFeedback: ((Boolean) -> Unit)? = null
     var onEmojiModeChanged: ((Boolean) -> Unit)? = null
+    var onEmojiOpenRequested: (() -> Unit)? = null
     var onLanguageToggleRequested: (() -> Unit)? = null
     var onCursorMove: ((Int) -> Unit)? = null
     var allowTopOverflow: Boolean = true
 
+    private enum class ShiftMode { OFF, ONCE, CAPS_LOCK }
+
     private val languagePackManager = LanguagePackManager.getInstance(context)
+    private val customBgManager = CustomBackgroundManager.getInstance(context)
     private var activeLanguageId: String = LanguageCatalog.ENGLISH_ID
     private var activeDynamicLayout: DynamicKeyboardLayout? = null
     private var isKarBarActive: Boolean = false
 
-    private var isShift = false
+    private var shiftMode: ShiftMode = ShiftMode.OFF
+    private var lastShiftTapMs: Long = 0L
     private var isSymbols = false
     private var isEmojiMode = false
     private var isSearchAction = false
     private var settings: KeyboardSettings = KeyboardSettings()
+    /**
+     * When true (24h VIP Trial, Lifetime VIP Unlocked, or in-app Live Demo Preview), renders full
+     * Touch Spark / continuous RGB lighting and custom photo / banner backgrounds.
+     * When false (Forever Free Standard Keyboard on real system IME after 24h), renders a clean,
+     * fast standard matte-dark keyboard with RGB lighting and photo/banner themes turned OFF.
+     */
+    private var vipVisualsEnabled: Boolean = true
+
+    // Persistent Custom Photo & Built-in Banner Preset Background cache
+    private var photoTheme: CustomPhotoTheme = customBgManager.getCurrentTheme()
+    private var cachedPhotoBitmap: Bitmap? = null
+    private var cachedPhotoKey: String = ""
+    private val photoPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val photoDimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val photoSrcRect = Rect()
+    private val photoDstRect = RectF()
+    private val shiftArrowPath = Path()
+    private val shiftFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL_AND_STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
 
     private var rgbPhase = 0f
     private var pressedKeyBox: KeyBox? = null
@@ -204,7 +230,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         interpolator = LinearInterpolator()
         addUpdateListener {
             rgbPhase = it.animatedValue as Float
-            if (settings.effect != RgbEffect.TOUCH_SPARK || hasActiveVisualEffects()) {
+            if ((vipVisualsEnabled && settings.effect != RgbEffect.TOUCH_SPARK) || hasActiveVisualEffects()) {
                 invalidate()
             }
         }
@@ -224,14 +250,30 @@ class RgbKeyboardView @JvmOverloads constructor(
         val active = pressedKeyBox ?: return@Runnable
         if (isGliding || isSpaceDragging) return@Runnable
 
+        if (active.rawKey == "SHIFT") {
+            // Long-press on Shift locks Caps Lock ON immediately
+            longPressTriggered = true
+            shiftMode = if (shiftMode == ShiftMode.CAPS_LOCK) ShiftMode.OFF else ShiftMode.CAPS_LOCK
+            if (settings.hapticEnabled) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            onKeyFeedback?.invoke(true)
+            if (shiftMode != ShiftMode.OFF) isKarBarActive = false
+            rebuildKeyBoxes()
+            invalidate()
+            return@Runnable
+        }
+
         if (active.rawKey == "," || active.rawKey == "،") {
-            // Gboard Comma/Emoji long-press opens Emoji panel
+            // Gboard Comma/Emoji long-press opens full categorized Emoji panel
             longPressTriggered = true
             if (settings.hapticEnabled) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             onKeyFeedback?.invoke(true)
             releaseCurrentGlow(SystemClock.uptimeMillis())
             pressedKeyBox = null
-            toggleEmojiMode()
+            if (onEmojiOpenRequested != null) {
+                onEmojiOpenRequested?.invoke()
+            } else {
+                toggleEmojiMode()
+            }
             return@Runnable
         }
 
@@ -269,6 +311,34 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
     }
 
+    fun setVipVisualsEnabled(enabled: Boolean) {
+        if (vipVisualsEnabled != enabled) {
+            vipVisualsEnabled = enabled
+            if (!enabled) {
+                trailPoints.clear()
+            }
+            invalidate()
+        }
+    }
+
+    fun updatePhotoTheme(newTheme: CustomPhotoTheme) {
+        photoTheme = newTheme
+        reloadPhotoBitmapIfNeeded()
+        invalidate()
+    }
+
+    private fun reloadPhotoBitmapIfNeeded() {
+        val key = photoTheme.cacheKey
+        if (key == cachedPhotoKey) return
+        cachedPhotoKey = key
+        cachedPhotoBitmap?.recycle()
+        cachedPhotoBitmap = if (photoTheme.hasPhoto) {
+            customBgManager.decodeCachedBitmap(photoTheme)
+        } else {
+            null
+        }
+    }
+
     fun setActiveLanguage(langId: String) {
         val loaded = if (langId == LanguageCatalog.ENGLISH_ID) {
             null
@@ -282,7 +352,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         if (changed) {
             isSymbols = false
             isEmojiMode = false
-            isShift = false
+            shiftMode = ShiftMode.OFF
             isKarBarActive = false
             activeGlows.clear()
             onEmojiModeChanged?.invoke(false)
@@ -327,6 +397,10 @@ class RgbKeyboardView @JvmOverloads constructor(
             rgbAnimator.duration = targetDuration.coerceIn(900L, 14000L)
         }
 
+        // Sync custom photo theme if updated in SharedPreferences
+        photoTheme = customBgManager.getCurrentTheme()
+        reloadPhotoBitmapIfNeeded()
+
         // Always verify dynamic JSON layout matches the requested activeLanguageId (handles fresh downloads too)
         setActiveLanguage(newSettings.activeLanguageId)
         invalidate()
@@ -341,10 +415,13 @@ class RgbKeyboardView @JvmOverloads constructor(
         return pressedKeyBox != null || activeGlows.isNotEmpty() || trailPoints.isNotEmpty()
     }
 
+    private val isShifted: Boolean
+        get() = shiftMode != ShiftMode.OFF
+
     private fun currentRows(): List<List<String>> {
         if (isSymbols) return symRows
         val dyn = activeDynamicLayout ?: return enRows
-        if (isShift) return dyn.shiftRows
+        if (isShifted) return dyn.shiftRows
         if (isKarBarActive && dyn.karBar.isNotEmpty() && dyn.rows.isNotEmpty()) {
             // Dynamic Kar / Matra vowel-bar morphs Row 0 right after typing a consonant!
             return listOf(dyn.karBar) + dyn.rows.drop(1)
@@ -380,7 +457,7 @@ class RgbKeyboardView @JvmOverloads constructor(
             val totalGapX = gapX * (row.size + 1) + sideInset * 2f
             val usableW = (width.toFloat() - totalGapX).coerceAtLeast(1f)
 
-            val isRowKarBar = !isSymbols && !isShift && isKarBarActive && rIndex == 0 && dyn != null && dyn.karBar.isNotEmpty()
+            val isRowKarBar = !isSymbols && !isShifted && isKarBarActive && rIndex == 0 && dyn != null && dyn.karBar.isNotEmpty()
 
             var curX = gapX + sideInset
             row.forEachIndexed { cIndex, rawKey ->
@@ -392,12 +469,12 @@ class RgbKeyboardView @JvmOverloads constructor(
                 val displayLabel = when {
                     rawKey == "SPACE" -> dyn?.spacebarLabel ?: "English"
                     rawKey == "DEL" -> "⌫"
-                    rawKey == "SHIFT" -> "⇧"
+                    rawKey == "SHIFT" -> ""
                     rawKey == "ENTER" -> "↵"
                     rawKey == "GLOBE" -> ""
                     rawKey == "ABC" -> dyn?.backToAlphaLabel ?: "ABC"
                     isEnglish && !isSymbols && rawKey.length == 1 ->
-                        if (isShift) rawKey.uppercase() else rawKey.lowercase()
+                        if (isShifted) rawKey.uppercase() else rawKey.lowercase()
                     else -> rawKey
                 }
 
@@ -409,11 +486,11 @@ class RgbKeyboardView @JvmOverloads constructor(
                         subLabel = enTopRowHints[cIndex]
                         longPressOut = enTopRowHints[cIndex]
                     }
-                    !isSymbols && rIndex == 0 && !isShift && !isRowKarBar && dyn != null && cIndex < dyn.topRowHints.size -> {
+                    !isSymbols && rIndex == 0 && !isShifted && !isRowKarBar && dyn != null && cIndex < dyn.topRowHints.size -> {
                         subLabel = dyn.topRowHints[cIndex]
                         longPressOut = dyn.topRowHints[cIndex]
                     }
-                    !isSymbols && !isShift && dyn != null && dyn.longPressMap.containsKey(rawKey) -> {
+                    !isSymbols && !isShifted && dyn != null && dyn.longPressMap.containsKey(rawKey) -> {
                         val alt = dyn.longPressMap[rawKey]
                         subLabel = alt
                         longPressOut = alt
@@ -499,10 +576,18 @@ class RgbKeyboardView @JvmOverloads constructor(
             rebuildKeyBoxes()
         }
 
-        val isTouchSparkMode = settings.effect == RgbEffect.TOUCH_SPARK
+        val isTouchSparkMode = !vipVisualsEnabled || settings.effect == RgbEffect.TOUCH_SPARK
         val cornerRadius = (settings.keyCornerRadiusDp * density * 0.82f).coerceIn(5.5f * density, 13f * density)
 
-        val continuousShader: SweepGradient? = if (!isTouchSparkMode) {
+        // 0. Draw Persistent Custom Photo / Banner Theme Background ONLY when VIP visuals are active
+        val hasCustomPhoto = if (vipVisualsEnabled) {
+            reloadPhotoBitmapIfNeeded()
+            drawCustomPhotoBackground(canvas)
+        } else {
+            false
+        }
+
+        val continuousShader: SweepGradient? = if (vipVisualsEnabled && !isTouchSparkMode) {
             val shader = ensureSweepShader()
             val angle = if (settings.effect == RgbEffect.STATIC_NEON) 0f else rgbPhase
             shaderMatrix.setRotate(angle, width / 2f, height / 2f)
@@ -516,20 +601,22 @@ class RgbKeyboardView @JvmOverloads constructor(
             rgbBorderPaint.shader = shader
             rgbBorderPaint.alpha = (255 * alphaFactor).toInt()
             rgbFillPaint.shader = shader
-            rgbFillPaint.alpha = (175 * alphaFactor).toInt()
+            rgbFillPaint.alpha = (if (hasCustomPhoto) 135 else 175 * alphaFactor).toInt().coerceIn(50, 220)
             shader
         } else {
             null
         }
 
-        // 1. Draw Gboard Keycaps (clean stealth dark semi-transparent at rest in Touch Spark)
+        // 1. Draw Gboard Keycaps (clean matte-dark standard keys when free, or Touch Spark / RGB when VIP)
         for (i in keyBoxes.indices) {
             val box = keyBoxes[i]
             val rect = box.rect
             val isPressed = pressedKeyBox?.id == box.id
             val glowEntry = activeGlows.lastOrNull { it.keyId == box.id }
-            val glowIntensity = computeGlowFactor(glowEntry, nowMs)
-            val isShiftLit = box.rawKey == "SHIFT" && isShift
+            val glowIntensity = if (vipVisualsEnabled) computeGlowFactor(glowEntry, nowMs) else 0f
+            val isShiftOnce = box.rawKey == "SHIFT" && shiftMode == ShiftMode.ONCE
+            val isCapsLocked = box.rawKey == "SHIFT" && shiftMode == ShiftMode.CAPS_LOCK
+            val isShiftLit = isShiftOnce || isCapsLocked
 
             // Prominent circular blue Enter / Search button on the bottom-right corner (Gboard signature)
             if (box.rawKey == "ENTER") {
@@ -538,13 +625,18 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
 
             if (isTouchSparkMode) {
-                // Clean semi-transparent Gboard dark rounded keycaps (subtle cyan accent when Dynamic Kar bar is active)
+                // Clean matte-dark Gboard rounded keycaps (translucent when VIP custom photo is active)
+                val letterAlpha = if (hasCustomPhoto) 154 else 235
+                val modAlpha = if (hasCustomPhoto) 138 else 220
                 keyBgPaint.color = when {
-                    box.isKarBarKey -> Color.argb(235, 22, 42, 58)
-                    box.rawKey == "SPACE" -> Color.argb(232, 34, 37, 49)
+                    !vipVisualsEnabled && isPressed -> Color.argb(245, 56, 62, 82)
+                    isCapsLocked -> Color.argb(225, 24, 62, 118)
+                    isShiftOnce -> Color.argb(215, 36, 48, 72)
+                    box.isKarBarKey -> Color.argb(if (hasCustomPhoto) 185 else 235, 22, 42, 58)
+                    box.rawKey == "SPACE" -> Color.argb(letterAlpha, 34, 37, 49)
                     isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey) ->
-                        Color.argb(215, 25, 28, 39)
-                    else -> Color.argb(230, 35, 39, 52)
+                        Color.argb(modAlpha, 25, 28, 39)
+                    else -> Color.argb(letterAlpha, 35, 39, 52)
                 }
                 canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
 
@@ -554,50 +646,57 @@ class RgbKeyboardView @JvmOverloads constructor(
                     canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
                 }
 
-                // Touch Spark glow ignition in this key's own distinct vibrant neon color
-                val effGlow = if (isShiftLit) maxOf(glowIntensity, 0.72f) else glowIntensity
-                if (effGlow > 0.01f) {
-                    val neon = box.neonColor
-                    sparkFillPaint.color = Color.argb(
-                        (effGlow * 96 * settings.glowIntensity).toInt().coerceIn(0, 145),
-                        Color.red(neon),
-                        Color.green(neon),
-                        Color.blue(neon)
-                    )
-                    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
+                // Touch Spark neon glow ignition ONLY when VIP visuals are enabled
+                if (vipVisualsEnabled) {
+                    val effGlow = when {
+                        isCapsLocked -> maxOf(glowIntensity, 0.92f)
+                        isShiftOnce -> maxOf(glowIntensity, 0.58f)
+                        else -> glowIntensity
+                    }
+                    if (effGlow > 0.01f) {
+                        val neon = if (isCapsLocked) Color.parseColor("#38BDF8") else box.neonColor
+                        sparkFillPaint.color = Color.argb(
+                            (effGlow * 96 * settings.glowIntensity).toInt().coerceIn(0, 145),
+                            Color.red(neon),
+                            Color.green(neon),
+                            Color.blue(neon)
+                        )
+                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
 
-                    sparkBorderPaint.color = Color.argb(
-                        (effGlow * 255 * settings.glowIntensity).toInt().coerceIn(0, 255),
-                        Color.red(neon),
-                        Color.green(neon),
-                        Color.blue(neon)
-                    )
-                    sparkBorderPaint.strokeWidth = (1.6f + effGlow * 1.4f) * density
-                    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
+                        sparkBorderPaint.color = Color.argb(
+                            (effGlow * 255 * settings.glowIntensity).toInt().coerceIn(0, 255),
+                            Color.red(neon),
+                            Color.green(neon),
+                            Color.blue(neon)
+                        )
+                        sparkBorderPaint.strokeWidth = (1.6f + effGlow * 1.4f) * density
+                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
+                    }
                 }
             } else {
                 // Optional continuous RGB Studio modes
                 when (settings.keycapStyle) {
                     KeycapStyle.PUDDING -> {
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
+                        puddingInnerPaint.color = Color.argb(if (hasCustomPhoto) 168 else 245, 24, 27, 37)
                         tempRect.set(rect.left + 2.2f * density, rect.top + 1.5f * density, rect.right - 2.2f * density, rect.bottom - 4f * density)
                         val innerR = (cornerRadius - 2f * density).coerceAtLeast(3f)
                         canvas.drawRoundRect(tempRect, innerR, innerR, puddingInnerPaint)
                     }
                     KeycapStyle.NEON_WIREFRAME -> {
-                        keyBgPaint.color = Color.parseColor("#11131A")
+                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 128 else 240, 17, 19, 26)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
                         rgbBorderPaint.strokeWidth = 1.9f * density
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
                     }
                     KeycapStyle.SOLID_MECH -> {
-                        keyBgPaint.color = Color.parseColor("#222634")
+                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 165 else 245, 34, 38, 52)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
                         tempRect.set(rect.centerX() - rect.width() * 0.28f, rect.bottom - 4.5f * density, rect.centerX() + rect.width() * 0.28f, rect.bottom - 2f * density)
                         canvas.drawRoundRect(tempRect, 3f * density, 3f * density, rgbFillPaint)
                     }
                     KeycapStyle.FLOATING_GLOW -> {
-                        keyBgPaint.color = Color.argb(230, 31, 34, 46)
+                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 152 else 230, 31, 34, 46)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
                         rgbBorderPaint.strokeWidth = 1.6f * density
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
@@ -605,8 +704,12 @@ class RgbKeyboardView @JvmOverloads constructor(
                 }
 
                 if (glowIntensity > 0.01f || isShiftLit) {
-                    val neon = box.neonColor
-                    val factor = if (isShiftLit) maxOf(glowIntensity, 0.55f) else glowIntensity
+                    val neon = if (isCapsLocked) Color.parseColor("#38BDF8") else box.neonColor
+                    val factor = when {
+                        isCapsLocked -> maxOf(glowIntensity, 0.85f)
+                        isShiftOnce -> maxOf(glowIntensity, 0.50f)
+                        else -> glowIntensity
+                    }
                     sparkFillPaint.color = Color.argb(
                         (factor * 105).toInt().coerceIn(0, 145),
                         Color.red(neon),
@@ -615,6 +718,12 @@ class RgbKeyboardView @JvmOverloads constructor(
                     )
                     canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
                 }
+            }
+
+            // Draw crisp Shift / Caps Lock arrow icon (with underline bar when Caps Lock is ON)
+            if (box.rawKey == "SHIFT") {
+                drawShiftArrowIcon(canvas, rect, shiftMode, glowIntensity, box.neonColor, isTouchSparkMode)
+                continue
             }
 
             // Draw Globe icon cleanly for the language switch key
@@ -680,10 +789,12 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
         textPaint.shader = null
 
-        // 2. Smooth fading multicolor Glide / Swipe trail
-        drawGlideTrail(canvas, nowMs)
+        // 2. Smooth fading multicolor Glide / Swipe trail (VIP only)
+        if (vipVisualsEnabled) {
+            drawGlideTrail(canvas, nowMs)
+        }
 
-        // 3. Bright glowing rising pop-up bubbles above pressed / fading keys
+        // 3. Key pop-up bubbles (glowing multicolor rising bubbles when VIP, clean matte dark popup when free)
         drawRisingSparkBubbles(canvas, nowMs)
     }
 
@@ -747,6 +858,86 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
     }
 
+    private fun drawCustomPhotoBackground(canvas: Canvas): Boolean {
+        val bmp = cachedPhotoBitmap ?: return false
+        if (bmp.isRecycled || bmp.width <= 0 || bmp.height <= 0) return false
+
+        // CENTER_CROP source rect so any portrait/landscape gallery photo fills cleanly without stretching
+        val viewAspect = width.toFloat() / height.toFloat().coerceAtLeast(1f)
+        val bmpAspect = bmp.width.toFloat() / bmp.height.toFloat().coerceAtLeast(1f)
+        if (bmpAspect > viewAspect) {
+            val scaledW = (bmp.height * viewAspect).toInt().coerceIn(1, bmp.width)
+            val left = (bmp.width - scaledW) / 2
+            photoSrcRect.set(left, 0, left + scaledW, bmp.height)
+        } else {
+            val scaledH = (bmp.width / viewAspect).toInt().coerceIn(1, bmp.height)
+            val top = (bmp.height - scaledH) / 2
+            photoSrcRect.set(0, top, bmp.width, top + scaledH)
+        }
+        photoDstRect.set(0f, 0f, width.toFloat(), height.toFloat())
+        canvas.drawBitmap(bmp, photoSrcRect, photoDstRect, photoPaint)
+
+        // Configurable dim overlay so keys & Touch Spark RGB glow pop cleanly over bright photos
+        val dimAlphaInt = (photoTheme.dimAlpha.coerceIn(0.15f, 0.85f) * 255f).toInt()
+        photoDimPaint.color = Color.argb(dimAlphaInt, 8, 10, 18)
+        canvas.drawRect(photoDstRect, photoDimPaint)
+        return true
+    }
+
+    private fun drawShiftArrowIcon(
+        canvas: Canvas,
+        rect: RectF,
+        mode: ShiftMode,
+        glowIntensity: Float,
+        neonColor: Int,
+        isTouchSparkMode: Boolean
+    ) {
+        val cx = rect.centerX()
+        val cy = rect.centerY() - if (mode == ShiftMode.CAPS_LOCK) 1.5f * density else 0f
+        val size = min(rect.width(), rect.height()) * 0.27f
+
+        shiftArrowPath.reset()
+        // Crisp upward arrow geometry
+        shiftArrowPath.moveTo(cx, cy - size)                       // top tip
+        shiftArrowPath.lineTo(cx + size, cy + size * 0.08f)        // right wing
+        shiftArrowPath.lineTo(cx + size * 0.42f, cy + size * 0.08f)
+        shiftArrowPath.lineTo(cx + size * 0.42f, cy + size * 0.82f) // bottom right stem
+        shiftArrowPath.lineTo(cx - size * 0.42f, cy + size * 0.82f) // bottom left stem
+        shiftArrowPath.lineTo(cx - size * 0.42f, cy + size * 0.08f)
+        shiftArrowPath.lineTo(cx - size, cy + size * 0.08f)        // left wing
+        shiftArrowPath.close()
+
+        when (mode) {
+            ShiftMode.OFF -> {
+                val strokeCol = if (glowIntensity > 0.08f && isTouchSparkMode) {
+                    blendColor(Color.parseColor("#E3E8F4"), neonColor, glowIntensity)
+                } else {
+                    Color.parseColor("#E3E8F4")
+                }
+                vectorIconPaint.color = strokeCol
+                vectorIconPaint.strokeWidth = 1.75f * density
+                canvas.drawPath(shiftArrowPath, vectorIconPaint)
+            }
+            ShiftMode.ONCE -> {
+                shiftFillPaint.color = Color.WHITE
+                shiftFillPaint.strokeWidth = 1.2f * density
+                canvas.drawPath(shiftArrowPath, shiftFillPaint)
+            }
+            ShiftMode.CAPS_LOCK -> {
+                val lockAccent = Color.parseColor("#60E5FF")
+                shiftFillPaint.color = Color.WHITE
+                shiftFillPaint.strokeWidth = 1.2f * density
+                canvas.drawPath(shiftArrowPath, shiftFillPaint)
+
+                // Prominent glowing underline bar directly beneath arrow for Caps Lock ON
+                vectorIconPaint.color = lockAccent
+                vectorIconPaint.strokeWidth = 2.4f * density
+                val barY = cy + size * 1.25f
+                canvas.drawLine(cx - size * 0.68f, barY, cx + size * 0.68f, barY, vectorIconPaint)
+            }
+        }
+    }
+
     private fun drawGlobeIcon(canvas: Canvas, cx: Float, cy: Float, radius: Float, color: Int) {
         vectorIconPaint.color = color
         vectorIconPaint.strokeWidth = 1.45f * density
@@ -769,6 +960,32 @@ class RgbKeyboardView @JvmOverloads constructor(
         for (i in activeGlows.indices) {
             val glow = activeGlows[i]
             if (!glow.showPopup) continue
+
+            // In Free Standard Mode, show a clean matte-dark Gboard key preview ONLY while pressed (no neon fade)
+            if (!vipVisualsEnabled) {
+                if (glow.releasedAtMs != null) continue
+                val bubbleW = maxOf(glow.rect.width() * 1.38f, 40f * density)
+                val bubbleH = maxOf(glow.rect.height() * 1.12f, 44f * density)
+                val cx = glow.rect.centerX().coerceIn(bubbleW / 2f + 4f * density, width - bubbleW / 2f - 4f * density)
+                val minTop = if (allowTopOverflow) -30f * density else 3f * density
+                val top = (glow.rect.top - 8f * density - bubbleH).coerceAtLeast(minTop)
+                val bubbleRect = RectF(cx - bubbleW / 2f, top, cx + bubbleW / 2f, top + bubbleH)
+                val bubbleCorner = 12f * density
+
+                popupBgPaint.color = Color.parseColor("#2E3344")
+                canvas.drawRoundRect(bubbleRect, bubbleCorner, bubbleCorner, popupBgPaint)
+                sparkBorderPaint.color = Color.parseColor("#475069")
+                sparkBorderPaint.strokeWidth = 1.2f * density
+                canvas.drawRoundRect(bubbleRect, bubbleCorner, bubbleCorner, sparkBorderPaint)
+
+                popupTextPaint.textSize = 22f * scaledDensity
+                popupTextPaint.color = Color.WHITE
+                popupTextPaint.clearShadowLayer()
+                val fm = popupTextPaint.fontMetrics
+                val ty = bubbleRect.centerY() - (fm.ascent + fm.descent) / 2f
+                canvas.drawText(glow.displayLabel, bubbleRect.centerX(), ty, popupTextPaint)
+                continue
+            }
 
             val fade = computeGlowFactor(glow, nowMs)
             if (fade <= 0.02f) continue
@@ -969,7 +1186,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                         onKeyAction?.invoke("DEL")
                         isDeleting = true
                         handler.postDelayed(deleteRunnable, 380L)
-                    } else if (hit.longPressOutput != null || hit.rawKey == "," || hit.rawKey == "،") {
+                    } else if (hit.rawKey == "SHIFT" || hit.longPressOutput != null || hit.rawKey == "," || hit.rawKey == "،") {
                         handler.postDelayed(longPressRunnable, LONG_PRESS_DELAY_MS)
                     }
                     invalidate()
@@ -1030,7 +1247,9 @@ class RgbKeyboardView @JvmOverloads constructor(
                 pressedKeyBox = null
 
                 if (released != null && released.rawKey != "DEL") {
-                    if (longPressTriggered && released.longPressOutput != null) {
+                    if (longPressTriggered && released.rawKey == "SHIFT") {
+                        // Already locked Caps Lock on long-press
+                    } else if (longPressTriggered && released.longPressOutput != null) {
                         onKeyFeedback?.invoke(false)
                         onKeyAction?.invoke(released.longPressOutput)
                     } else if (released.rawKey == "SPACE" && isSpaceDragging) {
@@ -1152,8 +1371,27 @@ class RgbKeyboardView @JvmOverloads constructor(
     private fun handleKeyPress(key: String) {
         when {
             key == "SHIFT" -> {
-                isShift = !isShift
-                if (isShift) isKarBarActive = false
+                val now = SystemClock.uptimeMillis()
+                shiftMode = when (shiftMode) {
+                    ShiftMode.OFF -> {
+                        lastShiftTapMs = now
+                        ShiftMode.ONCE
+                    }
+                    ShiftMode.ONCE -> {
+                        if (now - lastShiftTapMs <= DOUBLE_TAP_SHIFT_MS) {
+                            lastShiftTapMs = 0L
+                            ShiftMode.CAPS_LOCK
+                        } else {
+                            lastShiftTapMs = 0L
+                            ShiftMode.OFF
+                        }
+                    }
+                    ShiftMode.CAPS_LOCK -> {
+                        lastShiftTapMs = 0L
+                        ShiftMode.OFF
+                    }
+                }
+                if (shiftMode != ShiftMode.OFF) isKarBarActive = false
                 rebuildKeyBoxes()
             }
             isSymbolSwitchKey(key) -> {
@@ -1190,12 +1428,13 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
             else -> {
                 val dyn = activeDynamicLayout
-                val out = if (dyn == null && !isSymbols && !isShift) key.lowercase() else key
+                val out = if (dyn == null && !isSymbols && !isShifted) key.lowercase() else key
                 onKeyAction?.invoke(out)
 
                 var needsRebuild = false
-                if (isShift) {
-                    isShift = false
+                // Only single-shot Shift (ONCE) resets to lowercase; CAPS_LOCK stays locked ON!
+                if (shiftMode == ShiftMode.ONCE) {
+                    shiftMode = ShiftMode.OFF
                     needsRebuild = true
                 }
 
@@ -1231,5 +1470,6 @@ class RgbKeyboardView @JvmOverloads constructor(
         private const val SPARK_FADE_MS = 460L
         private const val TRAIL_LIFETIME_MS = 380L
         private const val LONG_PRESS_DELAY_MS = 350L
+        private const val DOUBLE_TAP_SHIFT_MS = 380L
     }
 }

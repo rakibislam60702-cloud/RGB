@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
+import android.Manifest
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,7 +30,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,9 +45,17 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -57,7 +67,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -68,6 +80,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -79,6 +92,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.R
+import com.example.data.CustomPhotoTheme
+import com.example.data.LicenseUiState
+import com.example.engine.BanglaGuideScript
+import com.example.engine.OnlineVoiceTypingController
+import com.example.engine.VoiceGuideState
+import com.example.model.EmojiCatalog
 import com.example.model.ImeStatus
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
@@ -103,7 +122,7 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
-private enum class StudioOverlayMode { NONE, CLIPBOARD, REACTIONS }
+private enum class StudioOverlayMode { NONE, CLIPBOARD, REACTIONS, EMOJI }
 
 private val studioQuickReactions = listOf(
     "🔥 Lit!" to "🔥",
@@ -123,12 +142,18 @@ private val studioQuickReactions = listOf(
 @Composable
 fun StudioScreen(
     settings: KeyboardSettings,
+    customPhotoTheme: CustomPhotoTheme,
     imeStatus: ImeStatus,
+    licenseState: LicenseUiState,
+    voiceGuideState: VoiceGuideState,
     languagePacks: List<LanguagePackUiState>,
     playgroundText: String,
     clipboardClips: List<String>,
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
+    onOpenUnlockScreen: () -> Unit,
+    onSpeakBanglaGuide: (BanglaGuideScript) -> Unit,
+    onToggleVoiceGuideMute: () -> Unit,
     onSelectLanguageById: (String) -> Unit,
     onToggleLanguage: () -> Unit,
     onSelectEffect: (RgbEffect) -> Unit,
@@ -148,11 +173,13 @@ fun StudioScreen(
     onOpenLanguagesTab: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var showSystemImeTester by remember { mutableStateOf(false) }
+    var showEasyGuideDialog by remember { mutableStateOf(false) }
     var systemTestText by remember { mutableStateOf("") }
     var activeOverlay by remember { mutableStateOf(StudioOverlayMode.NONE) }
-    var isEmojiOpen by remember { mutableStateOf(false) }
-    var nativeKeyboardRef by remember { mutableStateOf<NativeRgbKeyboardView?>(null) }
+    var voiceState by remember { mutableStateOf(OnlineVoiceTypingController.VoiceListeningState()) }
+    var showVoiceBanner by remember { mutableStateOf(false) }
 
     val latestCommit by rememberUpdatedState(onPlaygroundCommit)
     val latestBackspace by rememberUpdatedState(onPlaygroundBackspace)
@@ -160,18 +187,53 @@ fun StudioScreen(
     val latestEnter by rememberUpdatedState(onPlaygroundEnter)
     val latestFeedback by rememberUpdatedState(onKeyFeedback)
     val latestToggleLanguage by rememberUpdatedState(onToggleLanguage)
+    val latestActiveLangId by rememberUpdatedState(settings.activeLanguageId)
 
-    val voiceInputLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spoken = result.data
-                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-            if (!spoken.isNullOrBlank()) {
-                latestCommit(spoken)
+    val voiceController = remember(context) {
+        OnlineVoiceTypingController(
+            context = context.applicationContext,
+            onStateChanged = { next ->
+                voiceState = next
+                if (next.isListening || !next.errorMessage.isNullOrBlank()) {
+                    showVoiceBanner = true
+                }
+            },
+            onPartialText = { _ -> },
+            onFinalText = { spoken ->
+                latestCommit("$spoken ")
+                showVoiceBanner = false
             }
+        )
+    }
+
+    DisposableEffect(voiceController) {
+        onDispose { voiceController.destroy() }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val locale = OnlineVoiceTypingController.localeForLanguageId(latestActiveLangId)
+            showVoiceBanner = true
+            voiceController.startListening(locale)
+        } else {
+            showVoiceBanner = true
+            voiceState = OnlineVoiceTypingController.VoiceListeningState(
+                isListening = false,
+                locale = OnlineVoiceTypingController.localeForLanguageId(latestActiveLangId),
+                errorMessage = context.getString(R.string.voice_permission_needed)
+            )
         }
+    }
+
+    if (showEasyGuideDialog) {
+        EasyBanglaGuideDialog(
+            voiceGuideState = voiceGuideState,
+            onSpeakScript = onSpeakBanglaGuide,
+            onToggleMuteStop = onToggleVoiceGuideMute,
+            onDismiss = { showEasyGuideDialog = false }
+        )
     }
 
     Column(
@@ -187,12 +249,18 @@ fun StudioScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Hero Hardware Banner + Live IME Status
+            // Hero Banner + Clear Bangla Setup Cards + Live Trial Timer + Interactive Bangla Voice Guide
             HeroStatusCard(
                 imeStatus = imeStatus,
+                licenseState = licenseState,
                 settings = settings,
+                voiceGuideState = voiceGuideState,
                 onOpenImeSettings = onOpenImeSettings,
-                onShowImePicker = onShowImePicker
+                onShowImePicker = onShowImePicker,
+                onOpenUnlockScreen = onOpenUnlockScreen,
+                onSpeakBanglaGuide = onSpeakBanglaGuide,
+                onToggleVoiceGuideMute = onToggleVoiceGuideMute,
+                onOpenEasyGuide = { showEasyGuideDialog = true }
             )
 
             // Quick Active Language Strip (Built-in English + Downloaded JSON Packs + Download Shortcut)
@@ -328,13 +396,63 @@ fun StudioScreen(
             )
         }
 
-        // Embedded Gboard-Layout Live Keyboard Deck with Touch Spark RGB & Dynamic JSON Layouts
+        // Embedded Gboard-Layout Live Keyboard Deck with Touch Spark RGB, Custom Photo BG & Dynamic JSON Layouts
         val isFiveRowLayout = settings.activeLanguageId == "bn" || settings.activeLanguageId == "hi"
         val extraRowHeight = if (isFiveRowLayout) 26.dp else 0.dp
         val deckHeightDp = when (settings.heightPreset) {
             KeyboardHeightPreset.COMPACT -> 212.dp + extraRowHeight
             KeyboardHeightPreset.STANDARD -> 232.dp + extraRowHeight
             KeyboardHeightPreset.TALL -> 260.dp + extraRowHeight
+        }
+
+        // Free In-App Live VIP Demo Preview + Apply to Keyboard Strip (shown after 24h VIP trial expires)
+        if (licenseState.isFreeStandardMode) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 680.dp)
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ObsidianSurfaceVariant)
+                    .border(
+                        width = 1.2.dp,
+                        brush = Brush.horizontalGradient(listOf(NeonCyan, NeonMagenta)),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 9.dp)
+                    .testTag("studio_live_demo_apply_bar"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.bn_demo_preview_tag),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NeonCyan,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(NeonCyan)
+                        .clickable(onClick = onOpenUnlockScreen)
+                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                        .testTag("btn_studio_apply_vip_to_keyboard"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_btn_apply_to_keyboard),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF001B22)
+                    )
+                }
+            }
         }
 
         Surface(
@@ -352,7 +470,7 @@ fun StudioScreen(
                     .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
                     .padding(4.dp)
             ) {
-                // Clean Gboard-style 7-icon evenly spaced top toolbar
+                // Clean Gboard-style 6-icon evenly spaced top toolbar (Globe key switches Bangla/English)
                 if (settings.showToolbar) {
                     Row(
                         modifier = Modifier
@@ -371,7 +489,6 @@ fun StudioScreen(
                             onClick = {
                                 onKeyFeedback(true)
                                 onRefreshClipboard()
-                                if (isEmojiOpen) nativeKeyboardRef?.toggleEmojiMode()
                                 activeOverlay = if (activeOverlay == StudioOverlayMode.CLIPBOARD) {
                                     StudioOverlayMode.NONE
                                 } else {
@@ -380,17 +497,20 @@ fun StudioScreen(
                             }
                         )
 
-                        // 2. Emoji / Sticker icon
+                        // 2. Emoji / Sticker icon -> Unlimited Categorized Emoji Panel
                         GboardToolbarIcon(
                             iconRes = R.drawable.ic_kb_emoji,
                             contentDescription = stringResource(R.string.cd_emoji),
-                            active = isEmojiOpen,
+                            active = activeOverlay == StudioOverlayMode.EMOJI,
                             testTag = "studio_kb_emoji",
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 onKeyFeedback(true)
-                                activeOverlay = StudioOverlayMode.NONE
-                                nativeKeyboardRef?.toggleEmojiMode()
+                                activeOverlay = if (activeOverlay == StudioOverlayMode.EMOJI) {
+                                    StudioOverlayMode.NONE
+                                } else {
+                                    StudioOverlayMode.EMOJI
+                                }
                             }
                         )
 
@@ -403,7 +523,6 @@ fun StudioScreen(
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 onKeyFeedback(true)
-                                if (isEmojiOpen) nativeKeyboardRef?.toggleEmojiMode()
                                 activeOverlay = if (activeOverlay == StudioOverlayMode.REACTIONS) {
                                     StudioOverlayMode.NONE
                                 } else {
@@ -425,21 +544,7 @@ fun StudioScreen(
                             }
                         )
 
-                        // 5. Language / Translate icon -> Cycles all enabled dynamic JSON languages
-                        GboardToolbarIcon(
-                            iconRes = R.drawable.ic_kb_translate,
-                            contentDescription = stringResource(R.string.cd_switch_language),
-                            active = settings.activeLanguageId != LanguageCatalog.ENGLISH_ID,
-                            testTag = "studio_kb_lang",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onKeyFeedback(true)
-                                activeOverlay = StudioOverlayMode.NONE
-                                onToggleLanguage()
-                            }
-                        )
-
-                        // 6. Theme Palette icon -> Cycles Touch Spark & RGB studio effects
+                        // 5. Theme Palette icon -> Cycles Touch Spark & RGB studio effects
                         GboardToolbarIcon(
                             iconRes = R.drawable.ic_kb_palette,
                             contentDescription = stringResource(R.string.cd_cycle_effect),
@@ -452,27 +557,103 @@ fun StudioScreen(
                             }
                         )
 
-                        // 7. Voice Mic icon -> Launches Android Speech Recognizer
+                        // 6. Voice Mic icon -> Online Bengali & English SpeechRecognizer
                         GboardToolbarIcon(
                             iconRes = R.drawable.ic_kb_mic,
                             contentDescription = stringResource(R.string.cd_voice_mic),
-                            active = false,
+                            active = voiceState.isListening,
+                            activeColor = NeonEmerald,
                             testTag = "studio_kb_mic",
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 onKeyFeedback(true)
-                                val activeLocale = LanguageCatalog.findById(settings.activeLanguageId)?.locale
-                                    ?.replace('_', '-')
-                                    ?: "en-US"
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, activeLocale)
+                                if (voiceController.isCurrentlyListening()) {
+                                    voiceController.stopListening()
+                                    showVoiceBanner = false
+                                } else if (!voiceController.hasAudioPermission()) {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    val locale = OnlineVoiceTypingController.localeForLanguageId(settings.activeLanguageId)
+                                    showVoiceBanner = true
+                                    voiceController.startListening(locale)
                                 }
-                                runCatching { voiceInputLauncher.launch(intent) }
                             }
+                        )
+                    }
+                }
+
+                // Inline Online Voice Typing Bar (Bengali & English Live SpeechRecognizer)
+                AnimatedVisibility(visible = showVoiceBanner) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF172033))
+                            .border(
+                                1.dp,
+                                if (voiceState.isListening) NeonCyan.copy(alpha = 0.65f) else NeonAmber.copy(alpha = 0.5f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Mic,
+                            contentDescription = null,
+                            tint = if (voiceState.isListening) NeonEmerald else NeonAmber,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = when {
+                                voiceState.partialTranscript.isNotBlank() -> voiceState.partialTranscript
+                                voiceState.isListening && voiceState.locale.isBengali ->
+                                    stringResource(R.string.voice_listening_bn)
+                                voiceState.isListening ->
+                                    stringResource(R.string.voice_listening_en)
+                                !voiceState.errorMessage.isNullOrBlank() ->
+                                    voiceState.errorMessage.orEmpty()
+                                else -> stringResource(R.string.voice_tap_to_speak)
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (voiceState.isListening) NeonCyan else NeonAmber,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (voiceState.locale.isBengali) "বাংলা ⇄ EN" else "EN ⇄ বাংলা",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF243552))
+                                .clickable {
+                                    onKeyFeedback(true)
+                                    if (!voiceController.hasAudioPermission()) {
+                                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    } else {
+                                        voiceController.switchLocaleAndRestart()
+                                    }
+                                }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                                .testTag("studio_voice_lang_toggle")
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.cd_clear_text),
+                            tint = NeonError,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    voiceController.stopListening()
+                                    showVoiceBanner = false
+                                }
+                                .padding(2.dp)
+                                .testTag("studio_voice_stop")
                         )
                     }
                 }
@@ -514,6 +695,25 @@ fun StudioScreen(
                         )
                     }
 
+                    StudioOverlayMode.EMOJI -> {
+                        StudioEmojiPanel(
+                            height = deckHeightDp,
+                            isBengaliActive = settings.activeLanguageId == "bn",
+                            onSelectEmoji = { emoji ->
+                                onKeyFeedback(false)
+                                onPlaygroundCommit(emoji)
+                            },
+                            onBackspace = {
+                                onKeyFeedback(true)
+                                onPlaygroundBackspace()
+                            },
+                            onClose = {
+                                onKeyFeedback(true)
+                                activeOverlay = StudioOverlayMode.NONE
+                            }
+                        )
+                    }
+
                     StudioOverlayMode.NONE -> {
                         AndroidView(
                             modifier = Modifier
@@ -537,14 +737,17 @@ fun StudioScreen(
                                     }
                                     this.onKeyFeedback = { isMod -> latestFeedback(isMod) }
                                     this.onLanguageToggleRequested = { latestToggleLanguage() }
-                                    onEmojiModeChanged = { open -> isEmojiOpen = open }
+                                    this.onEmojiOpenRequested = { activeOverlay = StudioOverlayMode.EMOJI }
+                                    // Always enable full VIP visuals in the in-app Live Playground so users can test every effect & photo freely!
+                                    setVipVisualsEnabled(true)
                                     updateSettings(settings)
-                                    nativeKeyboardRef = this
+                                    updatePhotoTheme(customPhotoTheme)
                                 }
                             },
                             update = { view ->
-                                nativeKeyboardRef = view
+                                view.setVipVisualsEnabled(true)
                                 view.updateSettings(settings)
+                                view.updatePhotoTheme(customPhotoTheme)
                             }
                         )
                     }
@@ -557,12 +760,146 @@ fun StudioScreen(
 }
 
 @Composable
+private fun StudioEmojiPanel(
+    height: androidx.compose.ui.unit.Dp,
+    isBengaliActive: Boolean,
+    onSelectEmoji: (String) -> Unit,
+    onBackspace: () -> Unit,
+    onClose: () -> Unit
+) {
+    var selectedCategoryIdx by remember { mutableIntStateOf(0) }
+    val activeCategory = EmojiCatalog.categories[selectedCategoryIdx.coerceIn(0, EmojiCatalog.categories.lastIndex)]
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0D0F17))
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .testTag("studio_emoji_panel"),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // 9 Category Tabs
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(34.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            itemsIndexed(EmojiCatalog.categories, key = { _, cat -> cat.id }) { idx, category ->
+                val selected = idx == selectedCategoryIdx
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (selected) Color(0xFF24314A) else Color.Transparent)
+                        .border(
+                            width = if (selected) 1.dp else 0.dp,
+                            color = if (selected) NeonCyan else Color.Transparent,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable { selectedCategoryIdx = idx }
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                        .testTag("studio_emoji_tab_${category.id}"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = category.icon,
+                        fontSize = 18.sp
+                    )
+                }
+            }
+        }
+
+        // Scrollable 8-column Emoji Grid
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(8),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            items(activeCategory.emojis) { emoji ->
+                Box(
+                    modifier = Modifier
+                        .height(38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onSelectEmoji(emoji) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = emoji,
+                        fontSize = 22.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // Bottom Bar: ABC / কখগ + Category Name + Backspace
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1E2434))
+                    .clickable(onClick = onClose)
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .testTag("studio_emoji_close"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isBengaliActive) "কখগ" else "ABC",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            }
+
+            Text(
+                text = "${activeCategory.title} (${activeCategory.emojis.size})",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF252A3B))
+                    .clickable(onClick = onBackspace)
+                    .padding(horizontal = 16.dp, vertical = 5.dp)
+                    .testTag("studio_emoji_backspace"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⌫",
+                    fontSize = 16.sp,
+                    color = TextPrimary
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun GboardToolbarIcon(
     iconRes: Int,
     contentDescription: String,
     active: Boolean,
     testTag: String,
     modifier: Modifier = Modifier,
+    activeColor: Color = Color(0xFF60A5FA),
     onClick: () -> Unit
 ) {
     Box(
@@ -577,7 +914,7 @@ private fun GboardToolbarIcon(
         Icon(
             painter = painterResource(id = iconRes),
             contentDescription = contentDescription,
-            tint = if (active) Color(0xFF60A5FA) else Color(0xFFC9D1DE),
+            tint = if (active) activeColor else Color(0xFFC9D1DE),
             modifier = Modifier.size(21.dp)
         )
     }
@@ -779,9 +1116,15 @@ private fun StudioClipboardPanel(
 @Composable
 private fun HeroStatusCard(
     imeStatus: ImeStatus,
+    licenseState: LicenseUiState,
     settings: KeyboardSettings,
+    voiceGuideState: VoiceGuideState,
     onOpenImeSettings: () -> Unit,
-    onShowImePicker: () -> Unit
+    onShowImePicker: () -> Unit,
+    onOpenUnlockScreen: () -> Unit,
+    onSpeakBanglaGuide: (BanglaGuideScript) -> Unit,
+    onToggleVoiceGuideMute: () -> Unit,
+    onOpenEasyGuide: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -815,8 +1158,8 @@ private fun HeroStatusCard(
                 .background(
                     Brush.horizontalGradient(
                         0.0f to ObsidianCanvas.copy(alpha = 0.96f),
-                        0.56f to ObsidianCanvas.copy(alpha = 0.84f),
-                        1.0f to ObsidianCanvas.copy(alpha = 0.42f)
+                        0.60f to ObsidianCanvas.copy(alpha = 0.88f),
+                        1.0f to ObsidianCanvas.copy(alpha = 0.55f)
                     )
                 )
         )
@@ -824,23 +1167,73 @@ private fun HeroStatusCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Top bar: Status Badge + Mute/Stop Bangla Voice Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = stringResource(R.string.studio_tagline),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NeonCyan
-                )
                 ImeStatusBadge(imeStatus = imeStatus)
+
+                // Mute / Stop / Replay Bangla Voice Guide Toggle (Top Right)
+                val voiceBtnColor = when {
+                    voiceGuideState.isSpeaking -> NeonError
+                    voiceGuideState.isMuted -> TextMuted
+                    else -> NeonCyan
+                }
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            when {
+                                voiceGuideState.isSpeaking -> NeonError.copy(alpha = 0.18f)
+                                voiceGuideState.isMuted -> ObsidianSurfaceVariant.copy(alpha = 0.9f)
+                                else -> NeonCyan.copy(alpha = 0.16f)
+                            }
+                        )
+                        .border(1.dp, voiceBtnColor.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                        .clickable(onClick = onToggleVoiceGuideMute)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("btn_voice_guide_mute_toggle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = when {
+                            voiceGuideState.isSpeaking -> Icons.Filled.Stop
+                            voiceGuideState.isMuted -> Icons.Filled.VolumeOff
+                            else -> Icons.Filled.VolumeUp
+                        },
+                        contentDescription = stringResource(R.string.cd_voice_guide_toggle),
+                        tint = voiceBtnColor,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = stringResource(
+                            when {
+                                voiceGuideState.isSpeaking -> R.string.bn_voice_stop
+                                voiceGuideState.isMuted -> R.string.bn_voice_mute
+                                else -> R.string.bn_voice_unmute
+                            }
+                        ),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = voiceBtnColor
+                    )
+                }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Live 5-Minute Free Trial Countdown Badge OR Lifetime Unlocked Badge
+            TrialLicenseStatusStrip(
+                licenseState = licenseState,
+                onOpenUnlockScreen = onOpenUnlockScreen
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = stringResource(R.string.studio_title),
                     style = MaterialTheme.typography.headlineMedium,
@@ -855,113 +1248,518 @@ private fun HeroStatusCard(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (!imeStatus.isEnabled) {
-                    Button(
-                        onClick = onOpenImeSettings,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonCyan,
-                            contentColor = Color(0xFF001B22)
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                            .testTag("btn_enable_ime")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.action_enable_ime),
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                } else if (!imeStatus.isSelected) {
-                    Button(
-                        onClick = onShowImePicker,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonMagenta,
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                            .testTag("btn_select_ime")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SwapHoriz,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.action_select_ime),
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = onOpenImeSettings,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("btn_open_ime_settings_secondary")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = stringResource(R.string.action_open_settings),
-                            tint = TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(NeonEmeraldContainer.copy(alpha = 0.85f))
-                            .border(1.dp, NeonEmerald.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = NeonEmerald,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.action_active_ready),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = NeonEmerald
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = onShowImePicker,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("btn_switch_ime_active")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SwapHoriz,
-                            contentDescription = stringResource(R.string.action_select_ime),
-                            tint = TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+            // Clear Bangla Text Setup Cards with Interactive "🔊 বাংলায় শুনে নিন" Voice Buttons
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                // Step 1: ধাপ ১: কিবোর্ড চালু করুন
+                BanglaSetupCard(
+                    title = stringResource(R.string.bn_setup_step_1_title),
+                    subtitle = stringResource(
+                        if (imeStatus.isEnabled) R.string.bn_setup_step_1_done
+                        else R.string.bn_setup_step_1_subtitle
+                    ),
+                    isComplete = imeStatus.isEnabled,
+                    completeBadgeText = stringResource(R.string.badge_enabled_check),
+                    accentColor = NeonCyan,
+                    icon = Icons.Filled.Settings,
+                    isSpeakingThis = voiceGuideState.isSpeaking &&
+                        voiceGuideState.activeScript == BanglaGuideScript.WELCOME_STEP_1,
+                    onCardClick = onOpenImeSettings,
+                    onListenVoiceClick = { onSpeakBanglaGuide(BanglaGuideScript.WELCOME_STEP_1) },
+                    testTag = "btn_enable_ime",
+                    voiceTestTag = "btn_voice_step_1"
+                )
+
+                // Step 2: ধাপ ২: কিবোর্ড সিলেক্ট করুন
+                val step2Script = if (imeStatus.isSelected) BanglaGuideScript.COMPLETE else BanglaGuideScript.STEP_2
+                BanglaSetupCard(
+                    title = stringResource(R.string.bn_setup_step_2_title),
+                    subtitle = stringResource(
+                        if (imeStatus.isSelected) R.string.bn_setup_step_2_done
+                        else R.string.bn_setup_step_2_subtitle
+                    ),
+                    isComplete = imeStatus.isSelected,
+                    completeBadgeText = stringResource(R.string.action_active_ready),
+                    accentColor = NeonMagenta,
+                    icon = Icons.Filled.SwapHoriz,
+                    isSpeakingThis = voiceGuideState.isSpeaking &&
+                        (voiceGuideState.activeScript == BanglaGuideScript.STEP_2 ||
+                            voiceGuideState.activeScript == BanglaGuideScript.COMPLETE),
+                    onCardClick = onShowImePicker,
+                    onListenVoiceClick = { onSpeakBanglaGuide(step2Script) },
+                    testTag = "btn_select_ime",
+                    voiceTestTag = "btn_voice_step_2"
+                )
+
+                // Easy Guide Button: কীভাবে ব্যবহার করবেন? (সহজ গাইড)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ObsidianSurfaceVariant.copy(alpha = 0.88f))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenEasyGuide)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag("btn_bangla_easy_guide"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.HelpOutline,
+                        contentDescription = null,
+                        tint = NeonCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.bn_btn_easy_guide),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TrialLicenseStatusStrip(
+    licenseState: LicenseUiState,
+    onOpenUnlockScreen: () -> Unit
+) {
+    if (licenseState.isLifetimeUnlocked) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(NeonEmeraldContainer.copy(alpha = 0.65f))
+                .border(1.dp, NeonEmerald.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+                .testTag("badge_lifetime_unlocked"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Verified,
+                    contentDescription = null,
+                    tint = NeonEmerald,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = stringResource(R.string.bn_lifetime_unlocked_badge),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonEmerald
+                )
+            }
+            Text(
+                text = "ID: ${licenseState.deviceId}",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
+        }
+    } else if (licenseState.isFreeStandardMode) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(ObsidianSurfaceVariant.copy(alpha = 0.92f))
+                .border(1.dp, NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                .clickable(onClick = onOpenUnlockScreen)
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+                .testTag("badge_free_standard_mode"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Keyboard,
+                    contentDescription = null,
+                    tint = NeonCyan,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = stringResource(R.string.bn_free_standard_badge),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                text = stringResource(R.string.bn_unlock_now_chip),
+                fontFamily = FontFamily.Default,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF001B22),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(NeonCyan)
+                    .padding(horizontal = 9.dp, vertical = 3.dp)
+                    .testTag("btn_unlock_now_banner")
+            )
+        }
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(NeonAmberContainer.copy(alpha = 0.72f))
+                .border(1.dp, NeonAmber.copy(alpha = 0.68f), RoundedCornerShape(12.dp))
+                .clickable(onClick = onOpenUnlockScreen)
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+                .testTag("badge_free_trial_timer"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Timer,
+                    contentDescription = null,
+                    tint = NeonAmber,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = stringResource(
+                        R.string.bn_trial_badge_format,
+                        licenseState.formattedRemainingBangla
+                    ),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonAmber,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.bn_unlock_now_chip),
+                fontFamily = FontFamily.Default,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF001B22),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(NeonCyan)
+                    .padding(horizontal = 9.dp, vertical = 3.dp)
+                    .testTag("btn_unlock_now_banner")
+            )
+        }
+    }
+}
+
+@Composable
+private fun BanglaSetupCard(
+    title: String,
+    subtitle: String,
+    isComplete: Boolean,
+    completeBadgeText: String,
+    accentColor: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSpeakingThis: Boolean,
+    onCardClick: () -> Unit,
+    onListenVoiceClick: () -> Unit,
+    testTag: String,
+    voiceTestTag: String
+) {
+    val borderColor = if (isComplete) NeonEmerald.copy(alpha = 0.72f) else accentColor.copy(alpha = 0.58f)
+    val bgColor = if (isComplete) {
+        NeonEmeraldContainer.copy(alpha = 0.52f)
+    } else {
+        ObsidianSurface.copy(alpha = 0.92f)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
+            .border(1.2.dp, borderColor, RoundedCornerShape(14.dp))
+            .clickable(onClick = onCardClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .testTag(testTag),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isComplete) NeonEmerald.copy(alpha = 0.18f) else accentColor.copy(alpha = 0.16f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isComplete) Icons.Filled.CheckCircle else icon,
+                    contentDescription = null,
+                    tint = if (isComplete) NeonEmerald else accentColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    fontFamily = FontFamily.Default,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    fontFamily = FontFamily.Default,
+                    fontSize = 12.sp,
+                    color = if (isComplete) NeonEmerald else TextSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (isComplete) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(NeonEmerald.copy(alpha = 0.18f))
+                        .border(1.dp, NeonEmerald.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = NeonEmerald,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = completeBadgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonEmerald
+                    )
+                }
+            }
+        }
+
+        // Prominent Speaker Button: "🔊 বাংলায় শুনে নিন"
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                    if (isSpeakingThis) NeonCyan.copy(alpha = 0.24f) else Color(0xFF1A2236)
+                )
+                .border(
+                    1.dp,
+                    if (isSpeakingThis) NeonCyan else accentColor.copy(alpha = 0.45f),
+                    RoundedCornerShape(10.dp)
+                )
+                .clickable(onClick = onListenVoiceClick)
+                .padding(horizontal = 11.dp, vertical = 6.dp)
+                .testTag(voiceTestTag),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.bn_btn_listen_voice),
+                fontFamily = FontFamily.Default,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isSpeakingThis) NeonCyan else TextPrimary
+            )
+        }
+    }
+}
+
+@Composable
+private fun EasyBanglaGuideDialog(
+    voiceGuideState: VoiceGuideState,
+    onSpeakScript: (BanglaGuideScript) -> Unit,
+    onToggleMuteStop: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianSurface,
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.bn_guide_dialog_title),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = onToggleMuteStop,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (voiceGuideState.isSpeaking) Icons.Filled.Stop else Icons.Filled.VolumeUp,
+                        contentDescription = stringResource(R.string.cd_voice_guide_toggle),
+                        tint = if (voiceGuideState.isSpeaking) NeonError else NeonCyan
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Full voice guide listen button
+                Button(
+                    onClick = { onSpeakScript(BanglaGuideScript.USAGE_GUIDE) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NeonCyan,
+                        contentColor = Color(0xFF001B22)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("btn_guide_listen_full")
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_btn_listen_voice),
+                        fontFamily = FontFamily.Default,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                // Quick Step Voice Replays
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onSpeakScript(BanglaGuideScript.WELCOME_STEP_1) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "🔊 ধাপ ১",
+                            fontFamily = FontFamily.Default,
+                            fontSize = 12.sp,
+                            color = NeonCyan
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { onSpeakScript(BanglaGuideScript.STEP_2) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "🔊 ধাপ ২",
+                            fontFamily = FontFamily.Default,
+                            fontSize = 12.sp,
+                            color = NeonMagenta
+                        )
+                    }
+                }
+
+                GuideTipCard(
+                    title = stringResource(R.string.bn_guide_tip_globe_title),
+                    desc = stringResource(R.string.bn_guide_tip_globe_desc)
+                )
+                GuideTipCard(
+                    title = stringResource(R.string.bn_guide_tip_mic_title),
+                    desc = stringResource(R.string.bn_guide_tip_mic_desc)
+                )
+                GuideTipCard(
+                    title = stringResource(R.string.bn_guide_tip_caps_title),
+                    desc = stringResource(R.string.bn_guide_tip_caps_desc)
+                )
+                GuideTipCard(
+                    title = stringResource(R.string.bn_guide_tip_theme_title),
+                    desc = stringResource(R.string.bn_guide_tip_theme_desc)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NeonCyan,
+                    contentColor = Color(0xFF001B22)
+                )
+            ) {
+                Text(
+                    text = stringResource(R.string.bn_guide_close),
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    )
+}
+
+@Composable
+private fun GuideTipCard(
+    title: String,
+    desc: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ObsidianCanvas)
+            .border(1.dp, ObsidianBorder, RoundedCornerShape(12.dp))
+            .padding(11.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(
+            text = title,
+            fontFamily = FontFamily.Default,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = NeonCyan
+        )
+        Text(
+            text = desc,
+            fontFamily = FontFamily.Default,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = TextPrimary
+        )
     }
 }
 
@@ -971,7 +1769,7 @@ private fun ImeStatusBadge(imeStatus: ImeStatus) {
         imeStatus.isSelected -> Triple(
             NeonEmeraldContainer,
             NeonEmerald,
-            stringResource(R.string.status_active)
+            stringResource(R.string.action_active_ready)
         )
         imeStatus.isEnabled -> Triple(
             NeonAmberContainer,

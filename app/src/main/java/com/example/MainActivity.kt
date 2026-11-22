@@ -1,7 +1,9 @@
 package com.example
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
@@ -11,6 +13,8 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -43,7 +47,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -58,7 +64,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.CustomPhotoTheme
+import com.example.data.LicenseUiState
+import com.example.engine.VoiceGuideState
 import com.example.model.LanguagePackUiState
+import com.example.ui.components.LifetimeUnlockScreen
 import com.example.ui.screens.EffectsScreen
 import com.example.ui.screens.HardwareScreen
 import com.example.ui.screens.LanguagesScreen
@@ -104,44 +114,127 @@ private enum class StudioTab(
 }
 
 class MainActivity : ComponentActivity() {
+
+    private var windowFocusTick by mutableIntStateOf(0)
+    private var openUnlockTrigger by mutableIntStateOf(0)
+
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Permission result is automatically observed by RgbKeyboardService next time mic is tapped
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
+        handleIncomingIntent(intent)
         setContent {
             ProRgbKeyboardTheme {
-                ProRgbKeyboardApp()
+                ProRgbKeyboardApp(
+                    windowFocusTick = windowFocusTick,
+                    openUnlockTrigger = openUnlockTrigger
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            windowFocusTick++
+        }
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_REQUEST_AUDIO_PERMISSION, false) == true) {
+            intent.removeExtra(EXTRA_REQUEST_AUDIO_PERMISSION)
+            val granted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_UNLOCK_SCREEN, false) == true) {
+            intent.removeExtra(EXTRA_OPEN_UNLOCK_SCREEN)
+            openUnlockTrigger++
+        }
+    }
+
+    companion object {
+        const val EXTRA_REQUEST_AUDIO_PERMISSION = "extra_request_audio_permission"
+        const val EXTRA_OPEN_UNLOCK_SCREEN = "extra_open_unlock_screen"
     }
 }
 
 @Composable
 fun ProRgbKeyboardApp(
+    windowFocusTick: Int = 0,
+    openUnlockTrigger: Int = 0,
     viewModel: StudioViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val customPhotoTheme by viewModel.customPhotoTheme.collectAsStateWithLifecycle()
     val imeStatus by viewModel.imeStatus.collectAsStateWithLifecycle()
+    val licenseState by viewModel.licenseState.collectAsStateWithLifecycle()
+    val voiceGuideState by viewModel.voiceGuideState.collectAsStateWithLifecycle()
     val languagePacks by viewModel.languagePacks.collectAsStateWithLifecycle()
     val playgroundText by viewModel.playgroundText.collectAsStateWithLifecycle()
     val clipboardClips by viewModel.clipboardClips.collectAsStateWithLifecycle()
 
     var currentTab by rememberSaveable { mutableStateOf(StudioTab.STUDIO) }
+    var showVipUnlockModal by rememberSaveable { mutableStateOf(false) }
 
-    BackHandler(enabled = currentTab != StudioTab.STUDIO) {
+    LaunchedEffect(openUnlockTrigger) {
+        if (openUnlockTrigger > 0) {
+            viewModel.refreshLicenseState()
+            if (!licenseState.isLifetimeUnlocked) {
+                showVipUnlockModal = true
+            }
+        }
+    }
+
+    LaunchedEffect(licenseState.isLifetimeUnlocked) {
+        if (licenseState.isLifetimeUnlocked) {
+            showVipUnlockModal = false
+        }
+    }
+
+    BackHandler(enabled = showVipUnlockModal) {
+        showVipUnlockModal = false
+    }
+
+    BackHandler(enabled = !showVipUnlockModal && currentTab != StudioTab.STUDIO) {
         currentTab = StudioTab.STUDIO
     }
 
-    // Automatically re-check Android IME enabled & default status, languages, and clipboard on resume
+    // Re-check IME & license status immediately when system dialogs close
+    LaunchedEffect(windowFocusTick) {
+        if (windowFocusTick > 0) {
+            viewModel.refreshImeStatus()
+            viewModel.refreshLicenseState()
+        }
+    }
+
+    // Automatically re-check Android IME enabled & default status, license, languages, and clipboard on resume
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshImeStatus()
+                viewModel.refreshLicenseState()
                 viewModel.refreshClipboard()
                 viewModel.refreshDownloadedLanguages()
             }
@@ -218,13 +311,17 @@ fun ProRgbKeyboardApp(
                     TabContent(
                         currentTab = currentTab,
                         settings = settings,
+                        customPhotoTheme = customPhotoTheme,
                         imeStatus = imeStatus,
+                        licenseState = licenseState,
+                        voiceGuideState = voiceGuideState,
                         languagePacks = languagePacks,
                         playgroundText = playgroundText,
                         clipboardClips = clipboardClips,
                         viewModel = viewModel,
                         onOpenImeSettings = openImeSettings,
                         onShowImePicker = showImePicker,
+                        onOpenUnlockScreen = { showVipUnlockModal = true },
                         onOpenHardwareSettings = { currentTab = StudioTab.HARDWARE },
                         onOpenLanguagesTab = { currentTab = StudioTab.LANGUAGES }
                     )
@@ -278,18 +375,34 @@ fun ProRgbKeyboardApp(
                     TabContent(
                         currentTab = currentTab,
                         settings = settings,
+                        customPhotoTheme = customPhotoTheme,
                         imeStatus = imeStatus,
+                        licenseState = licenseState,
+                        voiceGuideState = voiceGuideState,
                         languagePacks = languagePacks,
                         playgroundText = playgroundText,
                         clipboardClips = clipboardClips,
                         viewModel = viewModel,
                         onOpenImeSettings = openImeSettings,
                         onShowImePicker = showImePicker,
+                        onOpenUnlockScreen = { showVipUnlockModal = true },
                         onOpenHardwareSettings = { currentTab = StudioTab.HARDWARE },
                         onOpenLanguagesTab = { currentTab = StudioTab.LANGUAGES }
                     )
                 }
             }
+        }
+
+        // Dismissible Bengali ₹20 Lifetime VIP Unlock Modal (never locks out free standard typing or live demo preview)
+        if (showVipUnlockModal && !licenseState.isLifetimeUnlocked) {
+            LifetimeUnlockScreen(
+                licenseState = licenseState,
+                createUpiPaymentIntent = viewModel::createOfficialUpiIntent,
+                onVerifyUpiResult = viewModel::verifyUpiPaymentResult,
+                onVerifyOwnerPin = viewModel::verifyOwnerUnlockPin,
+                onBuildWhatsAppUri = viewModel::buildWhatsAppReceiptUri,
+                onDismiss = { showVipUnlockModal = false }
+            )
         }
     }
 }
@@ -298,13 +411,17 @@ fun ProRgbKeyboardApp(
 private fun TabContent(
     currentTab: StudioTab,
     settings: com.example.model.KeyboardSettings,
+    customPhotoTheme: CustomPhotoTheme,
     imeStatus: com.example.model.ImeStatus,
+    licenseState: LicenseUiState,
+    voiceGuideState: VoiceGuideState,
     languagePacks: List<LanguagePackUiState>,
     playgroundText: String,
     clipboardClips: List<String>,
     viewModel: StudioViewModel,
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
+    onOpenUnlockScreen: () -> Unit,
     onOpenHardwareSettings: () -> Unit,
     onOpenLanguagesTab: () -> Unit
 ) {
@@ -312,12 +429,18 @@ private fun TabContent(
         when (tab) {
             StudioTab.STUDIO -> StudioScreen(
                 settings = settings,
+                customPhotoTheme = customPhotoTheme,
                 imeStatus = imeStatus,
+                licenseState = licenseState,
+                voiceGuideState = voiceGuideState,
                 languagePacks = languagePacks,
                 playgroundText = playgroundText,
                 clipboardClips = clipboardClips,
                 onOpenImeSettings = onOpenImeSettings,
                 onShowImePicker = onShowImePicker,
+                onOpenUnlockScreen = onOpenUnlockScreen,
+                onSpeakBanglaGuide = viewModel::speakBanglaGuide,
+                onToggleVoiceGuideMute = viewModel::toggleVoiceGuideStopOrMute,
                 onSelectLanguageById = viewModel::selectLanguageById,
                 onToggleLanguage = viewModel::toggleLanguage,
                 onSelectEffect = viewModel::setEffect,
@@ -349,6 +472,13 @@ private fun TabContent(
 
             StudioTab.EFFECTS -> EffectsScreen(
                 settings = settings,
+                customPhotoTheme = customPhotoTheme,
+                licenseState = licenseState,
+                onApplyVipToKeyboard = onOpenUnlockScreen,
+                onSelectBannerPreset = viewModel::selectBannerPreset,
+                onPickCustomPhoto = viewModel::saveCustomPhoto,
+                onPhotoDimChange = viewModel::setCustomPhotoDim,
+                onRemoveCustomPhoto = viewModel::clearCustomPhoto,
                 onSelectEffect = viewModel::setEffect,
                 onSelectPalette = viewModel::setPalette,
                 onSelectKeycapStyle = viewModel::setKeycapStyle,

@@ -3,15 +3,26 @@ package com.example.viewmodel
 import android.app.Application
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.RgbKeyboardService
 import com.example.data.ClipboardHistoryManager
+import com.example.data.CustomBackgroundManager
+import com.example.data.CustomPhotoTheme
 import com.example.data.KeyboardPreferencesRepository
 import com.example.data.LanguagePackManager
+import com.example.data.LicenseUiState
+import com.example.data.PinVerificationResult
+import com.example.data.TrialLicenseManager
+import com.example.data.UpiVerificationResult
+import com.example.engine.BanglaGuideScript
+import com.example.engine.BanglaVoiceGuideController
 import com.example.engine.MechanicalFeedbackEngine
+import com.example.engine.VoiceGuideState
 import com.example.keyboard.ShiftState
 import com.example.model.ImeStatus
 import com.example.model.KeyboardHeightPreset
@@ -23,6 +34,7 @@ import com.example.model.LanguagePackUiState
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.model.SwitchSoundProfile
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,14 +42,22 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = KeyboardPreferencesRepository.getInstance(application)
     private val languagePackManager = LanguagePackManager.getInstance(application)
+    private val customBackgroundManager = CustomBackgroundManager.getInstance(application)
+    private val trialLicenseManager = TrialLicenseManager.getInstance(application)
     private val clipboardManager = ClipboardHistoryManager.getInstance(application)
     private val feedbackEngine = MechanicalFeedbackEngine(application)
+    private val voiceGuideController = BanglaVoiceGuideController(application)
+
+    val customPhotoTheme: StateFlow<CustomPhotoTheme> = customBackgroundManager.theme
+    val voiceGuideState: StateFlow<VoiceGuideState> = voiceGuideController.state
+    val licenseState: StateFlow<LicenseUiState> = trialLicenseManager.licenseState
 
     val settings: StateFlow<KeyboardSettings> = repository.settingsFlow.stateIn(
         scope = viewModelScope,
@@ -90,11 +110,57 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val _playgroundShift = MutableStateFlow(ShiftState.ONCE)
     val playgroundShift: StateFlow<ShiftState> = _playgroundShift.asStateFlow()
 
+    private var hasInitializedImeStatus: Boolean = false
     private var lastShiftTapMs: Long = 0L
     private var lastSpaceTapMs: Long = 0L
 
     init {
         refreshImeStatus()
+        startTrialCountdownTicker()
+    }
+
+    private fun startTrialCountdownTicker() {
+        viewModelScope.launch {
+            while (isActive) {
+                val state = trialLicenseManager.refreshState()
+                if (state.isLifetimeUnlocked) {
+                    break
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
+    fun refreshLicenseState() {
+        trialLicenseManager.refreshState()
+    }
+
+    fun createOfficialUpiIntent(): Pair<String, Intent> {
+        return trialLicenseManager.createOfficialUpiIntent()
+    }
+
+    fun verifyUpiPaymentResult(
+        resultCode: Int,
+        data: Intent?,
+        expectedTxnRef: String?
+    ): UpiVerificationResult {
+        val result = trialLicenseManager.verifyUpiIntentResult(resultCode, data, expectedTxnRef)
+        if (result is UpiVerificationResult.Success) {
+            voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
+        }
+        return result
+    }
+
+    fun verifyOwnerUnlockPin(pin: String): PinVerificationResult {
+        val result = trialLicenseManager.verifyOwnerPin(pin)
+        if (result is PinVerificationResult.Success) {
+            voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
+        }
+        return result
+    }
+
+    fun buildWhatsAppReceiptUri(): Uri {
+        return trialLicenseManager.buildWhatsAppReceiptUri()
     }
 
     fun refreshImeStatus() {
@@ -120,10 +186,45 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             defaultIme == expectedFullId ||
             (defaultIme.startsWith(context.packageName) && defaultIme.contains("RgbKeyboardService"))
 
-        _imeStatus.value = ImeStatus(
+        val previous = _imeStatus.value
+        val updated = ImeStatus(
             isEnabled = isEnabled,
             isSelected = isSelected
         )
+        _imeStatus.value = updated
+
+        if (!hasInitializedImeStatus) {
+            hasInitializedImeStatus = true
+            voiceGuideController.triggerFirstLaunchWelcomeIfNeeded(isEnabled, isSelected)
+        } else {
+            // Automatically narrate next Bengali step when user completes Step 1 or Step 2
+            when {
+                !previous.isSelected && updated.isSelected -> {
+                    voiceGuideController.speak(BanglaGuideScript.COMPLETE, forceUnmute = false)
+                }
+                !previous.isEnabled && updated.isEnabled && !updated.isSelected -> {
+                    voiceGuideController.speak(BanglaGuideScript.STEP_2, forceUnmute = false)
+                }
+            }
+        }
+    }
+
+    fun speakBanglaGuide(script: BanglaGuideScript) {
+        voiceGuideController.speak(script, forceUnmute = true)
+    }
+
+    fun toggleVoiceGuideStopOrMute() {
+        val status = _imeStatus.value
+        val recommended = when {
+            !status.isEnabled -> BanglaGuideScript.WELCOME_STEP_1
+            !status.isSelected -> BanglaGuideScript.STEP_2
+            else -> BanglaGuideScript.COMPLETE
+        }
+        voiceGuideController.toggleStopOrMute(recommended)
+    }
+
+    fun stopBanglaGuide() {
+        voiceGuideController.stopSpeaking()
     }
 
     fun triggerKeyFeedback(isModifier: Boolean) {
@@ -387,6 +488,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { repository.updateDoubleSpacePeriod(enabled) }
     }
 
+    fun selectBannerPreset(presetId: String) {
+        customBackgroundManager.selectPreset(presetId)
+    }
+
+    fun saveCustomPhoto(uri: Uri) {
+        viewModelScope.launch {
+            customBackgroundManager.savePhotoFromUri(uri)
+        }
+    }
+
+    fun setCustomPhotoDim(dimAlpha: Float) {
+        customBackgroundManager.setDimAlpha(dimAlpha)
+    }
+
+    fun clearCustomPhoto() {
+        customBackgroundManager.clearCustomPhoto()
+    }
+
     fun resetDefaults() {
         viewModelScope.launch { repository.resetDefaults() }
     }
@@ -394,5 +513,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         feedbackEngine.release()
+        voiceGuideController.release()
     }
 }

@@ -10,7 +10,7 @@
     android:paddingTop="2dp"
     android:paddingBottom="4dp">
 
-    <!-- Gboard-style evenly-spaced 7-icon top toolbar (no branding text) -->
+    <!-- Gboard-style evenly-spaced 6-icon top toolbar (Globe key switches languages) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -61,16 +61,6 @@
             android:src="@drawable/ic_kb_settings" />
 
         <ImageButton
-            android:id="@+id/btnLang"
-            android:layout_width="0dp"
-            android:layout_height="36dp"
-            android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_switch_language"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_kb_translate" />
-
-        <ImageButton
             android:id="@+id/btnTheme"
             android:layout_width="0dp"
             android:layout_height="36dp"
@@ -89,6 +79,63 @@
             android:contentDescription="@string/cd_voice_mic"
             android:scaleType="centerInside"
             android:src="@drawable/ic_kb_mic" />
+    </LinearLayout>
+
+    <!-- Inline Online Voice Typing Bar (Bengali & English SpeechRecognizer) -->
+    <LinearLayout
+        android:id="@+id/voiceBar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:layout_marginHorizontal="4dp"
+        android:layout_marginBottom="4dp"
+        android:background="#182032"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvVoiceStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/voice_listening_en"
+            android:textColor="#00E5FF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnVoiceLangToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginStart="6dp"
+            android:backgroundTint="#25344E"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingHorizontal="10dp"
+            android:text="EN ⇄ বাংলা"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnVoiceStop"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginStart="6dp"
+            android:backgroundTint="#3A1D28"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingHorizontal="10dp"
+            android:text="✕"
+            android:textColor="#FF6B8A"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- In-keyboard Clipboard Manager panel (opened via Feature Grid icon) -->
@@ -229,10 +276,160 @@
         </ScrollView>
     </LinearLayout>
 
+    <!-- Unlimited Categorized Scrollable Emoji Panel (9 Categories + Backspace) -->
+    <LinearLayout
+        android:id="@+id/emojiPanel"
+        android:layout_width="match_parent"
+        android:layout_height="232dp"
+        android:background="#11131A"
+        android:orientation="vertical"
+        android:paddingHorizontal="6dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:visibility="gone">
+
+        <!-- Category Tabs -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:fillViewport="true"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/emojiCategoryTabs"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <!-- Scrollable 8-Column Emoji Grid -->
+        <GridView
+            android:id="@+id/emojiGridView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:horizontalSpacing="2dp"
+            android:listSelector="@android:color/transparent"
+            android:numColumns="8"
+            android:paddingVertical="4dp"
+            android:stretchMode="columnWidth"
+            android:verticalSpacing="4dp" />
+
+        <!-- Emoji Panel Bottom Bar: ABC Return + Active Category Name + Backspace -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp">
+
+            <Button
+                android:id="@+id/btnEmojiClose"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:backgroundTint="#1E2434"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="52dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="12dp"
+                android:text="ABC"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvEmojiCategoryTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingHorizontal="8dp"
+                android:textColor="#8A94B0"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnEmojiBackspace"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:backgroundTint="#252A3B"
+                android:contentDescription="@string/cd_backspace"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="52dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="⌫"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp" />
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- 4-Row Gboard Layout + Touch Spark RGB Canvas Keyboard -->
     <com.example.rgbkeyboard.RgbKeyboardView
         android:id="@+id/rgbKeyboardView"
         android:layout_width="match_parent"
         android:layout_height="232dp" />
+
+    <!-- Bengali 5-Minute Trial Expired Lock Overlay inside System IME -->
+    <LinearLayout
+        android:id="@+id/trialLockPanel"
+        android:layout_width="match_parent"
+        android:layout_height="232dp"
+        android:background="#0D101A"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="14dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvImeLockTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/bn_ime_locked_title"
+            android:textColor="#00E5FF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvImeLockSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="@string/bn_ime_locked_subtitle"
+            android:textColor="#C5CEE2"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:id="@+id/tvImeLockDeviceId"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="#8A94B0"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnImeUnlockNow"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#00E5FF"
+            android:paddingHorizontal="20dp"
+            android:text="@string/bn_ime_locked_button"
+            android:textAllCaps="false"
+            android:textColor="#001B22"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
 </LinearLayout>

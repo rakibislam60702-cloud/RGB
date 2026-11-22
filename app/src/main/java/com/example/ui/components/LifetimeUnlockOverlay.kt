@@ -1,0 +1,664 @@
+package com.example.ui.components
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.R
+import com.example.data.LicenseUiState
+import com.example.data.PinVerificationResult
+import com.example.data.UpiVerificationResult
+import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.NeonAmber
+import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.NeonEmerald
+import com.example.ui.theme.NeonError
+import com.example.ui.theme.NeonMagenta
+import com.example.ui.theme.ObsidianBorder
+import com.example.ui.theme.ObsidianCanvas
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.ObsidianSurfaceVariant
+import com.example.ui.theme.TextMuted
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
+
+@Composable
+fun LifetimeUnlockScreen(
+    licenseState: LicenseUiState,
+    createUpiPaymentIntent: () -> Pair<String, Intent>,
+    onVerifyUpiResult: (resultCode: Int, data: Intent?, expectedTxnRef: String?) -> UpiVerificationResult,
+    onVerifyOwnerPin: (String) -> PinVerificationResult,
+    onBuildWhatsAppUri: () -> Uri,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var pendingTxnRef by remember { mutableStateOf<String?>(null) }
+    var paymentStatusMessage by remember { mutableStateOf<String?>(null) }
+    var isPaymentError by remember { mutableStateOf(false) }
+    var showOwnerPinDialog by remember { mutableStateOf(false) }
+
+    val upiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { activityResult ->
+        val verification = onVerifyUpiResult(
+            activityResult.resultCode,
+            activityResult.data,
+            pendingTxnRef
+        )
+        pendingTxnRef = null
+        when (verification) {
+            is UpiVerificationResult.Success -> {
+                paymentStatusMessage = null
+                isPaymentError = false
+                onDismiss()
+            }
+            UpiVerificationResult.Cancelled -> {
+                paymentStatusMessage = context.getString(R.string.bn_upi_cancelled)
+                isPaymentError = true
+            }
+            UpiVerificationResult.PendingOrSubmitted -> {
+                paymentStatusMessage = context.getString(R.string.bn_upi_pending)
+                isPaymentError = true
+            }
+            is UpiVerificationResult.Failed -> {
+                paymentStatusMessage = context.getString(R.string.bn_upi_failed)
+                isPaymentError = true
+            }
+        }
+    }
+
+    val copyDeviceId: () -> Unit = {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        cm?.setPrimaryClip(ClipData.newPlainText("Device ID", licenseState.deviceId))
+        Toast.makeText(context, context.getString(R.string.bn_device_id_copied), Toast.LENGTH_SHORT).show()
+    }
+
+    if (showOwnerPinDialog) {
+        OwnerPinFallbackDialog(
+            deviceId = licenseState.deviceId,
+            onCopyDeviceId = copyDeviceId,
+            onOpenWhatsApp = {
+                val uri = onBuildWhatsAppUri()
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                }
+            },
+            onVerifyPin = { pin ->
+                val res = onVerifyOwnerPin(pin)
+                if (res is PinVerificationResult.Success) {
+                    showOwnerPinDialog = false
+                    onDismiss()
+                }
+                res
+            },
+            onDismiss = { showOwnerPinDialog = false }
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xDD05070E))
+            .statusBarsPadding()
+            .testTag("lifetime_unlock_screen"),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 520.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(ObsidianSurface)
+                    .border(
+                        width = 1.4.dp,
+                        brush = Brush.linearGradient(listOf(NeonCyan, NeonMagenta)),
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Close icon (user can always dismiss and keep using the Forever Free Standard Keyboard & Live Demo)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("btn_close_optional_unlock")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.bn_btn_cancel),
+                            tint = TextSecondary
+                        )
+                    }
+                }
+
+                // Glowing VIP Badge
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(NeonCyan.copy(alpha = 0.2f), NeonMagenta.copy(alpha = 0.24f))
+                            )
+                        )
+                        .border(1.5.dp, NeonCyan.copy(alpha = 0.7f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lock,
+                        contentDescription = null,
+                        tint = NeonCyan,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                // Title & Exact Bengali Lifetime VIP Message
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_unlock_screen_title),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = if (licenseState.isFreeStandardMode) {
+                            stringResource(R.string.bn_unlock_expired_message)
+                        } else {
+                            stringResource(R.string.bn_unlock_active_trial_message)
+                        },
+                        fontFamily = FontFamily.Default,
+                        fontSize = 13.5.sp,
+                        lineHeight = 20.sp,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                // Features Included Card
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ObsidianCanvas)
+                        .border(1.dp, ObsidianBorder, RoundedCornerShape(14.dp))
+                        .padding(13.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_unlock_benefits_title),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonCyan
+                    )
+                    Text(
+                        text = stringResource(R.string.bn_unlock_benefit_1),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.5.sp,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = stringResource(R.string.bn_unlock_benefit_2),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.5.sp,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = stringResource(R.string.bn_unlock_benefit_3),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.5.sp,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = stringResource(R.string.bn_unlock_benefit_4),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.5.sp,
+                        color = TextPrimary
+                    )
+                }
+
+                // Unique 6-Character Device ID Box
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ObsidianSurfaceVariant)
+                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                        .clickable(onClick = copyDeviceId)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag("unlock_device_id_box"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = stringResource(R.string.bn_device_id_label),
+                            fontFamily = FontFamily.Default,
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                        Text(
+                            text = licenseState.deviceId,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp,
+                            color = NeonCyan,
+                            modifier = Modifier.testTag("unlock_device_id_value")
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.ContentCopy,
+                        contentDescription = stringResource(R.string.bn_device_id_copied),
+                        tint = NeonCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Official Merchant Info Badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VerifiedUser,
+                        contentDescription = null,
+                        tint = NeonEmerald,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.bn_unlock_merchant_info),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeonEmerald,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                // Payment Status / Error Message
+                if (!paymentStatusMessage.isNullOrBlank()) {
+                    Text(
+                        text = paymentStatusMessage.orEmpty(),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp,
+                        color = if (isPaymentError) NeonAmber else NeonEmerald,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isPaymentError) NeonAmber.copy(alpha = 0.14f) else NeonEmerald.copy(alpha = 0.14f)
+                            )
+                            .border(
+                                1.dp,
+                                if (isPaymentError) NeonAmber.copy(alpha = 0.5f) else NeonEmerald.copy(alpha = 0.5f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+
+                // Primary Official UPI Payment CTA Button
+                Button(
+                    onClick = {
+                        paymentStatusMessage = null
+                        val (txnRef, upiIntent) = createUpiPaymentIntent()
+                        val hasUpiApp = upiIntent.resolveActivity(context.packageManager) != null
+                        if (!hasUpiApp) {
+                            pendingTxnRef = null
+                            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
+                            isPaymentError = true
+                        } else {
+                            pendingTxnRef = txnRef
+                            val chooser = Intent.createChooser(upiIntent, "PhonePe / GPay / UPI অ্যাপ বেছে নিন")
+                            val launched = runCatching {
+                                upiLauncher.launch(chooser)
+                                true
+                            }.getOrDefault(false)
+                            if (!launched) {
+                                pendingTxnRef = null
+                                paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
+                                isPaymentError = true
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NeonCyan,
+                        contentColor = Color(0xFF001B22)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 54.dp)
+                        .testTag("btn_official_upi_pay")
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_btn_upi_pay),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                // Secondary Helper Link -> Owner-Controlled Secret PIN Fallback Dialog
+                Text(
+                    text = stringResource(R.string.bn_owner_pin_helper_link),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NeonCyan,
+                    textAlign = TextAlign.Center,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showOwnerPinDialog = true }
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .testTag("btn_open_owner_pin_dialog")
+                )
+
+                // Always allow dismissing back to Forever Free Standard Keyboard + In-App Live Demo
+                OutlinedButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("btn_continue_free_standard")
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_btn_cancel),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OwnerPinFallbackDialog(
+    deviceId: String,
+    onCopyDeviceId: () -> Unit,
+    onOpenWhatsApp: () -> Unit,
+    onVerifyPin: (String) -> PinVerificationResult,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var pinText by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianSurface,
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Key,
+                    contentDescription = null,
+                    tint = NeonCyan,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = stringResource(R.string.bn_owner_pin_dialog_title),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.bn_owner_pin_dialog_desc),
+                    fontFamily = FontFamily.Default,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    color = TextSecondary
+                )
+
+                // Device ID copy card
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ObsidianCanvas)
+                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                        .clickable(onClick = onCopyDeviceId)
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.bn_device_id_label),
+                            fontFamily = FontFamily.Default,
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                        Text(
+                            text = deviceId,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp,
+                            color = NeonCyan
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.ContentCopy,
+                        contentDescription = stringResource(R.string.bn_device_id_copied),
+                        tint = NeonCyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // WhatsApp Receipt Button
+                Button(
+                    onClick = onOpenWhatsApp,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1FAF5A),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("btn_whatsapp_send_receipt")
+                ) {
+                    Text(
+                        text = stringResource(R.string.bn_btn_whatsapp_receipt),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // 6-Digit Owner Unlock PIN Input Field
+                OutlinedTextField(
+                    value = pinText,
+                    onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(6)
+                        pinText = digits
+                        errorMessage = null
+                    },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.bn_pin_input_label),
+                            fontFamily = FontFamily.Default
+                        )
+                    },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.bn_pin_input_placeholder),
+                            fontFamily = FontFamily.Default,
+                            color = TextMuted
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = ObsidianBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = NeonCyan,
+                        focusedContainerColor = ObsidianCanvas,
+                        unfocusedContainerColor = ObsidianCanvas
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_owner_unlock_pin")
+                )
+
+                if (!errorMessage.isNullOrBlank()) {
+                    Text(
+                        text = errorMessage.orEmpty(),
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.sp,
+                        color = NeonError
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    when (val result = onVerifyPin(pinText)) {
+                        PinVerificationResult.Success -> {
+                            errorMessage = null
+                        }
+                        PinVerificationResult.InvalidPin -> {
+                            errorMessage = context.getString(R.string.bn_pin_invalid)
+                        }
+                        is PinVerificationResult.Cooldown -> {
+                            errorMessage = context.getString(R.string.bn_pin_cooldown)
+                        }
+                    }
+                },
+                enabled = pinText.length == 6,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NeonCyan,
+                    contentColor = Color(0xFF001B22)
+                ),
+                modifier = Modifier.testTag("btn_verify_owner_pin")
+            ) {
+                Text(
+                    text = stringResource(R.string.bn_btn_verify_pin),
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.bn_btn_cancel),
+                    fontFamily = FontFamily.Default,
+                    color = TextSecondary
+                )
+            }
+        }
+    )
+}
