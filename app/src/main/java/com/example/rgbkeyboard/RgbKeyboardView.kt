@@ -230,7 +230,10 @@ class RgbKeyboardView @JvmOverloads constructor(
         interpolator = LinearInterpolator()
         addUpdateListener {
             rgbPhase = it.animatedValue as Float
-            if ((vipVisualsEnabled && settings.effect != RgbEffect.TOUCH_SPARK) || hasActiveVisualEffects()) {
+            val needsContinuousRgb = vipVisualsEnabled &&
+                settings.effect != RgbEffect.NORMAL_DEFAULT &&
+                settings.effect != RgbEffect.TOUCH_SPARK
+            if (needsContinuousRgb || hasActiveVisualEffects()) {
                 invalidate()
             }
         }
@@ -576,7 +579,9 @@ class RgbKeyboardView @JvmOverloads constructor(
             rebuildKeyBoxes()
         }
 
-        val isTouchSparkMode = !vipVisualsEnabled || settings.effect == RgbEffect.TOUCH_SPARK
+        val isNormalClassicBlack = !vipVisualsEnabled || settings.effect == RgbEffect.NORMAL_DEFAULT
+        val isTouchSparkMode = isNormalClassicBlack || settings.effect == RgbEffect.TOUCH_SPARK
+        val allowRgbGlow = vipVisualsEnabled && settings.effect != RgbEffect.NORMAL_DEFAULT
         val cornerRadius = (settings.keyCornerRadiusDp * density * 0.82f).coerceIn(5.5f * density, 13f * density)
 
         // 0. Draw Persistent Custom Photo / Banner Theme Background ONLY when VIP visuals are active
@@ -587,7 +592,7 @@ class RgbKeyboardView @JvmOverloads constructor(
             false
         }
 
-        val continuousShader: SweepGradient? = if (vipVisualsEnabled && !isTouchSparkMode) {
+        val continuousShader: SweepGradient? = if (allowRgbGlow && !isTouchSparkMode) {
             val shader = ensureSweepShader()
             val angle = if (settings.effect == RgbEffect.STATIC_NEON) 0f else rgbPhase
             shaderMatrix.setRotate(angle, width / 2f, height / 2f)
@@ -607,13 +612,13 @@ class RgbKeyboardView @JvmOverloads constructor(
             null
         }
 
-        // 1. Draw Gboard Keycaps (clean matte-dark standard keys when free, or Touch Spark / RGB when VIP)
+        // 1. Draw Gboard Keycaps (pure matte-black in Normal Classic Black, or Touch Spark / RGB when VIP)
         for (i in keyBoxes.indices) {
             val box = keyBoxes[i]
             val rect = box.rect
             val isPressed = pressedKeyBox?.id == box.id
             val glowEntry = activeGlows.lastOrNull { it.keyId == box.id }
-            val glowIntensity = if (vipVisualsEnabled) computeGlowFactor(glowEntry, nowMs) else 0f
+            val glowIntensity = if (allowRgbGlow) computeGlowFactor(glowEntry, nowMs) else 0f
             val isShiftOnce = box.rawKey == "SHIFT" && shiftMode == ShiftMode.ONCE
             val isCapsLocked = box.rawKey == "SHIFT" && shiftMode == ShiftMode.CAPS_LOCK
             val isShiftLit = isShiftOnce || isCapsLocked
@@ -625,14 +630,18 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
 
             if (isTouchSparkMode) {
-                // Clean matte-dark Gboard rounded keycaps (translucent when VIP custom photo is active)
-                val letterAlpha = if (hasCustomPhoto) 154 else 235
-                val modAlpha = if (hasCustomPhoto) 138 else 220
+                // Clean matte-black Gboard rounded keycaps (translucent when VIP custom photo is active)
+                val letterAlpha = if (hasCustomPhoto) 154 else 242
+                val modAlpha = if (hasCustomPhoto) 138 else 235
                 keyBgPaint.color = when {
-                    !vipVisualsEnabled && isPressed -> Color.argb(245, 56, 62, 82)
+                    isNormalClassicBlack && isPressed -> Color.argb(245, 42, 45, 58)
                     isCapsLocked -> Color.argb(225, 24, 62, 118)
                     isShiftOnce -> Color.argb(215, 36, 48, 72)
                     box.isKarBarKey -> Color.argb(if (hasCustomPhoto) 185 else 235, 22, 42, 58)
+                    isNormalClassicBlack && box.rawKey == "SPACE" -> Color.argb(letterAlpha, 24, 25, 32)
+                    isNormalClassicBlack && (isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey)) ->
+                        Color.argb(modAlpha, 16, 17, 23)
+                    isNormalClassicBlack -> Color.argb(letterAlpha, 26, 28, 36)
                     box.rawKey == "SPACE" -> Color.argb(letterAlpha, 34, 37, 49)
                     isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey) ->
                         Color.argb(modAlpha, 25, 28, 39)
@@ -641,13 +650,13 @@ class RgbKeyboardView @JvmOverloads constructor(
                 canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
 
                 if (box.isKarBarKey && glowIntensity <= 0.01f) {
-                    sparkBorderPaint.color = Color.argb(120, 0, 229, 255)
+                    sparkBorderPaint.color = Color.argb(120, 0, 245, 212)
                     sparkBorderPaint.strokeWidth = 1.0f * density
                     canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
                 }
 
-                // Touch Spark neon glow ignition ONLY when VIP visuals are enabled
-                if (vipVisualsEnabled) {
+                // Touch Spark neon glow ignition ONLY when VIP visuals are enabled AND not Normal Classic Black
+                if (allowRgbGlow) {
                     val effGlow = when {
                         isCapsLocked -> maxOf(glowIntensity, 0.92f)
                         isShiftOnce -> maxOf(glowIntensity, 0.58f)
@@ -789,12 +798,12 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
         textPaint.shader = null
 
-        // 2. Smooth fading multicolor Glide / Swipe trail (VIP only)
-        if (vipVisualsEnabled) {
+        // 2. Smooth fading multicolor Glide / Swipe trail (VIP + non-Normal mode only)
+        if (allowRgbGlow) {
             drawGlideTrail(canvas, nowMs)
         }
 
-        // 3. Key pop-up bubbles (glowing multicolor rising bubbles when VIP, clean matte dark popup when free)
+        // 3. Key pop-up bubbles (glowing multicolor rising bubbles when VIP RGB, clean matte dark popup when Normal/Free)
         drawRisingSparkBubbles(canvas, nowMs)
     }
 
@@ -961,8 +970,8 @@ class RgbKeyboardView @JvmOverloads constructor(
             val glow = activeGlows[i]
             if (!glow.showPopup) continue
 
-            // In Free Standard Mode, show a clean matte-dark Gboard key preview ONLY while pressed (no neon fade)
-            if (!vipVisualsEnabled) {
+            // In Free Standard Mode or explicit Normal / Classic Black mode, show clean matte-dark popup only while pressed
+            if (!vipVisualsEnabled || settings.effect == RgbEffect.NORMAL_DEFAULT) {
                 if (glow.releasedAtMs != null) continue
                 val bubbleW = maxOf(glow.rect.width() * 1.38f, 40f * density)
                 val bubbleH = maxOf(glow.rect.height() * 1.12f, 44f * density)

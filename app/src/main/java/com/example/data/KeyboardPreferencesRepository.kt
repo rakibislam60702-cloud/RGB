@@ -74,7 +74,7 @@ class KeyboardPreferencesRepository private constructor(
                 } ?: RgbEffect.TOUCH_SPARK,
                 palette = prefs[Keys.PALETTE]?.let { name ->
                     RgbPalette.entries.find { it.name == name }
-                } ?: RgbPalette.SPECTRUM_PRISM,
+                } ?: RgbPalette.VICE_CITY_NEON,
                 keycapStyle = prefs[Keys.KEYCAP_STYLE]?.let { name ->
                     KeycapStyle.entries.find { it.name == name }
                 } ?: KeycapStyle.PUDDING,
@@ -149,13 +149,15 @@ class KeyboardPreferencesRepository private constructor(
     }
 
     private fun parseEnabledLanguageIds(raw: String?): List<String> {
+        if (raw == null) {
+            return listOf(LanguageCatalog.ENGLISH_ID, "bn", "hi")
+        }
         val parsed = raw
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?.distinct()
-            ?.toMutableList()
-            ?: mutableListOf()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .toMutableList()
         if (LanguageCatalog.ENGLISH_ID !in parsed) {
             parsed.add(0, LanguageCatalog.ENGLISH_ID)
         }

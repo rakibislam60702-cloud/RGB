@@ -6,8 +6,15 @@ import androidx.compose.ui.graphics.Color
 enum class RgbEffect(
     val displayName: String,
     val shortLabel: String,
-    val description: String
+    val description: String,
+    val isVipEffect: Boolean = true
 ) {
+    NORMAL_DEFAULT(
+        displayName = "Normal / Classic Black (No RGB)",
+        shortLabel = "Normal Black",
+        description = "Pure matte-black keys with zero RGB lights — clean, calm & battery friendly",
+        isVipEffect = false
+    ),
     TOUCH_SPARK(
         displayName = "Touch Spark",
         shortLabel = "Spark",
@@ -55,6 +62,15 @@ enum class RgbPalette(
     val colors: List<Color>,
     val isFullSpectrum: Boolean = false
 ) {
+    VICE_CITY_NEON(
+        displayName = "Vice City Sunset",
+        colors = listOf(
+            Color(0xFFFF2A85),
+            Color(0xFFFF9E00),
+            Color(0xFF00F5D4),
+            Color(0xFFB5179E)
+        )
+    ),
     SPECTRUM_PRISM(
         displayName = "Spectrum Prism",
         colors = listOf(
@@ -227,9 +243,9 @@ enum class KeyboardLanguage(
 data class KeyboardSettings(
     val language: KeyboardLanguage = KeyboardLanguage.ENGLISH,
     val activeLanguageId: String = LanguageCatalog.ENGLISH_ID,
-    val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID),
+    val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID, "bn", "hi"),
     val effect: RgbEffect = RgbEffect.TOUCH_SPARK,
-    val palette: RgbPalette = RgbPalette.SPECTRUM_PRISM,
+    val palette: RgbPalette = RgbPalette.VICE_CITY_NEON,
     val keycapStyle: KeycapStyle = KeycapStyle.PUDDING,
     val switchSound: SwitchSoundProfile = SwitchSoundProfile.SAMSUNG_SOFT,
     val animationSpeed: Float = 1.0f,

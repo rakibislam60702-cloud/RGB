@@ -163,6 +163,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return trialLicenseManager.buildWhatsAppReceiptUri()
     }
 
+    fun buildUpiQrPayload(): String {
+        return trialLicenseManager.buildUpiQrPayload()
+    }
+
     fun refreshImeStatus() {
         val context = getApplication<Application>()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager

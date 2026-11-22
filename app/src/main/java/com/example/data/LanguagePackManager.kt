@@ -37,7 +37,25 @@ class LanguagePackManager private constructor(
     val downloadedFiles: StateFlow<Map<String, Long>> = _downloadedFiles.asStateFlow()
 
     init {
+        ensureDefaultTriLanguagePacks()
         refreshDownloadedPacks()
+    }
+
+    private fun ensureDefaultTriLanguagePacks() {
+        val prefs = context.getSharedPreferences("rakib_lang_pack_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("preseeded_tri_lang_v1", false)) return
+        listOf("bn", "hi").forEach { langId ->
+            runCatching {
+                val target = layoutFileFor(langId)
+                if (!target.exists() || target.length() <= 0L) {
+                    val rawJson = context.assets.open("language_packs/$langId.json")
+                        .bufferedReader(Charsets.UTF_8)
+                        .use { it.readText() }
+                    target.writeText(rawJson, Charsets.UTF_8)
+                }
+            }
+        }
+        prefs.edit().putBoolean("preseeded_tri_lang_v1", true).apply()
     }
 
     fun refreshDownloadedPacks() {

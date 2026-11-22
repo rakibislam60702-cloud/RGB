@@ -133,13 +133,17 @@
     <string name="voice_permission_needed">Microphone permission required for voice typing</string>
     <string name="voice_error_retry">Could not hear clearly — tap mic to retry</string>
 
-    <!-- Bangla Setup Cards & Interactive Bangla Voice Guide -->
-    <string name="bn_setup_step_1_title">ধাপ ১: কিবোর্ড চালু করুন</string>
-    <string name="bn_setup_step_1_subtitle">সেটিংস থেকে Rakib official অপশনটি অন করে দিন</string>
-    <string name="bn_setup_step_1_done">চালু করা হয়েছে · পরবর্তী ধাপে যান</string>
-    <string name="bn_setup_step_2_title">ধাপ ২: কিবোর্ড সিলেক্ট করুন</string>
-    <string name="bn_setup_step_2_subtitle">পপ-আপ তালিকা থেকে Rakib official সিলেক্ট করুন</string>
-    <string name="bn_setup_step_2_done">কিবোর্ড সক্রিয় ও ব্যবহারের জন্য প্রস্তুত</string>
+    <!-- Minimalist Bangla Setup Cards & Interactive Bangla Voice Guide -->
+    <string name="bn_setup_step_1_title">১. কিবোর্ড চালু করুন</string>
+    <string name="bn_setup_step_1_subtitle">তালিকার নিচে \'Rakib official\' অন করুন</string>
+    <string name="bn_setup_step_1_done">চালু করা হয়েছে ✓</string>
+    <string name="bn_setup_step_2_title">২. কিবোর্ড সিলেক্ট করুন</string>
+    <string name="bn_setup_step_2_subtitle">তালিকা থেকে \'Rakib official\' বেছে নিন</string>
+    <string name="bn_setup_step_2_done">ব্যবহারের জন্য প্রস্তুত</string>
+    <string name="bn_badge_enabled_short">চালু ✓</string>
+    <string name="bn_badge_active_short">সক্রিয় ✓</string>
+    <string name="bn_hero_pro_badge">VICE RGB</string>
+    <string name="vip_one_time_badge">LIFETIME VIP • ONE-TIME PAYMENT (₹20)</string>
     <string name="bn_btn_easy_guide">কীভাবে ব্যবহার করবেন? (সহজ গাইড)</string>
     <string name="bn_btn_listen_voice">🔊 বাংলায় শুনে নিন</string>
     <string name="bn_voice_stop">⏹ বন্ধ করুন</string>
@@ -147,35 +151,37 @@
     <string name="bn_voice_unmute">🔊 ভয়েস গাইড</string>
     <string name="bn_guide_dialog_title">কীভাবে ব্যবহার করবেন? (সহজ গাইড)</string>
     <string name="bn_guide_close">বুঝেছি</string>
-    <string name="bn_guide_tip_globe_title">🌐 বাংলা ও ইংরেজি পরিবর্তন</string>
-    <string name="bn_guide_tip_globe_desc">স্পেসবারের পাশে পৃথিবী (🌐) বাটনে চাপ দিলেই সাথে সাথে বাংলা ও ইংরেজি পরিবর্তন হবে।</string>
+    <string name="bn_guide_tip_globe_title">🌐 English, বাংলা ও हिन्दी পরিবর্তন</string>
+    <string name="bn_guide_tip_globe_desc">স্পেসবারের পাশে পৃথিবী (🌐) বাটনে চাপ দিলেই সাথে সাথে English, বাংলা ও हिन्दी পরিবর্তন হবে।</string>
     <string name="bn_guide_tip_mic_title">🎙 বাংলায় অনলাইন ভয়েস টাইপিং</string>
     <string name="bn_guide_tip_mic_desc">উপরের মাইক বাটনে চাপ দিয়ে মুখে বলুন—বাংলা বা ইংরেজিতে সরাসরি টাইপ হয়ে যাবে।</string>
     <string name="bn_guide_tip_caps_title">⇧ ক্যাপস লক (Caps Lock)</string>
     <string name="bn_guide_tip_caps_desc">বাম দিকের তীর (⇧) বাটনে একবার চাপলে ১টি বড় অক্ষর, আর দুবার চাপলে বা ধরে রাখলে Caps Lock অন থাকবে।</string>
-    <string name="bn_guide_tip_theme_title">🖼 ফটো ও ব্যানার থিম</string>
-    <string name="bn_guide_tip_theme_desc">Effects ট্যাব থেকে রেডিমেড ব্যানার বা গ্যালারির যেকোনো ছবি কিবোর্ড ব্যাকগ্রাউন্ড হিসেবে সেট করুন।</string>
+    <string name="bn_guide_tip_theme_title">🖼 Vice City ব্যানার ও কাস্টম ফটো</string>
+    <string name="bn_guide_tip_theme_desc">Effects ট্যাব থেকে Vice City ব্যানার বা গ্যালারির যেকোনো ছবি কিবোর্ড ব্যাকগ্রাউন্ড হিসেবে সেট করুন।</string>
 
     <!-- Built-in Banner Presets -->
-    <string name="section_banner_presets">Ready-to-Use Banner Themes</string>
+    <string name="section_banner_presets">Vice City &amp; Neon Banner Themes</string>
     <string name="action_choose_gallery_photo">Choose Photo from Gallery</string>
-    <string name="preset_stealth_none">Stealth Dark</string>
+    <string name="preset_stealth_none">Classic Black</string>
     <string name="cd_voice_guide_toggle">Toggle Bangla voice guide audio</string>
 
-    <!-- 24-Hour Full VIP Trial + Forever Free Standard Keyboard + ₹20 Official UPI Lifetime VIP -->
-    <string name="bn_trial_badge_format">VIP ফ্রি ট্রায়াল বাকি: %1$s</string>
-    <string name="bn_free_standard_badge">ফ্রি স্ট্যান্ডার্ড কিবোর্ড চালু</string>
-    <string name="bn_lifetime_unlocked_badge">Lifetime VIP Unlocked ✓</string>
-    <string name="bn_unlock_now_chip">₹২০ VIP</string>
-    <string name="bn_demo_preview_tag">✨ লাইভ VIP ডেমো প্রিভিউ (ফ্রি টেস্ট)</string>
-    <string name="bn_demo_preview_effects_desc">সব RGB লাইট, ব্যানার ও কাস্টম ফটো এখানে ফ্রি টেস্ট করে দেখুন — আসল কিবোর্ডে সেট করতে নিচের বাটনে চাপ দিন।</string>
-    <string name="bn_btn_apply_to_keyboard">✨ কিবোর্ডে সেট করুন (Apply)</string>
-    <string name="bn_btn_apply_to_real_keyboard">✨ আসল কিবোর্ডে সেট করুন (Apply to Keyboard)</string>
-    <string name="bn_unlock_screen_title">Lifetime VIP আনলক করুন</string>
-    <string name="bn_unlock_expired_message">আপনার ১ দিনের ফ্রি VIP ট্রায়াল শেষ হয়েছে! সাধারণ কিবোর্ড ফ্রিতে চলবে, তবে Touch Spark RGB লাইট ও কাস্টম ফটো আসল কিবোর্ডে সেট করতে মাত্র ₹২০ দিয়ে লাইফটাইম VIP আনলক করুন।</string>
-    <string name="bn_unlock_active_trial_message">এককালীন মাত্র ₹২০ পেমেন্টে Touch Spark RGB লাইট, সব অ্যানিমেশন ও কাস্টম ফটো চিরজীবনের জন্য আপনার আসল কিবোর্ডে আনলক করুন।</string>
-    <string name="bn_unlock_merchant_info">Official Merchant: QUALITY FOODS · 6296603748@okbizaxis</string>
-    <string name="bn_btn_upi_pay">💳 PhonePe / GPay দিয়ে ₹২০ পেমেন্ট করুন - Lifetime VIP</string>
+    <!-- 7-Day Full VIP Trial + Normal Classic Black Free Mode + ₹20 Official UPI Lifetime VIP -->
+    <string name="bn_trial_badge_format">VIP ট্রায়াল: %1$s</string>
+    <string name="bn_free_standard_badge">🔒 VIP · ₹20</string>
+    <string name="bn_lifetime_unlocked_badge">LIFETIME VIP ✓</string>
+    <string name="bn_unlock_now_chip">₹20 VIP</string>
+    <string name="bn_upi_qr_title">অথবা যেকোনো UPI অ্যাপ দিয়ে QR স্ক্যান করুন (₹20)</string>
+    <string name="bn_upi_qr_caption">₹20 · Instant UPI Lifetime VIP</string>
+    <string name="bn_upi_chooser_title">PhonePe বা Google Pay বেছে নিন</string>
+    <string name="bn_demo_preview_tag">🔒 VIP প্রিভিউ মোড · টেস্ট করুন ফ্রি</string>
+    <string name="bn_demo_preview_effects_desc">লক করা (🔒 VIP) সব RGB লাইট, Vice City ব্যানার ও কাস্টম ফটো এখানে ফ্রি টেস্ট করুন — আসল কিবোর্ডে সেট করতে Save / Apply চাপুন।</string>
+    <string name="bn_btn_apply_to_keyboard">Save / Apply to Keyboard</string>
+    <string name="bn_btn_apply_to_real_keyboard">🔒 Save / Apply to Keyboard (₹20 Lifetime VIP)</string>
+    <string name="bn_unlock_screen_title">Rakib official · Lifetime VIP</string>
+    <string name="bn_unlock_expired_message">আপনার ৭ দিনের ফ্রি VIP ট্রায়াল শেষ হয়েছে! আপনার কিবোর্ড এখন Classic Black (No RGB) ফ্রি মোডে চলছে। সব RGB লাইট, Vice City থিম ও কাস্টম ফটো আনলক করতে এককালীন মাত্র ₹20 পেমেন্ট করুন।</string>
+    <string name="bn_unlock_active_trial_message">এককালীন মাত্র ₹20 পেমেন্টে Touch Spark RGB লাইট, Vice City থিম ও কাস্টম ফটো চিরজীবনের জন্য আনলক করুন।</string>
+    <string name="bn_btn_upi_pay">PhonePe / GPay দিয়ে ₹20 পেমেন্ট করুন (Lifetime VIP)</string>
     <string name="bn_owner_pin_helper_link">পেমেন্ট সফল হয়েছে কিন্তু আনলক হয়নি? মালিকের পিন দিয়ে খুলুন</string>
     <string name="bn_device_id_label">আপনার ডিভাইস আইডি (Device ID)</string>
     <string name="bn_device_id_copied">ডিভাইস আইডি কপি করা হয়েছে</string>
@@ -185,7 +191,7 @@
     <string name="bn_pin_input_label">৬ সংখ্যার আনলক পিন</string>
     <string name="bn_pin_input_placeholder">যেমন: 482910</string>
     <string name="bn_btn_verify_pin">পিন যাচাই ও আনলক করুন</string>
-    <string name="bn_btn_cancel">পরে করব (ফ্রি চালান)</string>
+    <string name="bn_btn_cancel">পরে করব (Classic Black ফ্রি চালান)</string>
     <string name="bn_upi_no_app_error">কোনো UPI অ্যাপ (PhonePe / GPay / Paytm) পাওয়া যায়নি।</string>
     <string name="bn_upi_cancelled">পেমেন্ট বাতিল করা হয়েছে। VIP আনলক করতে সম্পূর্ণ ₹২০ পেমেন্ট সম্পন্ন করুন।</string>
     <string name="bn_upi_pending">পেমেন্ট এখনো নিশ্চিত হয়নি (Pending)। সফল হলে তবেই অটো-আনলক হবে।</string>
@@ -193,11 +199,11 @@
     <string name="bn_pin_invalid">ভুল পিন! সঠিক ৬ সংখ্যার মালিকের পিন দিন।</string>
     <string name="bn_pin_cooldown">অনেকবার ভুল পিন দেওয়া হয়েছে। ১৫ সেকেন্ড পর আবার চেষ্টা করুন।</string>
     <string name="bn_ime_locked_title">🔒 VIP ট্রায়াল শেষ হয়েছে</string>
-    <string name="bn_ime_locked_subtitle">সাধারণ কিবোর্ড ফ্রিতে চলবে · RGB ও ফটো থিমের জন্য ₹২০ Lifetime VIP আনলক করুন।</string>
+    <string name="bn_ime_locked_subtitle">Classic Black ফ্রি মোড চালু আছে · RGB ও ফটো থিমের জন্য ₹২০ Lifetime VIP আনলক করুন।</string>
     <string name="bn_ime_locked_button">🔓 ₹২০ দিয়ে Lifetime VIP আনলক করুন</string>
-    <string name="bn_unlock_benefits_title">Lifetime VIP-এ যা যা পাবেন (চিরজীবন):</string>
+    <string name="bn_unlock_benefits_title">LIFETIME VIP • ONE-TIME PAYMENT (₹20):</string>
     <string name="bn_unlock_benefit_1">✨ Touch Spark, Spectrum Wave, Ripple, Matrix ও সব RGB লাইট</string>
-    <string name="bn_unlock_benefit_2">🖼 রেডিমেড ব্যানার ও কাস্টম গ্যালারি ফটো ব্যাকগ্রাউন্ড</string>
-    <string name="bn_unlock_benefit_3">🎨 সব RGB কালার প্যালেট, কীক্যাপ স্টাইল ও গ্লো টিউনিং</string>
-    <string name="bn_unlock_benefit_4">✅ বাংলা/ইংরেজি, ভয়েস টাইপিং, ইমোজি ও ক্যাপস লক সবসময় ফ্রি!</string>
+    <string name="bn_unlock_benefit_2">🌴 Vice City Sunset ব্যানার ও কাস্টম গ্যালারি ফটো ব্যাকগ্রাউন্ড</string>
+    <string name="bn_unlock_benefit_3">🎨 Vice City Sunset প্যালেট, কীক্যাপ স্টাইল ও গ্লো টিউনিং</string>
+    <string name="bn_unlock_benefit_4">✅ English, বাংলা, हिन्दी, ভয়েস টাইপিং ও Classic Black সবসময় ফ্রি!</string>
 </resources>

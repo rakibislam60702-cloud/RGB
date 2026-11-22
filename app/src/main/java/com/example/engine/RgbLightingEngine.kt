@@ -141,6 +141,9 @@ object RgbLightingEngine {
         keyLabel: String = "",
         touchGlowStrength: Float = 0f
     ): Color {
+        if (settings.effect == RgbEffect.NORMAL_DEFAULT) {
+            return Color.Transparent
+        }
         if (settings.effect == RgbEffect.TOUCH_SPARK) {
             val distinct = distinctNeonColorForKey(keyLabel, keyHash)
             val intensity = if (isPressed) 1f else touchGlowStrength.coerceIn(0f, 1f)
@@ -156,6 +159,7 @@ object RgbLightingEngine {
         val t = timeSec * speed
 
         val baseColor = when (settings.effect) {
+            RgbEffect.NORMAL_DEFAULT,
             RgbEffect.TOUCH_SPARK -> Color.Transparent
 
             RgbEffect.RAINBOW_WAVE -> {
@@ -253,8 +257,8 @@ object RgbLightingEngine {
         settings: KeyboardSettings,
         stops: Int = 7
     ): List<Color> {
-        if (settings.effect == RgbEffect.TOUCH_SPARK) {
-            return List(stops) { Color(0xFF1F2436) }
+        if (settings.effect == RgbEffect.NORMAL_DEFAULT || settings.effect == RgbEffect.TOUCH_SPARK) {
+            return List(stops) { Color(0xFF1F1833) }
         }
         val t = timeSec * settings.animationSpeed
         val pulse = if (settings.effect == RgbEffect.CYBER_BREATHING) {

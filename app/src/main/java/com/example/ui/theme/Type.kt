@@ -8,6 +8,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
+val OrbitronFamily = FontFamily(
+    Font(R.font.orbitron, FontWeight.Normal),
+    Font(R.font.orbitron, FontWeight.Medium),
+    Font(R.font.orbitron, FontWeight.SemiBold),
+    Font(R.font.orbitron, FontWeight.Bold),
+    Font(R.font.orbitron, FontWeight.ExtraBold)
+)
+
+val NotoSansBengaliFamily = FontFamily(
+    Font(R.font.noto_sans_bengali, FontWeight.Normal),
+    Font(R.font.noto_sans_bengali, FontWeight.Medium),
+    Font(R.font.noto_sans_bengali, FontWeight.SemiBold),
+    Font(R.font.noto_sans_bengali, FontWeight.Bold)
+)
+
 val SpaceGroteskFamily = FontFamily(
     Font(R.font.space_grotesk, FontWeight.Normal),
     Font(R.font.space_grotesk, FontWeight.Medium),
@@ -31,30 +46,31 @@ val JetBrainsMonoFamily = FontFamily(
 
 val ProRgbTypography = Typography(
     displaySmall = TextStyle(
-        fontFamily = SpaceGroteskFamily,
+        fontFamily = OrbitronFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 30.sp,
-        lineHeight = 36.sp,
-        letterSpacing = (-0.5).sp
+        fontSize = 28.sp,
+        lineHeight = 34.sp,
+        letterSpacing = 0.2.sp
     ),
     headlineMedium = TextStyle(
-        fontFamily = SpaceGroteskFamily,
+        fontFamily = OrbitronFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
-        lineHeight = 30.sp,
-        letterSpacing = (-0.3).sp
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.3.sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = SpaceGroteskFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp
-    ),
-    titleLarge = TextStyle(
-        fontFamily = SpaceGroteskFamily,
+        fontFamily = OrbitronFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 18.sp,
         lineHeight = 24.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily = OrbitronFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.2.sp
     ),
     titleMedium = TextStyle(
         fontFamily = SpaceGroteskFamily,
@@ -71,22 +87,22 @@ val ProRgbTypography = Typography(
         letterSpacing = 0.1.sp
     ),
     bodyLarge = TextStyle(
-        fontFamily = PlusJakartaSansFamily,
+        fontFamily = NotoSansBengaliFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 15.sp,
         lineHeight = 22.sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = PlusJakartaSansFamily,
+        fontFamily = NotoSansBengaliFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
         lineHeight = 19.sp
     ),
     bodySmall = TextStyle(
-        fontFamily = PlusJakartaSansFamily,
+        fontFamily = NotoSansBengaliFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
-        lineHeight = 16.sp
+        lineHeight = 17.sp
     ),
     labelLarge = TextStyle(
         fontFamily = SpaceGroteskFamily,

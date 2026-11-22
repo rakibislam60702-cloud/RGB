@@ -1,13 +1,16 @@
 package com.example.ui.components
 
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,7 +38,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -76,17 +79,23 @@ import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.NeonError
 import com.example.ui.theme.NeonMagenta
+import com.example.ui.theme.NotoSansBengaliFamily
 import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceVariant
+import com.example.ui.theme.OrbitronFamily
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 
 @Composable
 fun LifetimeUnlockScreen(
     licenseState: LicenseUiState,
+    upiQrPayload: String,
     createUpiPaymentIntent: () -> Pair<String, Intent>,
     onVerifyUpiResult: (resultCode: Int, data: Intent?, expectedTxnRef: String?) -> UpiVerificationResult,
     onVerifyOwnerPin: (String) -> PinVerificationResult,
@@ -229,27 +238,52 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
-                // Title & Exact Bengali Lifetime VIP Message
+                // Title, Glowing Vice City Branding & Exact English LIFETIME VIP • ONE-TIME PAYMENT (₹20) Badge
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     Text(
-                        text = stringResource(R.string.bn_unlock_screen_title),
-                        fontFamily = FontFamily.Default,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
+                        text = stringResource(R.string.studio_title),
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontFamily = OrbitronFamily,
+                            fontWeight = FontWeight.ExtraBold,
+                            brush = Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber, NeonCyan))
+                        ),
                         textAlign = TextAlign.Center
                     )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(NeonMagenta.copy(alpha = 0.24f), NeonCyan.copy(alpha = 0.2f))
+                                )
+                            )
+                            .border(
+                                1.dp,
+                                Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber, NeonCyan)),
+                                RoundedCornerShape(999.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.vip_one_time_badge),
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonCyan,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                     Text(
                         text = if (licenseState.isFreeStandardMode) {
                             stringResource(R.string.bn_unlock_expired_message)
                         } else {
                             stringResource(R.string.bn_unlock_active_trial_message)
                         },
-                        fontFamily = FontFamily.Default,
-                        fontSize = 13.5.sp,
+                        fontFamily = NotoSansBengaliFamily,
+                        fontSize = 13.sp,
                         lineHeight = 20.sp,
                         color = TextSecondary,
                         textAlign = TextAlign.Center
@@ -268,46 +302,57 @@ fun LifetimeUnlockScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.bn_unlock_benefits_title),
-                        fontFamily = FontFamily.Default,
-                        fontSize = 12.sp,
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = NeonCyan
+                        color = NeonAmber
                     )
                     Text(
                         text = stringResource(R.string.bn_unlock_benefit_1),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.5.sp,
                         color = TextPrimary
                     )
                     Text(
                         text = stringResource(R.string.bn_unlock_benefit_2),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.5.sp,
                         color = TextPrimary
                     )
                     Text(
                         text = stringResource(R.string.bn_unlock_benefit_3),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.5.sp,
                         color = TextPrimary
                     )
                     Text(
                         text = stringResource(R.string.bn_unlock_benefit_4),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.5.sp,
                         color = TextPrimary
                     )
                 }
 
-                // Unique 6-Character Device ID Box
+                // Clean Glassmorphic 6-Character Device ID Box directly above the Payment Button
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(ObsidianSurfaceVariant)
-                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xCC18102C),
+                                    Color(0xCC13162D)
+                                )
+                            )
+                        )
+                        .border(
+                            1.2.dp,
+                            Brush.horizontalGradient(listOf(NeonCyan.copy(alpha = 0.65f), NeonMagenta.copy(alpha = 0.45f))),
+                            RoundedCornerShape(14.dp)
+                        )
                         .clickable(onClick = copyDeviceId)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
                         .testTag("unlock_device_id_box"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -315,16 +360,16 @@ fun LifetimeUnlockScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             text = stringResource(R.string.bn_device_id_label),
-                            fontFamily = FontFamily.Default,
+                            fontFamily = NotoSansBengaliFamily,
                             fontSize = 11.sp,
                             color = TextMuted
                         )
                         Text(
                             text = licenseState.deviceId,
                             fontFamily = JetBrainsMonoFamily,
-                            fontSize = 18.sp,
+                            fontSize = 19.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 2.sp,
+                            letterSpacing = 2.2.sp,
                             color = NeonCyan,
                             modifier = Modifier.testTag("unlock_device_id_value")
                         )
@@ -337,30 +382,11 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
-                // Official Merchant Info Badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.VerifiedUser,
-                        contentDescription = null,
-                        tint = NeonEmerald,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.bn_unlock_merchant_info),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NeonEmerald,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
                 // Payment Status / Error Message
                 if (!paymentStatusMessage.isNullOrBlank()) {
                     Text(
                         text = paymentStatusMessage.orEmpty(),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.5.sp,
                         lineHeight = 18.sp,
                         color = if (isPaymentError) NeonAmber else NeonEmerald,
@@ -380,34 +406,30 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
-                // Primary Official UPI Payment CTA Button
+                // Primary Official UPI Payment CTA Button (Android 11+ safe: direct Intent.createChooser in try/catch without resolveActivity block)
                 Button(
                     onClick = {
                         paymentStatusMessage = null
                         val (txnRef, upiIntent) = createUpiPaymentIntent()
-                        val hasUpiApp = upiIntent.resolveActivity(context.packageManager) != null
-                        if (!hasUpiApp) {
+                        pendingTxnRef = txnRef
+                        val chooserTitle = context.getString(R.string.bn_upi_chooser_title)
+                        val chooser = Intent.createChooser(upiIntent, chooserTitle)
+                        try {
+                            upiLauncher.launch(chooser)
+                        } catch (_: ActivityNotFoundException) {
                             pendingTxnRef = null
                             paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
                             isPaymentError = true
-                        } else {
-                            pendingTxnRef = txnRef
-                            val chooser = Intent.createChooser(upiIntent, "PhonePe / GPay / UPI অ্যাপ বেছে নিন")
-                            val launched = runCatching {
-                                upiLauncher.launch(chooser)
-                                true
-                            }.getOrDefault(false)
-                            if (!launched) {
-                                pendingTxnRef = null
-                                paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
-                                isPaymentError = true
-                            }
+                        } catch (_: Exception) {
+                            pendingTxnRef = null
+                            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
+                            isPaymentError = true
                         }
                     },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = NeonCyan,
-                        contentColor = Color(0xFF001B22)
+                        containerColor = NeonMagenta,
+                        contentColor = Color.White
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -416,19 +438,22 @@ fun LifetimeUnlockScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.bn_btn_upi_pay),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
                 }
 
+                // Scannable Official Merchant UPI QR Code Card (6296603748@okbizaxis · ₹20)
+                UpiQrCodeCard(upiPayload = upiQrPayload)
+
                 Spacer(modifier = Modifier.height(2.dp))
 
                 // Secondary Helper Link -> Owner-Controlled Secret PIN Fallback Dialog
                 Text(
                     text = stringResource(R.string.bn_owner_pin_helper_link),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = NeonCyan,
@@ -441,7 +466,7 @@ fun LifetimeUnlockScreen(
                         .testTag("btn_open_owner_pin_dialog")
                 )
 
-                // Always allow dismissing back to Forever Free Standard Keyboard + In-App Live Demo
+                // Always allow dismissing back to Forever Free Classic Black Keyboard + In-App Live Preview
                 OutlinedButton(
                     onClick = onDismiss,
                     shape = RoundedCornerShape(12.dp),
@@ -452,7 +477,7 @@ fun LifetimeUnlockScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.bn_btn_cancel),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TextSecondary
@@ -493,7 +518,7 @@ private fun OwnerPinFallbackDialog(
                 )
                 Text(
                     text = stringResource(R.string.bn_owner_pin_dialog_title),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -507,7 +532,7 @@ private fun OwnerPinFallbackDialog(
             ) {
                 Text(
                     text = stringResource(R.string.bn_owner_pin_dialog_desc),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontSize = 12.5.sp,
                     lineHeight = 18.sp,
                     color = TextSecondary
@@ -528,7 +553,7 @@ private fun OwnerPinFallbackDialog(
                     Column {
                         Text(
                             text = stringResource(R.string.bn_device_id_label),
-                            fontFamily = FontFamily.Default,
+                            fontFamily = NotoSansBengaliFamily,
                             fontSize = 11.sp,
                             color = TextMuted
                         )
@@ -564,7 +589,7 @@ private fun OwnerPinFallbackDialog(
                 ) {
                     Text(
                         text = stringResource(R.string.bn_btn_whatsapp_receipt),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -581,13 +606,13 @@ private fun OwnerPinFallbackDialog(
                     label = {
                         Text(
                             text = stringResource(R.string.bn_pin_input_label),
-                            fontFamily = FontFamily.Default
+                            fontFamily = NotoSansBengaliFamily
                         )
                     },
                     placeholder = {
                         Text(
                             text = stringResource(R.string.bn_pin_input_placeholder),
-                            fontFamily = FontFamily.Default,
+                            fontFamily = NotoSansBengaliFamily,
                             color = TextMuted
                         )
                     },
@@ -611,7 +636,7 @@ private fun OwnerPinFallbackDialog(
                 if (!errorMessage.isNullOrBlank()) {
                     Text(
                         text = errorMessage.orEmpty(),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.sp,
                         color = NeonError
                     )
@@ -643,7 +668,7 @@ private fun OwnerPinFallbackDialog(
             ) {
                 Text(
                     text = stringResource(R.string.bn_btn_verify_pin),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -655,10 +680,80 @@ private fun OwnerPinFallbackDialog(
             ) {
                 Text(
                     text = stringResource(R.string.bn_btn_cancel),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     color = TextSecondary
                 )
             }
         }
     )
+}
+
+@Composable
+private fun UpiQrCodeCard(
+    upiPayload: String
+) {
+    val qrBitmap = remember(upiPayload) {
+        generateQrBitmap(payload = upiPayload, sizePx = 420)
+    }
+
+    if (qrBitmap != null) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(ObsidianCanvas)
+                .border(1.dp, ObsidianBorder, RoundedCornerShape(16.dp))
+                .padding(12.dp)
+                .testTag("upi_qr_code_card"),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.bn_upi_qr_title),
+                fontFamily = NotoSansBengaliFamily,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                textAlign = TextAlign.Center
+            )
+            Box(
+                modifier = Modifier
+                    .size(152.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = qrBitmap.asImageBitmap(),
+                    contentDescription = stringResource(R.string.bn_upi_qr_title),
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Text(
+                text = stringResource(R.string.bn_upi_qr_caption),
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.5.sp,
+                color = TextMuted,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+private fun generateQrBitmap(payload: String, sizePx: Int): Bitmap? {
+    return runCatching {
+        val hints = mapOf(EncodeHintType.MARGIN to 1)
+        val matrix = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+        val pixels = IntArray(sizePx * sizePx)
+        for (y in 0 until sizePx) {
+            val offset = y * sizePx
+            for (x in 0 until sizePx) {
+                pixels[offset + x] = if (matrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+            }
+        }
+        Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, sizePx, 0, 0, sizePx, sizePx)
+        }
+    }.getOrNull()
 }

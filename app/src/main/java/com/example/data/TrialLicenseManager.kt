@@ -24,24 +24,42 @@ data class LicenseUiState(
     val unlockMethod: String? = null,
     val unlockedTxnId: String? = null
 ) {
-    /** True during the initial 24-hour VIP trial OR permanently after ₹20 Lifetime VIP unlock. */
+    /** True during the initial 7-day VIP trial OR permanently after ₹20 Lifetime VIP unlock. */
     val isVipActive: Boolean
         get() = isLifetimeUnlocked || !isTrialExpired
 
-    /** True after 24-hour VIP trial ends without purchase: system keyboard stays free in standard matte-dark mode. */
+    /** True after 7-day VIP trial ends without purchase: real keyboard switches to Normal / Classic Black (No RGB). */
     val isFreeStandardMode: Boolean
         get() = !isLifetimeUnlocked && isTrialExpired
 
     val formattedRemainingBangla: String
         get() {
             val clamped = remainingSeconds.coerceAtLeast(0L)
-            val hours = clamped / 3600L
-            val mins = (clamped % 3600L) / 60L
+            val days = clamped / 86_400L
+            val hours = (clamped % 86_400L) / 3_600L
+            val mins = (clamped % 3_600L) / 60L
             val secs = clamped % 60L
             return when {
+                days > 0L -> "${toBengaliDigits(days)} দিন ${toBengaliDigits(hours)} ঘণ্টা"
                 hours > 0L -> "${toBengaliDigits(hours)} ঘণ্টা ${toBengaliDigits(mins)} মিনিট"
                 mins > 0L -> "${toBengaliDigits(mins)} মিনিট ${toBengaliDigits(secs)} সেকেন্ড"
                 else -> "${toBengaliDigits(secs)} সেকেন্ড"
+            }
+        }
+
+    /** Ultra-compact Bengali label for the minimalist top hero pill (e.g., "৬ দিন ২৩ ঘণ্টা"). */
+    val formattedCompactPillBangla: String
+        get() {
+            val clamped = remainingSeconds.coerceAtLeast(0L)
+            val days = clamped / 86_400L
+            val hours = (clamped % 86_400L) / 3_600L
+            val mins = (clamped % 3_600L) / 60L
+            val secs = clamped % 60L
+            return when {
+                days > 0L -> "${toBengaliDigits(days)} দিন ${toBengaliDigits(hours)} ঘণ্টা"
+                hours > 0L -> "${toBengaliDigits(hours)} ঘণ্টা ${toBengaliDigits(mins)} মি."
+                mins > 0L -> "${toBengaliDigits(mins)} মি. বাকি"
+                else -> "${toBengaliDigits(secs)} সে. বাকি"
             }
         }
 
@@ -207,6 +225,19 @@ class TrialLicenseManager private constructor(
     }
 
     /**
+     * Builds the scannable official UPI QR code URI for `6296603748@okbizaxis` (₹20 QUALITY FOODS).
+     */
+    fun buildUpiQrPayload(): String {
+        return "upi://pay" +
+            "?pa=${Uri.encode(MERCHANT_UPI_ID)}" +
+            "&pn=${Uri.encode(MERCHANT_NAME)}" +
+            "&mc=$MERCHANT_MCC" +
+            "&am=$AMOUNT_INR" +
+            "&cu=INR" +
+            "&tn=${Uri.encode(TRANSACTION_NOTE)}"
+    }
+
+    /**
      * Strictly verifies the authentic intent response returned by the UPI app.
      * Unlocks ONLY when resultCode == RESULT_OK, Status == SUCCESS (case-insensitive),
      * AND a valid non-placeholder txnId or ApprovalRefNo is returned (and txnRef matches if present).
@@ -361,13 +392,13 @@ class TrialLicenseManager private constructor(
         const val TRANSACTION_NOTE = "Rakib Keyboard Lifetime"
         const val WHATSAPP_OWNER_PHONE = "916296603748"
 
-        const val TRIAL_DURATION_SECONDS = 86_400L // Strict 24-hour (1-day) VIP trial
+        const val TRIAL_DURATION_SECONDS = 604_800L // Strict 7-day (168 hours) Full VIP trial
         const val TRIAL_DURATION_MS = TRIAL_DURATION_SECONDS * 1000L
 
         private const val OWNER_PIN_SALT = "RAKIB_QUALITY_FOODS_2026_SECRET"
         private const val MAX_PIN_ATTEMPTS_BEFORE_COOLDOWN = 5
         private const val PIN_COOLDOWN_MS = 15_000L
-        private const val CURRENT_TRIAL_POLICY_VERSION = 2
+        private const val CURRENT_TRIAL_POLICY_VERSION = 3
 
         private const val PREFS_NAME = "rakib_trial_license_prefs"
         private const val KEY_TRIAL_POLICY_VERSION = "trial_policy_version"

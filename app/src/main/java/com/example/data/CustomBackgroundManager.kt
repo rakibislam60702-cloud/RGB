@@ -31,6 +31,8 @@ data class BannerThemePreset(
 )
 
 object BannerPresetCatalog {
+    const val PRESET_VICE_SUNSET_PALMS = "vice_sunset_palms"
+    const val PRESET_VICE_NEON_DRIVE = "vice_neon_drive"
     const val PRESET_NEON_CYBER = "neon_cyber"
     const val PRESET_GALAXY_NEBULA = "galaxy_nebula"
     const val PRESET_DARK_CARBON = "dark_carbon"
@@ -41,6 +43,18 @@ object BannerPresetCatalog {
     const val PRESET_EMERALD_MATRIX = "emerald_matrix"
 
     val allPresets: List<BannerThemePreset> = listOf(
+        BannerThemePreset(
+            id = PRESET_VICE_SUNSET_PALMS,
+            title = "Vice Sunset",
+            drawableRes = R.drawable.img_preset_vice_sunset_palms_1795352797734,
+            previewColors = listOf(0xFFFF2A85, 0xFFFF9E00, 0xFF00F5D4)
+        ),
+        BannerThemePreset(
+            id = PRESET_VICE_NEON_DRIVE,
+            title = "Vice Drive",
+            drawableRes = R.drawable.img_preset_vice_neon_drive_1795352788244,
+            previewColors = listOf(0xFF00F5D4, 0xFFFF2A85, 0xFF090612)
+        ),
         BannerThemePreset(
             id = PRESET_NEON_CYBER,
             title = "Neon Cyber",

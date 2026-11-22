@@ -73,8 +73,11 @@ import com.example.ui.screens.EffectsScreen
 import com.example.ui.screens.HardwareScreen
 import com.example.ui.screens.LanguagesScreen
 import com.example.ui.screens.StudioScreen
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color as ComposeColor
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonCyanContainer
+import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ProRgbKeyboardTheme
@@ -262,6 +265,15 @@ fun ProRgbKeyboardApp(
         modifier = Modifier
             .fillMaxSize()
             .background(ObsidianCanvas)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        NeonMagenta.copy(alpha = 0.08f),
+                        ComposeColor.Transparent,
+                        NeonCyan.copy(alpha = 0.06f)
+                    )
+                )
+            )
     ) {
         val useNavRail = maxWidth >= 600.dp
 
@@ -330,7 +342,7 @@ fun ProRgbKeyboardApp(
         } else {
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
-                containerColor = ObsidianCanvas,
+                containerColor = ComposeColor.Transparent,
                 contentWindowInsets = WindowInsets.safeDrawing,
                 bottomBar = {
                     NavigationBar(
@@ -397,6 +409,7 @@ fun ProRgbKeyboardApp(
         if (showVipUnlockModal && !licenseState.isLifetimeUnlocked) {
             LifetimeUnlockScreen(
                 licenseState = licenseState,
+                upiQrPayload = viewModel.buildUpiQrPayload(),
                 createUpiPaymentIntent = viewModel::createOfficialUpiIntent,
                 onVerifyUpiResult = viewModel::verifyUpiPaymentResult,
                 onVerifyOwnerPin = viewModel::verifyOwnerUnlockPin,

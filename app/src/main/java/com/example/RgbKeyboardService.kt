@@ -459,15 +459,18 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun updateToolbarTints() {
         val defaultTint = Color.parseColor("#D5DCEF")
-        val activeBlue = Color.parseColor("#4285F4")
-        val activeCyan = Color.parseColor("#00E5FF")
-        val activeVoice = Color.parseColor("#00E676")
+        val activePink = Color.parseColor("#FF2A85")
+        val activeCyan = Color.parseColor("#00F5D4")
+        val activeVoice = Color.parseColor("#00F59B")
 
-        btnMenu?.setColorFilter(if (activeOverlay == OverlayMode.CLIPBOARD) activeBlue else defaultTint, PorterDuff.Mode.SRC_IN)
-        btnEmoji?.setColorFilter(if (activeOverlay == OverlayMode.EMOJI) activeBlue else defaultTint, PorterDuff.Mode.SRC_IN)
+        btnMenu?.setColorFilter(if (activeOverlay == OverlayMode.CLIPBOARD) activeCyan else defaultTint, PorterDuff.Mode.SRC_IN)
+        btnEmoji?.setColorFilter(if (activeOverlay == OverlayMode.EMOJI) activePink else defaultTint, PorterDuff.Mode.SRC_IN)
         btnGif?.setColorFilter(if (activeOverlay == OverlayMode.REACTIONS) activeCyan else defaultTint, PorterDuff.Mode.SRC_IN)
         btnTheme?.setColorFilter(
-            if (currentLicenseState.isVipActive && currentSettings.effect != RgbEffect.TOUCH_SPARK) activeCyan else defaultTint,
+            if (currentLicenseState.isVipActive &&
+                currentSettings.effect != RgbEffect.NORMAL_DEFAULT &&
+                currentSettings.effect != RgbEffect.TOUCH_SPARK
+            ) activePink else defaultTint,
             PorterDuff.Mode.SRC_IN
         )
         btnMic?.setColorFilter(if (latestVoiceState.isListening) activeVoice else defaultTint, PorterDuff.Mode.SRC_IN)

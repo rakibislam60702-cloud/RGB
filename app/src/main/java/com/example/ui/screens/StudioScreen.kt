@@ -114,10 +114,12 @@ import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.NeonEmeraldContainer
 import com.example.ui.theme.NeonError
 import com.example.ui.theme.NeonMagenta
+import com.example.ui.theme.NotoSansBengaliFamily
 import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceVariant
+import com.example.ui.theme.OrbitronFamily
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -136,7 +138,7 @@ private val studioQuickReactions = listOf(
     "😎 Cool" to "😎",
     "💯 100%" to "💯",
     "(♥‿♥)" to "(♥‿♥)",
-    "বাংলাদেশ 🇧🇩" to "বাংলাদেশ 🇧🇩"
+    "✨ দারুণ!" to "✨ দারুণ!"
 )
 
 @Composable
@@ -249,16 +251,14 @@ fun StudioScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Hero Banner + Clear Bangla Setup Cards + Live Trial Timer + Interactive Bangla Voice Guide
+            // Ultra-Clean Minimalist Dark Glassmorphism Hero Card
             HeroStatusCard(
                 imeStatus = imeStatus,
                 licenseState = licenseState,
-                settings = settings,
                 voiceGuideState = voiceGuideState,
                 onOpenImeSettings = onOpenImeSettings,
                 onShowImePicker = onShowImePicker,
                 onOpenUnlockScreen = onOpenUnlockScreen,
-                onSpeakBanglaGuide = onSpeakBanglaGuide,
                 onToggleVoiceGuideMute = onToggleVoiceGuideMute,
                 onOpenEasyGuide = { showEasyGuideDialog = true }
             )
@@ -277,38 +277,41 @@ fun StudioScreen(
                 ) {
                     items(enabledLanguages, key = { it.catalog.id }) { pack ->
                         val selected = pack.isActive
+                        val pillLabel = when (pack.catalog.id) {
+                            LanguageCatalog.ENGLISH_ID -> "EN"
+                            else -> pack.catalog.nativeName
+                        }
+                        val pillFont = when (pack.catalog.id) {
+                            LanguageCatalog.ENGLISH_ID -> JetBrainsMonoFamily
+                            "bn" -> NotoSansBengaliFamily
+                            else -> FontFamily.Default
+                        }
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(999.dp))
                                 .background(
-                                    if (selected) NeonCyan.copy(alpha = 0.14f) else ObsidianSurface
+                                    if (selected) NeonCyan.copy(alpha = 0.16f) else ObsidianSurface
                                 )
                                 .border(
                                     width = if (selected) 1.4.dp else 1.dp,
                                     color = if (selected) NeonCyan else ObsidianBorder,
-                                    shape = RoundedCornerShape(12.dp)
+                                    shape = RoundedCornerShape(999.dp)
                                 )
                                 .clickable { onSelectLanguageById(pack.catalog.id) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                                 .testTag("studio_lang_${pack.catalog.id}"),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = pack.catalog.shortBadge,
-                                fontFamily = if (pack.catalog.id == LanguageCatalog.ENGLISH_ID) JetBrainsMonoFamily else FontFamily.Default,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (selected) NeonCyan else TextMuted
-                            )
-                            Text(
-                                text = pack.catalog.nativeName,
-                                fontFamily = FontFamily.Default,
+                                text = pillLabel,
+                                fontFamily = pillFont,
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (selected) TextPrimary else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selected) NeonCyan else TextPrimary,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                softWrap = false
                             )
                         }
                     }
@@ -316,18 +319,21 @@ fun StudioScreen(
                     item(key = "add_more_languages") {
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(999.dp))
                                 .background(ObsidianSurfaceVariant)
-                                .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                                .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
                                 .clickable(onClick = onOpenLanguagesTab)
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
                                 .testTag("studio_btn_more_languages"),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = stringResource(R.string.add_languages_chip),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = NeonCyan
+                                color = NeonCyan,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -347,23 +353,25 @@ fun StudioScreen(
                 ) {
                     items(RgbEffect.entries) { effect ->
                         val selected = effect == settings.effect
+                        val isLockedPreview = licenseState.isFreeStandardMode && effect.isVipEffect
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(999.dp))
                                 .background(
                                     if (selected) ObsidianSurfaceVariant else ObsidianSurface
                                 )
                                 .border(
-                                    width = if (selected) 1.25.dp else 1.dp,
+                                    width = if (selected) 1.35.dp else 1.dp,
                                     brush = if (selected) {
-                                        Brush.horizontalGradient(settings.palette.colors)
+                                        Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber, NeonCyan))
                                     } else {
                                         Brush.horizontalGradient(listOf(ObsidianBorder, ObsidianBorder))
                                     },
-                                    shape = RoundedCornerShape(12.dp)
+                                    shape = RoundedCornerShape(999.dp)
                                 )
                                 .clickable { onSelectEffect(effect) }
-                                .padding(horizontal = 12.dp, vertical = 9.dp)
+                                .padding(horizontal = 14.dp, vertical = 9.dp)
                                 .testTag("quick_effect_${effect.name.lowercase()}"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -371,13 +379,19 @@ fun StudioScreen(
                             Icon(
                                 imageVector = Icons.Filled.AutoAwesome,
                                 contentDescription = null,
-                                tint = if (selected) NeonCyan else TextMuted,
+                                tint = when {
+                                    selected -> NeonCyan
+                                    !effect.isVipEffect -> TextSecondary
+                                    else -> NeonMagenta.copy(alpha = 0.8f)
+                                },
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = effect.shortLabel,
+                                text = if (isLockedPreview) "🔒 ${effect.shortLabel}" else effect.shortLabel,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (selected) TextPrimary else TextSecondary
+                                color = if (selected) TextPrimary else TextSecondary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -405,7 +419,7 @@ fun StudioScreen(
             KeyboardHeightPreset.TALL -> 260.dp + extraRowHeight
         }
 
-        // Free In-App Live VIP Demo Preview + Apply to Keyboard Strip (shown after 24h VIP trial expires)
+        // Free In-App Live VIP Demo Preview + Save / Apply to Keyboard Strip (shown after 7-day VIP trial expires)
         if (licenseState.isFreeStandardMode) {
             Row(
                 modifier = Modifier
@@ -415,8 +429,8 @@ fun StudioScreen(
                     .clip(RoundedCornerShape(14.dp))
                     .background(ObsidianSurfaceVariant)
                     .border(
-                        width = 1.2.dp,
-                        brush = Brush.horizontalGradient(listOf(NeonCyan, NeonMagenta)),
+                        width = 1.25.dp,
+                        brush = Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber, NeonCyan)),
                         shape = RoundedCornerShape(14.dp)
                     )
                     .padding(horizontal = 12.dp, vertical = 9.dp)
@@ -426,7 +440,7 @@ fun StudioScreen(
             ) {
                 Text(
                     text = stringResource(R.string.bn_demo_preview_tag),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = NeonCyan,
@@ -438,7 +452,7 @@ fun StudioScreen(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(NeonCyan)
+                        .background(Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber)))
                         .clickable(onClick = onOpenUnlockScreen)
                         .padding(horizontal = 11.dp, vertical = 6.dp)
                         .testTag("btn_studio_apply_vip_to_keyboard"),
@@ -446,10 +460,10 @@ fun StudioScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.bn_btn_apply_to_keyboard),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF001B22)
+                        color = Color.White
                     )
                 }
             }
@@ -1117,49 +1131,52 @@ private fun StudioClipboardPanel(
 private fun HeroStatusCard(
     imeStatus: ImeStatus,
     licenseState: LicenseUiState,
-    settings: KeyboardSettings,
     voiceGuideState: VoiceGuideState,
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
     onOpenUnlockScreen: () -> Unit,
-    onSpeakBanglaGuide: (BanglaGuideScript) -> Unit,
     onToggleVoiceGuideMute: () -> Unit,
     onOpenEasyGuide: () -> Unit
 ) {
+    val glassShape = RoundedCornerShape(24.dp)
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(ObsidianSurface)
+            .clip(glassShape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF170D2B),
+                        Color(0xFF0E081C),
+                        Color(0xFF1E0D2E)
+                    )
+                )
+            )
             .border(
-                width = 1.dp,
+                width = 1.4.dp,
                 brush = Brush.linearGradient(
                     listOf(
-                        settings.palette.colors.first().copy(alpha = 0.65f),
-                        ObsidianBorder,
-                        settings.palette.colors.last().copy(alpha = 0.55f)
+                        NeonMagenta.copy(alpha = 0.85f),
+                        NeonAmber.copy(alpha = 0.7f),
+                        NeonCyan.copy(alpha = 0.85f)
                     )
                 ),
-                shape = RoundedCornerShape(22.dp)
+                shape = glassShape
             )
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.img_rgb_hero_banner_1795266996963),
-            contentDescription = stringResource(R.string.cd_hero_banner),
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .matchParentSize()
-                .clip(RoundedCornerShape(22.dp))
-        )
-
+        // GTA VI Vice City neon sunset ambient glassmorphism sheen
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .background(
-                    Brush.horizontalGradient(
-                        0.0f to ObsidianCanvas.copy(alpha = 0.96f),
-                        0.60f to ObsidianCanvas.copy(alpha = 0.88f),
-                        1.0f to ObsidianCanvas.copy(alpha = 0.55f)
+                    Brush.radialGradient(
+                        colors = listOf(
+                            NeonMagenta.copy(alpha = 0.14f),
+                            NeonCyan.copy(alpha = 0.08f),
+                            Color.Transparent
+                        ),
+                        radius = 780f
                     )
                 )
         )
@@ -1168,432 +1185,317 @@ private fun HeroStatusCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Top bar: Status Badge + Mute/Stop Bangla Voice Toggle
+            // Clean, Spacious 2-Row Header inside the Glassmorphism Card
+            // Row 1: Left-aligned glowing gradient "Rakib official" title + right-aligned VIP Trial pill with integrated mute/unmute icon
+            val voiceTint = when {
+                voiceGuideState.isSpeaking -> NeonError
+                voiceGuideState.isMuted -> TextMuted
+                else -> NeonCyan
+            }
+            val pillColor = when {
+                licenseState.isLifetimeUnlocked -> NeonEmerald
+                licenseState.isFreeStandardMode -> NeonMagenta
+                else -> NeonAmber
+            }
+            val pillBg = when {
+                licenseState.isLifetimeUnlocked -> NeonEmeraldContainer.copy(alpha = 0.7f)
+                licenseState.isFreeStandardMode -> Color(0xFF2D0D25)
+                else -> NeonAmberContainer.copy(alpha = 0.65f)
+            }
+            val pillText = when {
+                licenseState.isLifetimeUnlocked -> stringResource(R.string.bn_lifetime_unlocked_badge)
+                licenseState.isFreeStandardMode -> stringResource(R.string.bn_free_standard_badge)
+                else -> stringResource(
+                    R.string.bn_trial_badge_format,
+                    licenseState.formattedCompactPillBangla
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ImeStatusBadge(imeStatus = imeStatus)
+                Text(
+                    text = stringResource(R.string.studio_title),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = OrbitronFamily,
+                        fontSize = 17.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        brush = Brush.horizontalGradient(
+                            listOf(NeonMagenta, NeonAmber, NeonCyan)
+                        )
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
 
-                // Mute / Stop / Replay Bangla Voice Guide Toggle (Top Right)
-                val voiceBtnColor = when {
-                    voiceGuideState.isSpeaking -> NeonError
-                    voiceGuideState.isMuted -> TextMuted
-                    else -> NeonCyan
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Unified sleek right-aligned VIP Trial pill with integrated mute/unmute icon (no overlap or crowding)
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(
-                            when {
-                                voiceGuideState.isSpeaking -> NeonError.copy(alpha = 0.18f)
-                                voiceGuideState.isMuted -> ObsidianSurfaceVariant.copy(alpha = 0.9f)
-                                else -> NeonCyan.copy(alpha = 0.16f)
-                            }
-                        )
-                        .border(1.dp, voiceBtnColor.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
-                        .clickable(onClick = onToggleVoiceGuideMute)
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                        .testTag("btn_voice_guide_mute_toggle"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        .background(pillBg)
+                        .border(1.dp, pillColor.copy(alpha = 0.65f), RoundedCornerShape(999.dp)),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = when {
-                            voiceGuideState.isSpeaking -> Icons.Filled.Stop
-                            voiceGuideState.isMuted -> Icons.Filled.VolumeOff
-                            else -> Icons.Filled.VolumeUp
-                        },
-                        contentDescription = stringResource(R.string.cd_voice_guide_toggle),
-                        tint = voiceBtnColor,
-                        modifier = Modifier.size(15.dp)
+                    Row(
+                        modifier = Modifier
+                            .clickable(enabled = !licenseState.isLifetimeUnlocked, onClick = onOpenUnlockScreen)
+                            .padding(start = 9.dp, end = 6.dp, top = 6.dp, bottom = 6.dp)
+                            .testTag(
+                                when {
+                                    licenseState.isLifetimeUnlocked -> "badge_lifetime_unlocked"
+                                    licenseState.isFreeStandardMode -> "badge_free_standard_mode"
+                                    else -> "badge_free_trial_timer"
+                                }
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (licenseState.isLifetimeUnlocked) Icons.Filled.Verified else Icons.Filled.Timer,
+                            contentDescription = null,
+                            tint = pillColor,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = pillText,
+                            fontFamily = NotoSansBengaliFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = pillColor,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(14.dp)
+                            .background(pillColor.copy(alpha = 0.3f))
                     )
-                    Text(
-                        text = stringResource(
-                            when {
-                                voiceGuideState.isSpeaking -> R.string.bn_voice_stop
-                                voiceGuideState.isMuted -> R.string.bn_voice_mute
-                                else -> R.string.bn_voice_unmute
-                            }
-                        ),
-                        fontFamily = FontFamily.Default,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = voiceBtnColor
-                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clickable(onClick = onToggleVoiceGuideMute)
+                            .padding(start = 6.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)
+                            .testTag("btn_voice_guide_mute_toggle"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                voiceGuideState.isSpeaking -> Icons.Filled.Stop
+                                voiceGuideState.isMuted -> Icons.Filled.VolumeOff
+                                else -> Icons.Filled.VolumeUp
+                            },
+                            contentDescription = stringResource(R.string.cd_voice_guide_toggle),
+                            tint = voiceTint,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
 
-            // Live 5-Minute Free Trial Countdown Badge OR Lifetime Unlocked Badge
-            TrialLicenseStatusStrip(
-                licenseState = licenseState,
-                onOpenUnlockScreen = onOpenUnlockScreen
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            // Row 2: Full-width glowing cyan-magenta pill banner: "LIFETIME VIP • ONE-TIME PAYMENT (₹20)"
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(NeonCyan.copy(alpha = 0.16f), NeonMagenta.copy(alpha = 0.18f))
+                        )
+                    )
+                    .border(
+                        1.1.dp,
+                        Brush.horizontalGradient(listOf(NeonCyan.copy(alpha = 0.7f), NeonMagenta.copy(alpha = 0.7f))),
+                        RoundedCornerShape(999.dp)
+                    )
+                    .clickable(enabled = !licenseState.isLifetimeUnlocked, onClick = onOpenUnlockScreen)
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                    .testTag("hero_lifetime_vip_banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
                 Text(
-                    text = stringResource(R.string.studio_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = TextPrimary
-                )
-                Text(
-                    text = stringResource(R.string.studio_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    text = if (licenseState.isLifetimeUnlocked) {
+                        "✓ LIFETIME VIP UNLOCKED · ALL EFFECTS ACTIVE"
+                    } else {
+                        stringResource(R.string.vip_one_time_badge)
+                    },
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
+                    color = if (licenseState.isLifetimeUnlocked) NeonEmerald else NeonCyan,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
-            // Clear Bangla Text Setup Cards with Interactive "🔊 বাংলায় শুনে নিন" Voice Buttons
+            // Modern 2-Step Minimalist Action Cards
             Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                // Step 1: ধাপ ১: কিবোর্ড চালু করুন
-                BanglaSetupCard(
+                // Step 1: ১. কিবোর্ড চালু করুন ("তালিকার নিচে 'Rakib official' অন করুন")
+                MinimalistStepCard(
                     title = stringResource(R.string.bn_setup_step_1_title),
                     subtitle = stringResource(
                         if (imeStatus.isEnabled) R.string.bn_setup_step_1_done
                         else R.string.bn_setup_step_1_subtitle
                     ),
                     isComplete = imeStatus.isEnabled,
-                    completeBadgeText = stringResource(R.string.badge_enabled_check),
-                    accentColor = NeonCyan,
+                    completeBadgeText = stringResource(R.string.bn_badge_enabled_short),
+                    completeColor = NeonEmerald,
+                    completeContainer = NeonEmeraldContainer,
+                    idleAccent = NeonMagenta,
                     icon = Icons.Filled.Settings,
-                    isSpeakingThis = voiceGuideState.isSpeaking &&
-                        voiceGuideState.activeScript == BanglaGuideScript.WELCOME_STEP_1,
-                    onCardClick = onOpenImeSettings,
-                    onListenVoiceClick = { onSpeakBanglaGuide(BanglaGuideScript.WELCOME_STEP_1) },
-                    testTag = "btn_enable_ime",
-                    voiceTestTag = "btn_voice_step_1"
+                    onClick = onOpenImeSettings,
+                    testTag = "btn_enable_ime"
                 )
 
-                // Step 2: ধাপ ২: কিবোর্ড সিলেক্ট করুন
-                val step2Script = if (imeStatus.isSelected) BanglaGuideScript.COMPLETE else BanglaGuideScript.STEP_2
-                BanglaSetupCard(
+                // Step 2: ২. কিবোর্ড সিলেক্ট করুন (glowing electric cyan "সক্রিয় ✓" state once selected)
+                MinimalistStepCard(
                     title = stringResource(R.string.bn_setup_step_2_title),
                     subtitle = stringResource(
                         if (imeStatus.isSelected) R.string.bn_setup_step_2_done
                         else R.string.bn_setup_step_2_subtitle
                     ),
                     isComplete = imeStatus.isSelected,
-                    completeBadgeText = stringResource(R.string.action_active_ready),
-                    accentColor = NeonMagenta,
+                    completeBadgeText = stringResource(R.string.bn_badge_active_short),
+                    completeColor = NeonCyan,
+                    completeContainer = Color(0xFF072B27),
+                    idleAccent = NeonCyan,
                     icon = Icons.Filled.SwapHoriz,
-                    isSpeakingThis = voiceGuideState.isSpeaking &&
-                        (voiceGuideState.activeScript == BanglaGuideScript.STEP_2 ||
-                            voiceGuideState.activeScript == BanglaGuideScript.COMPLETE),
-                    onCardClick = onShowImePicker,
-                    onListenVoiceClick = { onSpeakBanglaGuide(step2Script) },
-                    testTag = "btn_select_ime",
-                    voiceTestTag = "btn_voice_step_2"
-                )
-
-                // Easy Guide Button: কীভাবে ব্যবহার করবেন? (সহজ গাইড)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(ObsidianSurfaceVariant.copy(alpha = 0.88f))
-                        .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                        .clickable(onClick = onOpenEasyGuide)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                        .testTag("btn_bangla_easy_guide"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.HelpOutline,
-                        contentDescription = null,
-                        tint = NeonCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = stringResource(R.string.bn_btn_easy_guide),
-                        fontFamily = FontFamily.Default,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrialLicenseStatusStrip(
-    licenseState: LicenseUiState,
-    onOpenUnlockScreen: () -> Unit
-) {
-    if (licenseState.isLifetimeUnlocked) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(NeonEmeraldContainer.copy(alpha = 0.65f))
-                .border(1.dp, NeonEmerald.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 7.dp)
-                .testTag("badge_lifetime_unlocked"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Verified,
-                    contentDescription = null,
-                    tint = NeonEmerald,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = stringResource(R.string.bn_lifetime_unlocked_badge),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = NeonEmerald
+                    onClick = onShowImePicker,
+                    testTag = "btn_select_ime"
                 )
             }
-            Text(
-                text = "ID: ${licenseState.deviceId}",
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 11.sp,
-                color = TextSecondary
-            )
-        }
-    } else if (licenseState.isFreeStandardMode) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(ObsidianSurfaceVariant.copy(alpha = 0.92f))
-                .border(1.dp, NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                .clickable(onClick = onOpenUnlockScreen)
-                .padding(horizontal = 12.dp, vertical = 7.dp)
-                .testTag("badge_free_standard_mode"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+
+            // Compact, stylish Rounded Cyan Easy Guide Button below the 2 cards
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(NeonCyan.copy(alpha = 0.12f))
+                    .border(1.2.dp, NeonCyan.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
+                    .clickable(onClick = onOpenEasyGuide)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .testTag("btn_bangla_easy_guide"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.weight(1f)
+                horizontalArrangement = Arrangement.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Keyboard,
+                    imageVector = Icons.Filled.HelpOutline,
                     contentDescription = null,
                     tint = NeonCyan,
                     modifier = Modifier.size(16.dp)
                 )
+                Spacer(modifier = Modifier.width(7.dp))
                 Text(
-                    text = stringResource(R.string.bn_free_standard_badge),
-                    fontFamily = FontFamily.Default,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = stringResource(R.string.bn_btn_easy_guide),
+                    fontFamily = NotoSansBengaliFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = TextPrimary,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    softWrap = false
                 )
             }
-            Text(
-                text = stringResource(R.string.bn_unlock_now_chip),
-                fontFamily = FontFamily.Default,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF001B22),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(NeonCyan)
-                    .padding(horizontal = 9.dp, vertical = 3.dp)
-                    .testTag("btn_unlock_now_banner")
-            )
-        }
-    } else {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(NeonAmberContainer.copy(alpha = 0.72f))
-                .border(1.dp, NeonAmber.copy(alpha = 0.68f), RoundedCornerShape(12.dp))
-                .clickable(onClick = onOpenUnlockScreen)
-                .padding(horizontal = 12.dp, vertical = 7.dp)
-                .testTag("badge_free_trial_timer"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Timer,
-                    contentDescription = null,
-                    tint = NeonAmber,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = stringResource(
-                        R.string.bn_trial_badge_format,
-                        licenseState.formattedRemainingBangla
-                    ),
-                    fontFamily = FontFamily.Default,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = NeonAmber,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = stringResource(R.string.bn_unlock_now_chip),
-                fontFamily = FontFamily.Default,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF001B22),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(NeonCyan)
-                    .padding(horizontal = 9.dp, vertical = 3.dp)
-                    .testTag("btn_unlock_now_banner")
-            )
         }
     }
 }
 
 @Composable
-private fun BanglaSetupCard(
+private fun MinimalistStepCard(
     title: String,
     subtitle: String,
     isComplete: Boolean,
     completeBadgeText: String,
-    accentColor: Color,
+    completeColor: Color,
+    completeContainer: Color,
+    idleAccent: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    isSpeakingThis: Boolean,
-    onCardClick: () -> Unit,
-    onListenVoiceClick: () -> Unit,
-    testTag: String,
-    voiceTestTag: String
+    onClick: () -> Unit,
+    testTag: String
 ) {
-    val borderColor = if (isComplete) NeonEmerald.copy(alpha = 0.72f) else accentColor.copy(alpha = 0.58f)
-    val bgColor = if (isComplete) {
-        NeonEmeraldContainer.copy(alpha = 0.52f)
-    } else {
-        ObsidianSurface.copy(alpha = 0.92f)
-    }
+    val activeAccent = if (isComplete) completeColor else idleAccent
+    val bgColor = if (isComplete) completeContainer.copy(alpha = 0.62f) else Color(0xCC18102C)
+    val borderColor = if (isComplete) completeColor.copy(alpha = 0.82f) else Color(0xFF342258)
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .heightIn(min = 60.dp)
+            .clip(RoundedCornerShape(15.dp))
             .background(bgColor)
-            .border(1.2.dp, borderColor, RoundedCornerShape(14.dp))
-            .clickable(onClick = onCardClick)
+            .border(1.2.dp, borderColor, RoundedCornerShape(15.dp))
+            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .testTag(testTag),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(activeAccent.copy(alpha = 0.17f))
+                .border(1.dp, activeAccent.copy(alpha = 0.45f), CircleShape),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isComplete) NeonEmerald.copy(alpha = 0.18f) else accentColor.copy(alpha = 0.16f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isComplete) Icons.Filled.CheckCircle else icon,
-                    contentDescription = null,
-                    tint = if (isComplete) NeonEmerald else accentColor,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = title,
-                    fontFamily = FontFamily.Default,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = subtitle,
-                    fontFamily = FontFamily.Default,
-                    fontSize = 12.sp,
-                    color = if (isComplete) NeonEmerald else TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            if (isComplete) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(NeonEmerald.copy(alpha = 0.18f))
-                        .border(1.dp, NeonEmerald.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.CheckCircle,
-                        contentDescription = null,
-                        tint = NeonEmerald,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = completeBadgeText,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = NeonEmerald
-                    )
-                }
-            }
+            Icon(
+                imageVector = if (isComplete) Icons.Filled.CheckCircle else icon,
+                contentDescription = null,
+                tint = activeAccent,
+                modifier = Modifier.size(19.dp)
+            )
         }
 
-        // Prominent Speaker Button: "🔊 বাংলায় শুনে নিন"
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(
-                    if (isSpeakingThis) NeonCyan.copy(alpha = 0.24f) else Color(0xFF1A2236)
-                )
-                .border(
-                    1.dp,
-                    if (isSpeakingThis) NeonCyan else accentColor.copy(alpha = 0.45f),
-                    RoundedCornerShape(10.dp)
-                )
-                .clickable(onClick = onListenVoiceClick)
-                .padding(horizontal = 11.dp, vertical = 6.dp)
-                .testTag(voiceTestTag),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
-                text = stringResource(R.string.bn_btn_listen_voice),
-                fontFamily = FontFamily.Default,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (isSpeakingThis) NeonCyan else TextPrimary
+                text = title,
+                fontFamily = NotoSansBengaliFamily,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+            Text(
+                text = subtitle,
+                fontFamily = NotoSansBengaliFamily,
+                fontSize = 11.5.sp,
+                color = if (isComplete) completeColor else TextSecondary,
+                maxLines = 2
+            )
+        }
+
+        if (isComplete) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(completeColor.copy(alpha = 0.16f))
+                    .border(1.dp, completeColor.copy(alpha = 0.65f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = completeBadgeText,
+                    fontFamily = NotoSansBengaliFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = completeColor
+                )
+            }
         }
     }
 }
@@ -1618,7 +1520,7 @@ private fun EasyBanglaGuideDialog(
             ) {
                 Text(
                     text = stringResource(R.string.bn_guide_dialog_title),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
@@ -1658,7 +1560,7 @@ private fun EasyBanglaGuideDialog(
                 ) {
                     Text(
                         text = stringResource(R.string.bn_btn_listen_voice),
-                        fontFamily = FontFamily.Default,
+                        fontFamily = NotoSansBengaliFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
@@ -1676,7 +1578,7 @@ private fun EasyBanglaGuideDialog(
                     ) {
                         Text(
                             text = "🔊 ধাপ ১",
-                            fontFamily = FontFamily.Default,
+                            fontFamily = NotoSansBengaliFamily,
                             fontSize = 12.sp,
                             color = NeonCyan
                         )
@@ -1688,7 +1590,7 @@ private fun EasyBanglaGuideDialog(
                     ) {
                         Text(
                             text = "🔊 ধাপ ২",
-                            fontFamily = FontFamily.Default,
+                            fontFamily = NotoSansBengaliFamily,
                             fontSize = 12.sp,
                             color = NeonMagenta
                         )
@@ -1724,7 +1626,7 @@ private fun EasyBanglaGuideDialog(
             ) {
                 Text(
                     text = stringResource(R.string.bn_guide_close),
-                    fontFamily = FontFamily.Default,
+                    fontFamily = NotoSansBengaliFamily,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -1748,61 +1650,17 @@ private fun GuideTipCard(
     ) {
         Text(
             text = title,
-            fontFamily = FontFamily.Default,
+            fontFamily = NotoSansBengaliFamily,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             color = NeonCyan
         )
         Text(
             text = desc,
-            fontFamily = FontFamily.Default,
+            fontFamily = NotoSansBengaliFamily,
             fontSize = 12.sp,
             lineHeight = 18.sp,
             color = TextPrimary
-        )
-    }
-}
-
-@Composable
-private fun ImeStatusBadge(imeStatus: ImeStatus) {
-    val (bg, fg, label) = when {
-        imeStatus.isSelected -> Triple(
-            NeonEmeraldContainer,
-            NeonEmerald,
-            stringResource(R.string.action_active_ready)
-        )
-        imeStatus.isEnabled -> Triple(
-            NeonAmberContainer,
-            NeonAmber,
-            stringResource(R.string.status_enabled)
-        )
-        else -> Triple(
-            ObsidianSurfaceVariant,
-            TextSecondary,
-            stringResource(R.string.status_not_enabled)
-        )
-    }
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(bg.copy(alpha = 0.9f))
-            .border(1.dp, fg.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-            .testTag("ime_status_badge"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(fg)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = fg
         )
     }
 }
