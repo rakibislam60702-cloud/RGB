@@ -1,14 +1,17 @@
 package com.example.ui.components
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -38,6 +41,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -49,6 +54,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,7 +68,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -72,6 +77,8 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.LicenseUiState
 import com.example.data.PinVerificationResult
+import com.example.data.RestoreVipResult
+import com.example.data.TrialLicenseManager
 import com.example.data.UpiVerificationResult
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.NeonAmber
@@ -88,26 +95,45 @@ import com.example.ui.theme.OrbitronFamily
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
+import com.google.android.gms.auth.api.identity.Identity
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+
+private enum class PhoneHintPurpose { INITIAL, PAY_UPI, RESTORE_VIP }
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 @Composable
 fun LifetimeUnlockScreen(
     licenseState: LicenseUiState,
     upiQrPayload: String,
     createUpiPaymentIntent: () -> Pair<String, Intent>,
-    onVerifyUpiResult: (resultCode: Int, data: Intent?, expectedTxnRef: String?) -> UpiVerificationResult,
+    onSaveMobileNumber: (String) -> String,
+    onVerifyUpiResult: (resultCode: Int, data: Intent?, expectedTxnRef: String?, mobileNumber: String) -> UpiVerificationResult,
+    onRestoreVipByMobile: (String) -> RestoreVipResult,
     onVerifyOwnerPin: (String) -> PinVerificationResult,
     onBuildWhatsAppUri: () -> Uri,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
     var pendingTxnRef by remember { mutableStateOf<String?>(null) }
     var paymentStatusMessage by remember { mutableStateOf<String?>(null) }
     var isPaymentError by remember { mutableStateOf(false) }
     var showOwnerPinDialog by remember { mutableStateOf(false) }
+
+    var selectedMobile by remember(licenseState.registeredMobileNumber) {
+        mutableStateOf(licenseState.registeredMobileNumber)
+    }
+    var showManualMobileFallback by remember { mutableStateOf(false) }
+    var activeHintPurpose by remember { mutableStateOf(PhoneHintPurpose.INITIAL) }
 
     val upiLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -115,7 +141,8 @@ fun LifetimeUnlockScreen(
         val verification = onVerifyUpiResult(
             activityResult.resultCode,
             activityResult.data,
-            pendingTxnRef
+            pendingTxnRef,
+            selectedMobile
         )
         pendingTxnRef = null
         when (verification) {
@@ -136,6 +163,126 @@ fun LifetimeUnlockScreen(
                 paymentStatusMessage = context.getString(R.string.bn_upi_failed)
                 isPaymentError = true
             }
+        }
+    }
+
+    val launchUpiPaymentNow: () -> Unit = {
+        paymentStatusMessage = null
+        val (txnRef, upiIntent) = createUpiPaymentIntent()
+        pendingTxnRef = txnRef
+        val chooserTitle = context.getString(R.string.bn_upi_chooser_title)
+        val chooser = Intent.createChooser(upiIntent, chooserTitle)
+        try {
+            upiLauncher.launch(chooser)
+        } catch (_: ActivityNotFoundException) {
+            pendingTxnRef = null
+            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
+            isPaymentError = true
+        } catch (_: Exception) {
+            pendingTxnRef = null
+            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
+            isPaymentError = true
+        }
+    }
+
+    val handleRestoreForMobile: (String) -> Unit = { mobile ->
+        when (onRestoreVipByMobile(mobile)) {
+            is RestoreVipResult.Restored -> {
+                paymentStatusMessage = context.getString(R.string.bn_restore_success)
+                isPaymentError = false
+                Toast.makeText(context, context.getString(R.string.bn_restore_success), Toast.LENGTH_LONG).show()
+                onDismiss()
+            }
+            RestoreVipResult.WrongDevice -> {
+                paymentStatusMessage = context.getString(R.string.bn_restore_wrong_device)
+                isPaymentError = true
+            }
+            RestoreVipResult.NotFoundForDevice -> {
+                paymentStatusMessage = context.getString(R.string.bn_restore_not_found)
+                isPaymentError = true
+            }
+            RestoreVipResult.InvalidMobile -> {
+                showManualMobileFallback = true
+                paymentStatusMessage = context.getString(R.string.bn_restore_invalid_number)
+                isPaymentError = true
+            }
+        }
+    }
+
+    val phoneHintLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val rawHint = if (result.resultCode == Activity.RESULT_OK && result.data != null && activity != null) {
+            runCatching {
+                Identity.getSignInClient(activity).getPhoneNumberFromIntent(result.data)
+            }.getOrNull()
+        } else {
+            null
+        }
+
+        val normalized = if (!rawHint.isNullOrBlank()) {
+            onSaveMobileNumber(rawHint)
+        } else {
+            ""
+        }
+
+        if (normalized.length >= 10) {
+            selectedMobile = normalized
+            showManualMobileFallback = false
+            when (activeHintPurpose) {
+                PhoneHintPurpose.PAY_UPI -> launchUpiPaymentNow()
+                PhoneHintPurpose.RESTORE_VIP -> handleRestoreForMobile(normalized)
+                PhoneHintPurpose.INITIAL -> Unit
+            }
+        } else {
+            // Clean fallback input box when SIM hint is dismissed or unavailable
+            showManualMobileFallback = true
+            if (activeHintPurpose == PhoneHintPurpose.PAY_UPI) {
+                paymentStatusMessage = context.getString(R.string.bn_mobile_required_notice)
+                isPaymentError = true
+            }
+        }
+    }
+
+    val triggerPhoneNumberHint: (PhoneHintPurpose) -> Unit = { purpose ->
+        activeHintPurpose = purpose
+        val hostActivity = activity
+        if (hostActivity == null) {
+            showManualMobileFallback = true
+        } else {
+            val request = GetPhoneNumberHintIntentRequest.builder().build()
+            Identity.getSignInClient(hostActivity)
+                .getPhoneNumberHintIntent(request)
+                .addOnSuccessListener { pendingIntent ->
+                    runCatching {
+                        phoneHintLauncher.launch(
+                            IntentSenderRequest.Builder(pendingIntent).build()
+                        )
+                    }.onFailure {
+                        showManualMobileFallback = true
+                        if (purpose == PhoneHintPurpose.PAY_UPI && selectedMobile.length >= 10) {
+                            launchUpiPaymentNow()
+                        } else if (purpose == PhoneHintPurpose.RESTORE_VIP && selectedMobile.length >= 10) {
+                            handleRestoreForMobile(selectedMobile)
+                        }
+                    }
+                }
+                .addOnFailureListener {
+                    // No SIM phone hint available on device/emulator -> show clean fallback input box
+                    showManualMobileFallback = true
+                    if (purpose == PhoneHintPurpose.PAY_UPI && selectedMobile.length >= 10) {
+                        launchUpiPaymentNow()
+                    } else if (purpose == PhoneHintPurpose.RESTORE_VIP && selectedMobile.length >= 10) {
+                        handleRestoreForMobile(selectedMobile)
+                    }
+                }
+        }
+    }
+
+    // Automatically trigger Android's native 1-tap SIM Phone Number Hint picker on open if no number is saved yet
+    LaunchedEffect(Unit) {
+        if (selectedMobile.length < 10) {
+            triggerPhoneNumberHint(PhoneHintPurpose.INITIAL)
         }
     }
 
@@ -382,6 +529,104 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
+                // 1-Tap SIM Mobile Number Card (auto-picked via Google Identity Phone Hint; clean fallback input if unavailable)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ObsidianCanvas)
+                        .border(1.dp, NeonCyan.copy(alpha = 0.38f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.PhoneAndroid,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.bn_mobile_number_label),
+                                fontFamily = NotoSansBengaliFamily,
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                        Text(
+                            text = if (selectedMobile.length >= 10) {
+                                stringResource(R.string.bn_mobile_change_btn)
+                            } else {
+                                stringResource(R.string.bn_mobile_pick_sim_btn)
+                            },
+                            fontFamily = NotoSansBengaliFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonCyan,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { triggerPhoneNumberHint(PhoneHintPurpose.INITIAL) }
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                .testTag("btn_pick_sim_mobile")
+                        )
+                    }
+
+                    if (selectedMobile.length >= 10 && !showManualMobileFallback) {
+                        Text(
+                            text = selectedMobile,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp,
+                            color = TextPrimary,
+                            modifier = Modifier.testTag("unlock_selected_mobile_value")
+                        )
+                    } else if (showManualMobileFallback) {
+                        OutlinedTextField(
+                            value = selectedMobile,
+                            onValueChange = { raw ->
+                                val digits = TrialLicenseManager.normalizeMobileNumber(raw)
+                                selectedMobile = digits
+                                if (digits.length >= 10) {
+                                    onSaveMobileNumber(digits)
+                                }
+                                paymentStatusMessage = null
+                            },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.bn_mobile_input_placeholder),
+                                    fontFamily = NotoSansBengaliFamily,
+                                    fontSize = 12.sp,
+                                    color = TextMuted
+                                )
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = ObsidianBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                cursorColor = NeonCyan,
+                                focusedContainerColor = ObsidianSurface,
+                                unfocusedContainerColor = ObsidianSurface
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("input_fallback_mobile_number")
+                        )
+                    }
+                }
+
                 // Payment Status / Error Message
                 if (!paymentStatusMessage.isNullOrBlank()) {
                     Text(
@@ -406,24 +651,15 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
-                // Primary Official UPI Payment CTA Button (Android 11+ safe: direct Intent.createChooser in try/catch without resolveActivity block)
+                // Primary Official UPI Payment CTA Button (auto-triggers 1-tap SIM phone picker if not yet selected)
                 Button(
                     onClick = {
-                        paymentStatusMessage = null
-                        val (txnRef, upiIntent) = createUpiPaymentIntent()
-                        pendingTxnRef = txnRef
-                        val chooserTitle = context.getString(R.string.bn_upi_chooser_title)
-                        val chooser = Intent.createChooser(upiIntent, chooserTitle)
-                        try {
-                            upiLauncher.launch(chooser)
-                        } catch (_: ActivityNotFoundException) {
-                            pendingTxnRef = null
-                            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
-                            isPaymentError = true
-                        } catch (_: Exception) {
-                            pendingTxnRef = null
-                            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
-                            isPaymentError = true
+                        val normalized = TrialLicenseManager.normalizeMobileNumber(selectedMobile)
+                        if (normalized.length >= 10) {
+                            selectedMobile = onSaveMobileNumber(normalized)
+                            launchUpiPaymentNow()
+                        } else {
+                            triggerPhoneNumberHint(PhoneHintPurpose.PAY_UPI)
                         }
                     },
                     shape = RoundedCornerShape(14.dp),
@@ -445,8 +681,42 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
-                // Scannable Official Merchant UPI QR Code Card (6296603748@okbizaxis · ₹20)
+                // Scannable Official Merchant UPI QR Code Card (merchant UPI ID hidden from UI)
                 UpiQrCodeCard(upiPayload = upiQrPayload)
+
+                // 1-Tap Automatic VIP Restore Button (Same Phone Only, via SIM Phone Hint Picker)
+                OutlinedButton(
+                    onClick = {
+                        paymentStatusMessage = null
+                        val normalized = TrialLicenseManager.normalizeMobileNumber(selectedMobile)
+                        if (showManualMobileFallback && normalized.length >= 10) {
+                            handleRestoreForMobile(normalized)
+                        } else {
+                            triggerPhoneNumberHint(PhoneHintPurpose.RESTORE_VIP)
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, NeonCyan.copy(alpha = 0.72f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("btn_auto_restore_vip")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Restore,
+                        contentDescription = null,
+                        tint = NeonCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.bn_btn_auto_restore_vip),
+                        fontFamily = NotoSansBengaliFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonCyan
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(2.dp))
 

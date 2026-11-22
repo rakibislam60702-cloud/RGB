@@ -79,6 +79,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -96,6 +97,8 @@ import com.example.data.CustomPhotoTheme
 import com.example.data.LicenseUiState
 import com.example.engine.BanglaGuideScript
 import com.example.engine.OnlineVoiceTypingController
+import com.example.engine.RgbStickerGenerator
+import com.example.engine.SmartWordPredictor
 import com.example.engine.VoiceGuideState
 import com.example.model.EmojiCatalog
 import com.example.model.ImeStatus
@@ -182,6 +185,7 @@ fun StudioScreen(
     var activeOverlay by remember { mutableStateOf(StudioOverlayMode.NONE) }
     var voiceState by remember { mutableStateOf(OnlineVoiceTypingController.VoiceListeningState()) }
     var showVoiceBanner by remember { mutableStateOf(false) }
+    var previewSticker by remember { mutableStateOf<RgbStickerGenerator.StickerArtifact?>(null) }
 
     val latestCommit by rememberUpdatedState(onPlaygroundCommit)
     val latestBackspace by rememberUpdatedState(onPlaygroundBackspace)
@@ -235,6 +239,68 @@ fun StudioScreen(
             onSpeakScript = onSpeakBanglaGuide,
             onToggleMuteStop = onToggleVoiceGuideMute,
             onDismiss = { showEasyGuideDialog = false }
+        )
+    }
+
+    previewSticker?.let { artifact ->
+        AlertDialog(
+            onDismissRequest = { previewSticker = null },
+            containerColor = ObsidianSurface,
+            title = {
+                Text(
+                    text = stringResource(R.string.sticker_preview_title),
+                    fontFamily = OrbitronFamily,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonCyan
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Image(
+                        bitmap = artifact.bitmap.asImageBitmap(),
+                        contentDescription = artifact.phrase,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .size(220.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF0A0614))
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        RgbStickerGenerator.shareStickerFallback(context, artifact)
+                        previewSticker = null
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NeonMagenta,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(
+                        text = stringResource(R.string.sticker_share_btn),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { previewSticker = null },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.sticker_close_btn),
+                        color = TextSecondary
+                    )
+                }
+            }
         )
     }
 
@@ -596,14 +662,14 @@ fun StudioScreen(
                     }
                 }
 
-                // Inline Online Voice Typing Bar (Bengali & English Live SpeechRecognizer)
+                // Inline Direct Same-Language Voice Typing Bar (bn-BD / en-IN / hi-IN — no auto-translation toggle)
                 AnimatedVisibility(visible = showVoiceBanner) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 4.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF172033))
+                            .background(Color(0xFF171128))
                             .border(
                                 1.dp,
                                 if (voiceState.isListening) NeonCyan.copy(alpha = 0.65f) else NeonAmber.copy(alpha = 0.5f),
@@ -613,6 +679,17 @@ fun StudioScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Text(
+                            text = voiceState.locale.badge,
+                            fontFamily = if (voiceState.locale.isBengali) NotoSansBengaliFamily else JetBrainsMonoFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonCyan,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF261B47))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
                         Icon(
                             imageVector = Icons.Filled.Mic,
                             contentDescription = null,
@@ -624,36 +701,21 @@ fun StudioScreen(
                                 voiceState.partialTranscript.isNotBlank() -> voiceState.partialTranscript
                                 voiceState.isListening && voiceState.locale.isBengali ->
                                     stringResource(R.string.voice_listening_bn)
+                                voiceState.isListening && voiceState.locale.isHindi ->
+                                    stringResource(R.string.voice_listening_hi)
                                 voiceState.isListening ->
                                     stringResource(R.string.voice_listening_en)
                                 !voiceState.errorMessage.isNullOrBlank() ->
                                     voiceState.errorMessage.orEmpty()
                                 else -> stringResource(R.string.voice_tap_to_speak)
                             },
-                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = if (voiceState.locale.isBengali) NotoSansBengaliFamily else FontFamily.Default,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
                             color = if (voiceState.isListening) NeonCyan else NeonAmber,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = if (voiceState.locale.isBengali) "বাংলা ⇄ EN" else "EN ⇄ বাংলা",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF243552))
-                                .clickable {
-                                    onKeyFeedback(true)
-                                    if (!voiceController.hasAudioPermission()) {
-                                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    } else {
-                                        voiceController.switchLocaleAndRestart()
-                                    }
-                                }
-                                .padding(horizontal = 9.dp, vertical = 5.dp)
-                                .testTag("studio_voice_lang_toggle")
                         )
                         Icon(
                             imageVector = Icons.Filled.Close,
@@ -669,6 +731,108 @@ fun StudioScreen(
                                 .padding(2.dp)
                                 .testTag("studio_voice_stop")
                         )
+                    }
+                }
+
+                // Scrollable Smart Word Prediction & Glowing "✨ RGB Sticker" Strip inside Live Playground
+                if (activeOverlay == StudioOverlayMode.NONE) {
+                    val prediction = remember(playgroundText, settings.activeLanguageId) {
+                        SmartWordPredictor.predict(playgroundText, settings.activeLanguageId)
+                    }
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                            .testTag("studio_suggestion_strip"),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (prediction.stickerPhrase.isNotEmpty()) {
+                            item(key = "rgb_sticker_chip") {
+                                val isVip = licenseState.isVipActive
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                if (isVip) {
+                                                    listOf(Color(0xFF3D1039), Color(0xFF112D3C))
+                                                } else {
+                                                    listOf(Color(0xFF2E1426), Color(0xFF2A1D12))
+                                                }
+                                            )
+                                        )
+                                        .border(
+                                            width = 1.25.dp,
+                                            brush = Brush.horizontalGradient(
+                                                if (isVip) listOf(NeonMagenta, NeonAmber, NeonCyan)
+                                                else listOf(NeonAmber, NeonMagenta)
+                                            ),
+                                            shape = RoundedCornerShape(999.dp)
+                                        )
+                                        .clickable {
+                                            onKeyFeedback(true)
+                                            if (!isVip) {
+                                                onOpenUnlockScreen()
+                                            } else {
+                                                val artifact = RgbStickerGenerator.generateSticker(
+                                                    context,
+                                                    prediction.stickerPhrase
+                                                )
+                                                if (artifact != null) {
+                                                    previewSticker = artifact
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                                        .testTag("studio_chip_rgb_sticker"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (isVip) {
+                                            stringResource(R.string.chip_rgb_sticker)
+                                        } else {
+                                            stringResource(R.string.chip_rgb_sticker_vip_locked)
+                                        },
+                                        fontFamily = NotoSansBengaliFamily,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isVip) NeonCyan else NeonAmber,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
+
+                        items(prediction.suggestions, key = { it }) { suggestion ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFF19132B))
+                                    .border(1.dp, Color(0xFF2F2352), RoundedCornerShape(999.dp))
+                                    .clickable {
+                                        onKeyFeedback(false)
+                                        repeat(prediction.currentTokenLength) {
+                                            onPlaygroundBackspace()
+                                        }
+                                        onPlaygroundCommit("$suggestion ")
+                                    }
+                                    .padding(horizontal = 11.dp, vertical = 5.dp)
+                                    .testTag("studio_suggestion_$suggestion"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = suggestion,
+                                    fontFamily = if (settings.activeLanguageId == "bn") NotoSansBengaliFamily else FontFamily.Default,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
                     }
                 }
 

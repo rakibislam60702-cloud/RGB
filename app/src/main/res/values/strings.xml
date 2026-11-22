@@ -127,11 +127,19 @@
     <string name="cd_custom_photo_preview">Custom keyboard background photo preview</string>
 
     <!-- Online Voice Typing -->
-    <string name="voice_listening_bn">Listening (বাংলা Online)…</string>
-    <string name="voice_listening_en">Listening (English Online)…</string>
-    <string name="voice_tap_to_speak">Tap mic to speak online</string>
+    <string name="voice_listening_bn">শুনছি (বাংলা)… বলুন</string>
+    <string name="voice_listening_en">Listening (English)… Speak now</string>
+    <string name="voice_listening_hi">सुन रहा हूँ (हिन्दी)… बोलिए</string>
+    <string name="voice_tap_to_speak">Tap mic to speak directly</string>
     <string name="voice_permission_needed">Microphone permission required for voice typing</string>
     <string name="voice_error_retry">Could not hear clearly — tap mic to retry</string>
+
+    <!-- Instant RGB Neon Text Stickers & Smart Suggestions -->
+    <string name="chip_rgb_sticker">✨ RGB Sticker</string>
+    <string name="chip_rgb_sticker_vip_locked">🔒 VIP • RGB Sticker</string>
+    <string name="sticker_preview_title">✨ RGB Neon Text Sticker</string>
+    <string name="sticker_share_btn">Share Sticker</string>
+    <string name="sticker_close_btn">Close</string>
 
     <!-- Minimalist Bangla Setup Cards & Interactive Bangla Voice Guide -->
     <string name="bn_setup_step_1_title">১. কিবোর্ড চালু করুন</string>
@@ -206,4 +214,14 @@
     <string name="bn_unlock_benefit_2">🌴 Vice City Sunset ব্যানার ও কাস্টম গ্যালারি ফটো ব্যাকগ্রাউন্ড</string>
     <string name="bn_unlock_benefit_3">🎨 Vice City Sunset প্যালেট, কীক্যাপ স্টাইল ও গ্লো টিউনিং</string>
     <string name="bn_unlock_benefit_4">✅ English, বাংলা, हिन्दी, ভয়েস টাইপিং ও Classic Black সবসময় ফ্রি!</string>
+    <string name="bn_mobile_number_label">আপনার মোবাইল নম্বর (সিম থেকে ১-ট্যাপে নিন)</string>
+    <string name="bn_mobile_pick_sim_btn">📱 ১-ট্যাপে সিম নম্বর নিন</string>
+    <string name="bn_mobile_change_btn">পরিবর্তন</string>
+    <string name="bn_mobile_input_placeholder">১০ সংখ্যার মোবাইল নম্বর লিখুন</string>
+    <string name="bn_mobile_required_notice">পেমেন্টের আগে ১-ট্যাপে আপনার মোবাইল নম্বর সিলেক্ট করুন (রিইনস্টলে অটো VIP রিস্টোরের জন্য)।</string>
+    <string name="bn_btn_auto_restore_vip">🔄 অটোমেটিক VIP রিস্টোর করুন</string>
+    <string name="bn_restore_success">সফলভাবে আপনার Lifetime VIP অটো-রিস্টোর হয়েছে ✓</string>
+    <string name="bn_restore_not_found">এই ফোনে এই মোবাইল নম্বরের কোনো VIP অ্যাক্টিভেশন পাওয়া যায়নি। নতুন করে ₹20 পেমেন্ট করুন অথবা মালিকের পিন দিন।</string>
+    <string name="bn_restore_wrong_device">এই লাইসেন্সটি অন্য ফোনের জন্য রেজিস্টার্ড। শুধুমাত্র একই ফোনে অটো-রিস্টোর কাজ করবে।</string>
+    <string name="bn_restore_invalid_number">সঠিক ১০ সংখ্যার মোবাইল নম্বর সিলেক্ট বা টাইপ করুন।</string>
 </resources>

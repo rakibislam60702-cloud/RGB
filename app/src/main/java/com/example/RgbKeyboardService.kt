@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PorterDuff
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
@@ -20,9 +21,11 @@ import android.view.inputmethod.InputMethodSubtype
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.GridView
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.res.ResourcesCompat
 import com.example.data.ClipboardHistoryManager
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
@@ -32,6 +35,8 @@ import com.example.data.LicenseUiState
 import com.example.data.TrialLicenseManager
 import com.example.engine.MechanicalFeedbackEngine
 import com.example.engine.OnlineVoiceTypingController
+import com.example.engine.RgbStickerGenerator
+import com.example.engine.SmartWordPredictor
 import com.example.model.EmojiCatalog
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
@@ -43,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Full Android InputMethodService powering Rakib official (Pro RGB Keyboard) system-wide.
@@ -67,9 +73,11 @@ class RgbKeyboardService : InputMethodService() {
 
     private var topBar: View? = null
     private var voiceBar: View? = null
+    private var tvVoiceLangBadge: TextView? = null
     private var tvVoiceStatus: TextView? = null
-    private var btnVoiceLangToggle: Button? = null
     private var btnVoiceStop: Button? = null
+    private var suggestionBar: HorizontalScrollView? = null
+    private var suggestionContainer: LinearLayout? = null
 
     private var keyboardView: RgbKeyboardView? = null
     private var trialLockPanel: View? = null
@@ -102,6 +110,9 @@ class RgbKeyboardService : InputMethodService() {
     private var activeOverlay: OverlayMode = OverlayMode.NONE
     private var lastSpaceTapTimeMs: Long = 0L
     private var latestVoiceState = OnlineVoiceTypingController.VoiceListeningState()
+    private var hasActiveVoiceComposing: Boolean = false
+    private var isGeneratingSticker: Boolean = false
+    private var bengaliTypeface: Typeface? = null
 
     private enum class OverlayMode { NONE, CLIPBOARD, REACTIONS, EMOJI }
 
@@ -117,7 +128,7 @@ class RgbKeyboardService : InputMethodService() {
         "😎 Cool" to "😎",
         "💯 100%" to "💯",
         "(♥‿♥)" to "(♥‿♥)",
-        "বাংলাদেশ 🇧🇩" to "বাংলাদেশ 🇧🇩"
+        "✨ দারুণ!" to "✨ দারুণ!"
     )
 
     private val emojiBackspaceRepeatRunnable = object : Runnable {
@@ -141,15 +152,29 @@ class RgbKeyboardService : InputMethodService() {
         currentPhotoTheme = customBackgroundManager.getCurrentTheme()
         currentLicenseState = trialLicenseManager.refreshState()
 
+        bengaliTypeface = runCatching {
+            ResourcesCompat.getFont(applicationContext, R.font.noto_sans_bengali)
+        }.getOrNull()
+
         voiceController = OnlineVoiceTypingController(
             context = applicationContext,
             onStateChanged = { state ->
                 latestVoiceState = state
                 uiHandler.post { renderVoiceState(state) }
             },
-            onPartialText = { _ -> },
+            onPartialText = { partial ->
+                uiHandler.post {
+                    val ic = currentInputConnection
+                    if (ic != null && partial.isNotBlank()) {
+                        hasActiveVoiceComposing = true
+                        ic.setComposingText(partial, 1)
+                        refreshSuggestions()
+                    }
+                }
+            },
             onFinalText = { spokenText ->
                 uiHandler.post {
+                    hasActiveVoiceComposing = false
                     handleCommitText("$spokenText ")
                 }
             }
@@ -195,9 +220,11 @@ class RgbKeyboardService : InputMethodService() {
 
         topBar = root.findViewById(R.id.topBar)
         voiceBar = root.findViewById(R.id.voiceBar)
+        tvVoiceLangBadge = root.findViewById(R.id.tvVoiceLangBadge)
         tvVoiceStatus = root.findViewById(R.id.tvVoiceStatus)
-        btnVoiceLangToggle = root.findViewById(R.id.btnVoiceLangToggle)
         btnVoiceStop = root.findViewById(R.id.btnVoiceStop)
+        suggestionBar = root.findViewById(R.id.suggestionBar)
+        suggestionContainer = root.findViewById(R.id.suggestionContainer)
 
         btnMenu = root.findViewById(R.id.btnMenu)
         btnEmoji = root.findViewById(R.id.btnEmoji)
@@ -289,26 +316,23 @@ class RgbKeyboardService : InputMethodService() {
             }
         }
 
-        // 6. Voice Mic icon -> Online Bengali & English SpeechRecognizer
+        // 6. Voice Mic icon -> Direct Same-Language SpeechRecognizer (bn-BD / en-IN / hi-IN)
         btnMic?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
             handleOnlineVoiceTyping()
         }
 
-        btnVoiceLangToggle?.setOnClickListener {
-            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-            if (!voiceController.hasAudioPermission()) {
-                launchAudioPermissionRequest()
-            } else {
-                voiceController.switchLocaleAndRestart()
-            }
-        }
-
         btnVoiceStop?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            if (hasActiveVoiceComposing) {
+                currentInputConnection?.setComposingText("", 1)
+                currentInputConnection?.finishComposingText()
+                hasActiveVoiceComposing = false
+            }
             voiceController.stopListening()
             voiceBar?.visibility = View.GONE
             updateToolbarTints()
+            refreshSuggestions()
         }
 
         btnClipboardClear?.setOnClickListener {
@@ -355,6 +379,7 @@ class RgbKeyboardService : InputMethodService() {
         currentLicenseState = trialLicenseManager.refreshState()
         applyTrialLockState()
         updateToolbarTints()
+        refreshSuggestions()
 
         return root
     }
@@ -368,10 +393,34 @@ class RgbKeyboardService : InputMethodService() {
         keyboardView?.updatePhotoTheme(customBackgroundManager.getCurrentTheme())
         currentLicenseState = trialLicenseManager.refreshState()
         applyTrialLockState()
+        refreshSuggestions()
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int
+    ) {
+        super.onUpdateSelection(
+            oldSelStart,
+            oldSelEnd,
+            newSelStart,
+            newSelEnd,
+            candidatesStart,
+            candidatesEnd
+        )
+        refreshSuggestions()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        if (hasActiveVoiceComposing) {
+            currentInputConnection?.finishComposingText()
+            hasActiveVoiceComposing = false
+        }
         if (::voiceController.isInitialized && voiceController.isCurrentlyListening()) {
             voiceController.stopListening()
         }
@@ -406,9 +455,11 @@ class RgbKeyboardService : InputMethodService() {
         }
         topBar = null
         voiceBar = null
+        tvVoiceLangBadge = null
         tvVoiceStatus = null
-        btnVoiceLangToggle = null
         btnVoiceStop = null
+        suggestionBar = null
+        suggestionContainer = null
         keyboardView = null
         trialLockPanel = null
         tvImeLockDeviceId = null
@@ -432,16 +483,18 @@ class RgbKeyboardService : InputMethodService() {
     }
 
     /**
-     * Never locks out basic typing! During the 24h VIP trial or after ₹20 Lifetime VIP unlock,
-     * enables Touch Spark RGB, continuous animations, and custom photo/banner backgrounds.
-     * After 24h without unlock, seamlessly switches to Forever Free Standard matte-dark mode
-     * while keeping Bangla/English typing, Voice Typing, Unlimited Emojis, and Caps Lock active.
+     * Never locks out basic typing! During the 7-day VIP trial or after ₹20 Lifetime VIP unlock,
+     * enables Touch Spark RGB, continuous animations, custom photo/banner backgrounds, and RGB Text Stickers.
+     * After 7 days without unlock, seamlessly switches to Classic Black (No RGB) free mode
+     * while keeping Bangla/English/Hindi typing, Voice Typing, Smart Suggestions, Emojis, and Caps Lock active.
      */
     private fun applyTrialLockState() {
         trialLockPanel?.visibility = View.GONE
         topBar?.visibility = if (currentSettings.showToolbar) View.VISIBLE else View.GONE
+        suggestionBar?.visibility = if (activeOverlay == OverlayMode.NONE) View.VISIBLE else View.GONE
         keyboardView?.setVipVisualsEnabled(currentLicenseState.isVipActive)
         updateToolbarTints()
+        refreshSuggestions()
     }
 
     private fun setOverlay(mode: OverlayMode) {
@@ -451,6 +504,7 @@ class RgbKeyboardService : InputMethodService() {
         reactionsPanel?.visibility = if (mode == OverlayMode.REACTIONS) View.VISIBLE else View.GONE
         emojiPanel?.visibility = if (mode == OverlayMode.EMOJI) View.VISIBLE else View.GONE
         keyboardView?.visibility = if (mode == OverlayMode.NONE) View.VISIBLE else View.GONE
+        suggestionBar?.visibility = if (mode == OverlayMode.NONE) View.VISIBLE else View.GONE
         if (mode == OverlayMode.EMOJI) {
             btnEmojiClose?.text = if (currentSettings.activeLanguageId == "bn") "কখগ" else "ABC"
         }
@@ -566,6 +620,10 @@ class RgbKeyboardService : InputMethodService() {
     private fun handleOnlineVoiceTyping() {
         syncVipVisualsQuietly()
         if (voiceController.isCurrentlyListening()) {
+            if (hasActiveVoiceComposing) {
+                currentInputConnection?.finishComposingText()
+                hasActiveVoiceComposing = false
+            }
             voiceController.stopListening()
             voiceBar?.visibility = View.GONE
             updateToolbarTints()
@@ -580,33 +638,40 @@ class RgbKeyboardService : InputMethodService() {
             return
         }
 
-        val initialLocale = OnlineVoiceTypingController.localeForLanguageId(currentSettings.activeLanguageId)
+        val activeLocale = OnlineVoiceTypingController.localeForLanguageId(currentSettings.activeLanguageId)
         voiceBar?.visibility = View.VISIBLE
-        voiceController.startListening(initialLocale)
+        voiceController.startListening(activeLocale)
     }
 
     private fun renderVoiceState(state: OnlineVoiceTypingController.VoiceListeningState) {
         updateToolbarTints()
-        btnVoiceLangToggle?.text = if (state.locale.isBengali) "বাংলা ⇄ EN" else "EN ⇄ বাংলা"
+        tvVoiceLangBadge?.text = state.locale.badge
 
         when {
             state.isListening -> {
                 voiceBar?.visibility = View.VISIBLE
-                tvVoiceStatus?.setTextColor(Color.parseColor("#00E5FF"))
-                tvVoiceStatus?.text = if (state.partialTranscript.isNotBlank()) {
-                    "🎙 ${state.partialTranscript}"
-                } else if (state.locale.isBengali) {
-                    "🎙 ${getString(R.string.voice_listening_bn)}"
-                } else {
-                    "🎙 ${getString(R.string.voice_listening_en)}"
+                tvVoiceStatus?.setTextColor(Color.parseColor("#00F5D4"))
+                tvVoiceStatus?.text = when {
+                    state.partialTranscript.isNotBlank() -> "🎙 ${state.partialTranscript}"
+                    state.locale.isBengali -> "🎙 ${getString(R.string.voice_listening_bn)}"
+                    state.locale.isHindi -> "🎙 ${getString(R.string.voice_listening_hi)}"
+                    else -> "🎙 ${getString(R.string.voice_listening_en)}"
                 }
             }
             !state.errorMessage.isNullOrBlank() -> {
+                if (hasActiveVoiceComposing) {
+                    currentInputConnection?.finishComposingText()
+                    hasActiveVoiceComposing = false
+                }
                 voiceBar?.visibility = View.VISIBLE
                 tvVoiceStatus?.setTextColor(Color.parseColor("#FFB300"))
                 tvVoiceStatus?.text = state.errorMessage
             }
             else -> {
+                if (hasActiveVoiceComposing) {
+                    currentInputConnection?.finishComposingText()
+                    hasActiveVoiceComposing = false
+                }
                 voiceBar?.visibility = View.GONE
             }
         }
@@ -618,6 +683,159 @@ class RgbKeyboardService : InputMethodService() {
             putExtra(MainActivity.EXTRA_REQUEST_AUDIO_PERMISSION, true)
         }
         runCatching { startActivity(intent) }
+    }
+
+    private fun refreshSuggestions() {
+        val container = suggestionContainer ?: return
+        val before = runCatching {
+            currentInputConnection?.getTextBeforeCursor(80, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+
+        val prediction = SmartWordPredictor.predict(before, currentSettings.activeLanguageId)
+        val density = resources.displayMetrics.density
+        container.removeAllViews()
+
+        // 1. Glowing "✨ RGB Sticker" chip (or "🔒 VIP • RGB Sticker" after 7-day trial expires)
+        if (prediction.stickerPhrase.isNotEmpty()) {
+            val isVip = currentLicenseState.isVipActive
+            val stickerChip = TextView(this).apply {
+                text = if (isVip) {
+                    getString(R.string.chip_rgb_sticker)
+                } else {
+                    getString(R.string.chip_rgb_sticker_vip_locked)
+                }
+                textSize = 12f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(if (isVip) Color.parseColor("#00F5D4") else Color.parseColor("#FF9E00"))
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding(
+                    (12 * density).toInt(),
+                    (4 * density).toInt(),
+                    (12 * density).toInt(),
+                    (4 * density).toInt()
+                )
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    if (isVip) {
+                        intArrayOf(Color.parseColor("#3D1039"), Color.parseColor("#112D3C"))
+                    } else {
+                        intArrayOf(Color.parseColor("#2E1426"), Color.parseColor("#2A1D12"))
+                    }
+                ).apply {
+                    cornerRadius = 999f * density
+                    setStroke(
+                        (1.3f * density).toInt(),
+                        if (isVip) Color.parseColor("#FF2A85") else Color.parseColor("#FF9E00")
+                    )
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (28 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                    handleRgbStickerChipTap(prediction.stickerPhrase)
+                }
+            }
+            container.addView(stickerChip)
+        }
+
+        // 2. Smart Word Prediction & Next-Word Suggestion Chips
+        prediction.suggestions.forEach { suggestion ->
+            val wordChip = TextView(this).apply {
+                text = suggestion
+                textSize = 13f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT
+                setTextColor(Color.parseColor("#F1F5FF"))
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding(
+                    (11 * density).toInt(),
+                    (4 * density).toInt(),
+                    (11 * density).toInt(),
+                    (4 * density).toInt()
+                )
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#19132B"))
+                    cornerRadius = 999f * density
+                    setStroke((1f * density).toInt(), Color.parseColor("#2F2352"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (28 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                    applyWordSuggestion(suggestion, prediction.currentTokenLength)
+                }
+            }
+            container.addView(wordChip)
+        }
+    }
+
+    private fun applyWordSuggestion(word: String, replaceTokenLength: Int) {
+        syncVipVisualsQuietly()
+        val ic = currentInputConnection ?: return
+        ic.beginBatchEdit()
+        try {
+            if (replaceTokenLength > 0) {
+                ic.deleteSurroundingText(replaceTokenLength, 0)
+            }
+            ic.commitText("$word ", 1)
+        } finally {
+            ic.endBatchEdit()
+        }
+        lastSpaceTapTimeMs = 0L
+        refreshSuggestions()
+    }
+
+    private fun handleRgbStickerChipTap(phrase: String) {
+        val latestLicense = trialLicenseManager.refreshState()
+        currentLicenseState = latestLicense
+        if (!latestLicense.isVipActive) {
+            handleOpenUnlockScreen()
+            return
+        }
+        if (isGeneratingSticker) return
+        isGeneratingSticker = true
+
+        serviceScope.launch {
+            try {
+                val artifact = withContext(Dispatchers.Default) {
+                    RgbStickerGenerator.generateSticker(applicationContext, phrase)
+                }
+                if (artifact != null) {
+                    val committedDirectly = RgbStickerGenerator.sendStickerToActiveApp(
+                        context = this@RgbKeyboardService,
+                        inputConnection = currentInputConnection,
+                        editorInfo = currentInputEditorInfo,
+                        artifact = artifact
+                    )
+                    if (committedDirectly) {
+                        val ic = currentInputConnection
+                        if (ic != null) {
+                            val before = ic.getTextBeforeCursor(phrase.length + 2, 0)?.toString().orEmpty()
+                            if (before.trimEnd().endsWith(phrase)) {
+                                val charsToDelete = before.length - before.lastIndexOf(phrase)
+                                if (charsToDelete > 0) {
+                                    ic.deleteSurroundingText(charsToDelete, 0)
+                                }
+                            }
+                        }
+                        refreshSuggestions()
+                    }
+                    artifact.bitmap.recycle()
+                }
+            } finally {
+                isGeneratingSticker = false
+            }
+        }
     }
 
     private fun populateReactionsPanel() {
@@ -744,6 +962,7 @@ class RgbKeyboardService : InputMethodService() {
         serviceScope.launch {
             val nextLangId = preferencesRepository.cycleActiveLanguage(downloaded)
             keyboardView?.setActiveLanguage(nextLangId)
+            refreshSuggestions()
         }
     }
 
@@ -752,6 +971,7 @@ class RgbKeyboardService : InputMethodService() {
         val ic = currentInputConnection ?: return
         ic.commitText(text, 1)
         lastSpaceTapTimeMs = 0L
+        refreshSuggestions()
     }
 
     private fun handleBackspace() {
@@ -769,6 +989,7 @@ class RgbKeyboardService : InputMethodService() {
             }
         }
         lastSpaceTapTimeMs = 0L
+        refreshSuggestions()
     }
 
     private fun handleSpace() {
@@ -782,11 +1003,13 @@ class RgbKeyboardService : InputMethodService() {
                 ic.deleteSurroundingText(1, 0)
                 ic.commitText("$punct ", 1)
                 lastSpaceTapTimeMs = 0L
+                refreshSuggestions()
                 return
             }
         }
         ic.commitText(" ", 1)
         lastSpaceTapTimeMs = now
+        refreshSuggestions()
     }
 
     private fun handleEnter() {
@@ -803,6 +1026,7 @@ class RgbKeyboardService : InputMethodService() {
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
         }
         lastSpaceTapTimeMs = 0L
+        refreshSuggestions()
     }
 
     private fun handleCursorMove(steps: Int) {

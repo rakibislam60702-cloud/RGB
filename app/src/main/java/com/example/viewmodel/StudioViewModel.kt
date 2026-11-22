@@ -17,6 +17,7 @@ import com.example.data.KeyboardPreferencesRepository
 import com.example.data.LanguagePackManager
 import com.example.data.LicenseUiState
 import com.example.data.PinVerificationResult
+import com.example.data.RestoreVipResult
 import com.example.data.TrialLicenseManager
 import com.example.data.UpiVerificationResult
 import com.example.engine.BanglaGuideScript
@@ -115,6 +116,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var lastSpaceTapMs: Long = 0L
 
     init {
+        trialLicenseManager.tryAutoRestoreFromLicenseFile()
         refreshImeStatus()
         startTrialCountdownTicker()
     }
@@ -135,6 +137,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         trialLicenseManager.refreshState()
     }
 
+    fun savePendingMobileNumber(rawMobile: String): String {
+        return trialLicenseManager.savePendingMobileNumber(rawMobile)
+    }
+
     fun createOfficialUpiIntent(): Pair<String, Intent> {
         return trialLicenseManager.createOfficialUpiIntent()
     }
@@ -142,10 +148,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun verifyUpiPaymentResult(
         resultCode: Int,
         data: Intent?,
-        expectedTxnRef: String?
+        expectedTxnRef: String?,
+        mobileNumber: String
     ): UpiVerificationResult {
-        val result = trialLicenseManager.verifyUpiIntentResult(resultCode, data, expectedTxnRef)
+        val result = trialLicenseManager.verifyUpiIntentResult(
+            resultCode = resultCode,
+            data = data,
+            expectedTxnRef = expectedTxnRef,
+            rawMobileNumber = mobileNumber
+        )
         if (result is UpiVerificationResult.Success) {
+            voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
+        }
+        return result
+    }
+
+    fun restoreVipByMobile(mobileNumber: String): RestoreVipResult {
+        val result = trialLicenseManager.restoreVipByMobileNumber(mobileNumber)
+        if (result is RestoreVipResult.Restored) {
             voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
         }
         return result

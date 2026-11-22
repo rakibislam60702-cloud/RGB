@@ -11,8 +11,14 @@ import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
 
 /**
- * Online Bengali (bn-BD / bn-IN) & English (en-US) voice typing controller backed directly
- * by Android's SpeechRecognizer with EXTRA_PREFER_OFFLINE = false.
+ * Ultra-accurate direct same-language voice typing controller backed by Android's
+ * `SpeechRecognizer` with `EXTRA_PREFER_OFFLINE = false`, `EXTRA_PARTIAL_RESULTS = true`,
+ * and `EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE = true` (zero unwanted auto-translation).
+ *
+ * Maps the active keyboard language directly:
+ * - Bengali (`bn`) -> `bn-BD` (with `bn-IN` fallback if unavailable)
+ * - English (`en`) -> `en-IN`
+ * - Hindi (`hi`) -> `hi-IN`
  */
 class OnlineVoiceTypingController(
     private val context: Context,
@@ -23,25 +29,30 @@ class OnlineVoiceTypingController(
     enum class VoiceLocale(val tag: String, val badge: String, val displayLabel: String) {
         BENGALI_BD("bn-BD", "বাংলা", "বাংলা (BD)"),
         BENGALI_IN("bn-IN", "বাংলা", "বাংলা (IN)"),
-        ENGLISH_US("en-US", "EN", "English");
+        ENGLISH_IN("en-IN", "EN", "English"),
+        HINDI_IN("hi-IN", "हिन्दी", "हिन्दी"),
+        ARABIC_SA("ar-SA", "العربية", "العربية"),
+        URDU_PK("ur-PK", "اردو", "اردو");
 
         val isBengali: Boolean
             get() = this == BENGALI_BD || this == BENGALI_IN
 
-        fun togglePrimary(): VoiceLocale = if (isBengali) ENGLISH_US else BENGALI_BD
+        val isHindi: Boolean
+            get() = this == HINDI_IN
     }
 
     data class VoiceListeningState(
         val isListening: Boolean = false,
-        val locale: VoiceLocale = VoiceLocale.ENGLISH_US,
+        val locale: VoiceLocale = VoiceLocale.ENGLISH_IN,
         val partialTranscript: String = "",
         val errorMessage: String? = null
     )
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var currentLocale: VoiceLocale = VoiceLocale.ENGLISH_US
+    private var currentLocale: VoiceLocale = VoiceLocale.ENGLISH_IN
     private var isListening = false
     private var triedBnFallback = false
+    private var lastEmittedPartial = ""
 
     fun hasAudioPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -80,6 +91,7 @@ class OnlineVoiceTypingController(
         }
 
         currentLocale = locale
+        lastEmittedPartial = ""
         if (locale != VoiceLocale.BENGALI_IN) {
             triedBnFallback = false
         }
@@ -110,18 +122,36 @@ class OnlineVoiceTypingController(
 
             override fun onError(error: Int) {
                 isListening = false
-                // Automatic bn-BD -> bn-IN fallback if device speech server prefers bn-IN
+                // Automatic bn-BD -> bn-IN fallback only if speech engine doesn't support bn-BD
                 if (currentLocale == VoiceLocale.BENGALI_BD &&
                     !triedBnFallback &&
                     (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
-                        error == SpeechRecognizer.ERROR_NO_MATCH)
+                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
                 ) {
                     triedBnFallback = true
                     startListening(VoiceLocale.BENGALI_IN)
                     return
                 }
 
+                // If we already captured accurate partial speech before a timeout/no-match, commit it cleanly
+                if (lastEmittedPartial.isNotBlank() &&
+                    (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                ) {
+                    val salvaged = lastEmittedPartial
+                    lastEmittedPartial = ""
+                    onFinalText(salvaged)
+                    onStateChanged(
+                        VoiceListeningState(
+                            isListening = false,
+                            locale = currentLocale,
+                            partialTranscript = "",
+                            errorMessage = null
+                        )
+                    )
+                    return
+                }
+
+                lastEmittedPartial = ""
                 val msg = when (error) {
                     SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                     SpeechRecognizer.ERROR_NETWORK,
@@ -145,9 +175,11 @@ class OnlineVoiceTypingController(
                 isListening = false
                 val text = results
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
+                    ?.firstOrNull { !it.isNullOrBlank() }
                     ?.trim()
                     .orEmpty()
+                    .ifEmpty { lastEmittedPartial }
+                lastEmittedPartial = ""
                 if (text.isNotEmpty()) {
                     onFinalText(text)
                 }
@@ -164,10 +196,11 @@ class OnlineVoiceTypingController(
             override fun onPartialResults(partialResults: Bundle?) {
                 val partial = partialResults
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
+                    ?.firstOrNull { !it.isNullOrBlank() }
                     ?.trim()
                     .orEmpty()
                 if (partial.isNotEmpty()) {
+                    lastEmittedPartial = partial
                     onPartialText(partial)
                     onStateChanged(
                         VoiceListeningState(
@@ -187,10 +220,12 @@ class OnlineVoiceTypingController(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale.tag)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale.tag)
-            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         }
 
@@ -215,18 +250,8 @@ class OnlineVoiceTypingController(
         }
     }
 
-    fun switchLocaleAndRestart(): VoiceLocale {
-        val next = currentLocale.togglePrimary()
-        currentLocale = next
-        if (hasAudioPermission()) {
-            startListening(next)
-        } else {
-            onStateChanged(VoiceListeningState(isListening = false, locale = next))
-        }
-        return next
-    }
-
     fun stopListening() {
+        lastEmittedPartial = ""
         stopInternal()
         onStateChanged(
             VoiceListeningState(
@@ -239,6 +264,7 @@ class OnlineVoiceTypingController(
     }
 
     fun destroy() {
+        lastEmittedPartial = ""
         stopInternal()
     }
 
@@ -252,8 +278,12 @@ class OnlineVoiceTypingController(
     }
 
     companion object {
-        fun localeForLanguageId(langId: String): VoiceLocale {
-            return if (langId == "bn") VoiceLocale.BENGALI_BD else VoiceLocale.ENGLISH_US
+        fun localeForLanguageId(langId: String): VoiceLocale = when (langId) {
+            "bn" -> VoiceLocale.BENGALI_BD
+            "hi" -> VoiceLocale.HINDI_IN
+            "ar" -> VoiceLocale.ARABIC_SA
+            "ur" -> VoiceLocale.URDU_PK
+            else -> VoiceLocale.ENGLISH_IN
         }
     }
 }

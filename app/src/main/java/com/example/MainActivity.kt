@@ -134,6 +134,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         handleIncomingIntent(intent)
+        requestMicPermissionOnceIfNeeded()
         setContent {
             ProRgbKeyboardTheme {
                 ProRgbKeyboardApp(
@@ -141,6 +142,24 @@ class MainActivity : ComponentActivity() {
                     openUnlockTrigger = openUnlockTrigger
                 )
             }
+        }
+    }
+
+    /**
+     * Requests RECORD_AUDIO once inside the companion app so tapping the Mic key
+     * on the system keyboard starts direct voice typing immediately without re-opening the app.
+     */
+    private fun requestMicPermissionOnceIfNeeded() {
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+
+        val prefs = getSharedPreferences(PREFS_PERMISSIONS, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_MIC_PROMPTED_ONCE, false)) {
+            prefs.edit().putBoolean(KEY_MIC_PROMPTED_ONCE, true).apply()
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -177,6 +196,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_REQUEST_AUDIO_PERMISSION = "extra_request_audio_permission"
         const val EXTRA_OPEN_UNLOCK_SCREEN = "extra_open_unlock_screen"
+        private const val PREFS_PERMISSIONS = "rakib_permissions_prefs"
+        private const val KEY_MIC_PROMPTED_ONCE = "mic_permission_prompted_once"
     }
 }
 
@@ -411,7 +432,9 @@ fun ProRgbKeyboardApp(
                 licenseState = licenseState,
                 upiQrPayload = viewModel.buildUpiQrPayload(),
                 createUpiPaymentIntent = viewModel::createOfficialUpiIntent,
+                onSaveMobileNumber = viewModel::savePendingMobileNumber,
                 onVerifyUpiResult = viewModel::verifyUpiPaymentResult,
+                onRestoreVipByMobile = viewModel::restoreVipByMobile,
                 onVerifyOwnerPin = viewModel::verifyOwnerUnlockPin,
                 onBuildWhatsAppUri = viewModel::buildWhatsAppReceiptUri,
                 onDismiss = { showVipUnlockModal = false }

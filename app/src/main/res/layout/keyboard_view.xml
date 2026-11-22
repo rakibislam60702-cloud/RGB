@@ -81,18 +81,31 @@
             android:src="@drawable/ic_kb_mic" />
     </LinearLayout>
 
-    <!-- Inline Online Voice Typing Bar (Bengali & English SpeechRecognizer) -->
+    <!-- Inline Direct Same-Language Voice Typing Bar (bn-BD / en-IN / hi-IN) -->
     <LinearLayout
         android:id="@+id/voiceBar"
         android:layout_width="match_parent"
-        android:layout_height="40dp"
+        android:layout_height="38dp"
         android:layout_marginHorizontal="4dp"
-        android:layout_marginBottom="4dp"
-        android:background="#182032"
+        android:layout_marginBottom="3dp"
+        android:background="#171128"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="8dp"
+        android:paddingHorizontal="10dp"
         android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvVoiceLangBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="24dp"
+            android:layout_marginEnd="8dp"
+            android:background="#261B47"
+            android:gravity="center"
+            android:paddingHorizontal="8dp"
+            android:text="EN"
+            android:textColor="#00F5D4"
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/tvVoiceStatus"
@@ -102,32 +115,16 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:text="@string/voice_listening_en"
-            android:textColor="#00E5FF"
+            android:textColor="#00F5D4"
             android:textSize="12sp"
             android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/btnVoiceLangToggle"
-            android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:layout_marginStart="6dp"
-            android:backgroundTint="#25344E"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:paddingHorizontal="10dp"
-            android:text="EN ⇄ বাংলা"
-            android:textAllCaps="false"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp" />
 
         <Button
             android:id="@+id/btnVoiceStop"
             android:layout_width="wrap_content"
             android:layout_height="28dp"
             android:layout_marginStart="6dp"
-            android:backgroundTint="#3A1D28"
+            android:backgroundTint="#3A152C"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:minWidth="0dp"
@@ -137,6 +134,25 @@
             android:textColor="#FF6B8A"
             android:textSize="12sp" />
     </LinearLayout>
+
+    <!-- Scrollable Smart Word Prediction & Glowing RGB Neon Sticker Strip -->
+    <HorizontalScrollView
+        android:id="@+id/suggestionBar"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="#0D0919"
+        android:clipToPadding="false"
+        android:fillViewport="false"
+        android:paddingHorizontal="4dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/suggestionContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
 
     <!-- In-keyboard Clipboard Manager panel (opened via Feature Grid icon) -->
     <LinearLayout
