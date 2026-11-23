@@ -47,7 +47,7 @@
 
         <service
             android:name=".RgbKeyboardService"
-            android:label="Pro RGB Keyboard"
+            android:label="@string/app_name"
             android:permission="android.permission.BIND_INPUT_METHOD"
             android:exported="true">
             <intent-filter>

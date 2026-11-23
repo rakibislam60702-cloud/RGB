@@ -117,27 +117,27 @@ class MechanicalFeedbackEngine(context: Context) {
 
             if (!played) {
                 runCatching {
-                    audioManager?.playSoundEffect(AudioManager.FX_KEY_CLICK, 0.55f)
+                    audioManager?.playSoundEffect(AudioManager.FX_KEY_CLICK, 0.25f)
                 }
             }
         }
     }
 
     /**
-     * Soft, rounded Samsung Galaxy flagship keypress pop: gentle descending pitch droplet + damped body.
+     * Subtle, low-volume Soft Modern keypress tap: gentle rounded pitch droplet with damped body.
      */
     private fun synthesizeSamsungSoft(): ShortArray {
-        val numSamples = (sampleRate * 0.015).toInt()
+        val numSamples = (sampleRate * 0.013).toInt()
         val data = ShortArray(numSamples)
         val rng = Random(2026)
         for (i in 0 until numSamples) {
             val t = i.toDouble() / sampleRate
-            val env = exp(-t * 340.0)
-            val freq = 640.0 - 360.0 * (1.0 - exp(-t * 280.0))
-            val body = sin(2.0 * PI * freq * t) * 0.72 + sin(2.0 * PI * (freq * 1.8) * t) * 0.18
-            val softTap = (rng.nextDouble() * 2.0 - 1.0) * 0.10 * exp(-t * 900.0)
+            val env = exp(-t * 390.0)
+            val freq = 580.0 - 320.0 * (1.0 - exp(-t * 300.0))
+            val body = sin(2.0 * PI * freq * t) * 0.74 + sin(2.0 * PI * (freq * 1.65) * t) * 0.14
+            val softTap = (rng.nextDouble() * 2.0 - 1.0) * 0.07 * exp(-t * 980.0)
             val sample = (body * env + softTap).coerceIn(-1.0, 1.0)
-            data[i] = (sample * Short.MAX_VALUE * 0.52).toInt().toShort()
+            data[i] = (sample * Short.MAX_VALUE * 0.24).toInt().toShort()
         }
         return data
     }

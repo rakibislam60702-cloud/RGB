@@ -10,65 +10,64 @@
     android:paddingTop="2dp"
     android:paddingBottom="4dp">
 
-    <!-- Gboard-style evenly-spaced 6-icon top toolbar (Globe key switches languages) -->
+    <!-- Ultra-Clean Single-Button Top Toolbar: Rakib official (Permanent Free) | 😊 | 📋 | Aa | 🎙 | ✨ AI -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="42dp"
+        android:layout_height="44dp"
         android:clipChildren="false"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="4dp">
+        android:paddingHorizontal="6dp">
 
-        <ImageButton
-            android:id="@+id/btnMenu"
-            android:layout_width="0dp"
-            android:layout_height="36dp"
-            android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_clipboard"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_kb_grid_menu" />
+        <TextView
+            android:id="@+id/tvBrandSignature"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginEnd="6dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:paddingHorizontal="10dp"
+            android:text="@string/brand_header_title"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
-        <ImageButton
+        <TextView
             android:id="@+id/btnEmoji"
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_emoji"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_kb_emoji" />
+            android:gravity="center"
+            android:text="😊"
+            android:textSize="18sp" />
 
-        <ImageButton
-            android:id="@+id/btnGif"
+        <TextView
+            android:id="@+id/btnClipboard"
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_gif_reactions"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_kb_gif" />
+            android:contentDescription="@string/cd_clipboard"
+            android:gravity="center"
+            android:text="📋"
+            android:textSize="17sp" />
 
-        <ImageButton
-            android:id="@+id/btnSettings"
+        <TextView
+            android:id="@+id/btnStylishFonts"
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_open_app"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_kb_settings" />
-
-        <ImageButton
-            android:id="@+id/btnTheme"
-            android:layout_width="0dp"
-            android:layout_height="36dp"
-            android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_cycle_effect"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_kb_palette" />
+            android:contentDescription="@string/cd_stylish_fonts"
+            android:gravity="center"
+            android:text="@string/toolbar_stylish_fonts"
+            android:textColor="#E2E8F0"
+            android:textSize="14.5sp"
+            android:textStyle="bold" />
 
         <ImageButton
             android:id="@+id/btnMic"
@@ -79,6 +78,20 @@
             android:contentDescription="@string/cd_voice_mic"
             android:scaleType="centerInside"
             android:src="@drawable/ic_kb_mic" />
+
+        <TextView
+            android:id="@+id/btnAiHub"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginStart="4dp"
+            android:contentDescription="@string/cd_ai_hub"
+            android:gravity="center"
+            android:minWidth="58dp"
+            android:paddingHorizontal="11dp"
+            android:text="@string/toolbar_ai_hub"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <!-- Inline Direct Same-Language Voice Typing Bar (bn-BD / en-IN / hi-IN) -->
@@ -135,6 +148,54 @@
             android:textSize="12sp" />
     </LinearLayout>
 
+    <!-- Inline AI Topic Typing Bar (Active when typing a custom topic directly with keyboard keys) -->
+    <LinearLayout
+        android:id="@+id/aiTopicTypingBar"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:layout_marginHorizontal="4dp"
+        android:layout_marginBottom="3dp"
+        android:background="#161028"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvAiTopicDraft"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="start"
+            android:maxLines="1"
+            android:text="@string/ai_hub_topic_hint"
+            android:textColor="#F1F5FF"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:id="@+id/btnAiTopicGenerateNow"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginStart="6dp"
+            android:gravity="center"
+            android:paddingHorizontal="10dp"
+            android:text="@string/ai_hub_generate_btn"
+            android:textColor="#FFFFFF"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/btnAiTopicCancel"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="6dp"
+            android:gravity="center"
+            android:text="✕"
+            android:textColor="#FF6B8A"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <!-- Scrollable Smart Word Prediction & Glowing RGB Neon Sticker Strip -->
     <HorizontalScrollView
         android:id="@+id/suggestionBar"
@@ -154,7 +215,7 @@
             android:orientation="horizontal" />
     </HorizontalScrollView>
 
-    <!-- In-keyboard Clipboard Manager panel (opened via Feature Grid icon) -->
+    <!-- In-keyboard Clipboard Manager panel (opened via 📋) -->
     <LinearLayout
         android:id="@+id/clipboardPanel"
         android:layout_width="match_parent"
@@ -237,12 +298,12 @@
         </ScrollView>
     </LinearLayout>
 
-    <!-- In-keyboard Quick Reactions & GIF-style Stickers panel (opened via GIF icon) -->
+    <!-- In-keyboard Stylish Fonts Panel (opened via Aa) -->
     <LinearLayout
-        android:id="@+id/reactionsPanel"
+        android:id="@+id/stylishFontPanel"
         android:layout_width="match_parent"
         android:layout_height="232dp"
-        android:background="#11131A"
+        android:background="#0F111A"
         android:orientation="vertical"
         android:padding="8dp"
         android:visibility="gone">
@@ -258,13 +319,13 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/reactions_title"
-                android:textColor="#00E5FF"
+                android:text="@string/stylish_fonts_title"
+                android:textColor="#00F5D4"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
             <Button
-                android:id="@+id/btnReactionsClose"
+                android:id="@+id/btnFontsClose"
                 android:layout_width="wrap_content"
                 android:layout_height="28dp"
                 android:backgroundTint="#1E212E"
@@ -285,7 +346,109 @@
             android:scrollbars="none">
 
             <LinearLayout
-                android:id="@+id/reactionsContainer"
+                android:id="@+id/stylishFontContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- Unified ✨ AI Shayari & Smart Reply Hub Panel (160+ curated lines + Safe Auto-Shayari Generator) -->
+    <LinearLayout
+        android:id="@+id/aiHubPanel"
+        android:layout_width="match_parent"
+        android:layout_height="268dp"
+        android:background="#0B0716"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <!-- Row 1: Compact Topic Input Box + Generate ✨ + Keyboard Return -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:layout_marginBottom="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvAiTopicBox"
+                android:layout_width="0dp"
+                android:layout_height="34dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:maxLines="1"
+                android:paddingHorizontal="10dp"
+                android:text="@string/ai_hub_topic_hint"
+                android:textColor="#9AA4C4"
+                android:textSize="11.5sp" />
+
+            <TextView
+                android:id="@+id/btnAiGenerate"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginStart="6dp"
+                android:gravity="center"
+                android:paddingHorizontal="10dp"
+                android:text="@string/ai_hub_generate_btn"
+                android:textColor="#FFFFFF"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/btnAiHubClose"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginStart="6dp"
+                android:gravity="center"
+                android:paddingHorizontal="10dp"
+                android:text="⌨"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- Row 2: 5 Category Tabs -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:layout_marginBottom="5dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/aiCategoryTabs"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <!-- Optional Generated Banner / Quick Topics Bar -->
+        <HorizontalScrollView
+            android:id="@+id/aiQuickTopicsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            android:layout_marginBottom="5dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/aiQuickTopicsContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <!-- Scrollable Curated / Generated Shayari Cards (Tap card -> 2x2 Variation Chips) -->
+        <ScrollView
+            android:id="@+id/aiShayariScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/aiShayariContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
@@ -385,6 +548,76 @@
                 android:textColor="#FFFFFF"
                 android:textSize="15sp" />
         </LinearLayout>
+    </LinearLayout>
+
+    <!-- Inline 6-Style Animated & Multi-Color RGB Text Sticker Selector -->
+    <LinearLayout
+        android:id="@+id/stickerPanel"
+        android:layout_width="match_parent"
+        android:layout_height="232dp"
+        android:background="#0C0818"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingBottom="4dp">
+
+            <TextView
+                android:id="@+id/tvStickerPhrasePreview"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sticker_selector_title"
+                android:textColor="#00F5D4"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnStickerClose"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#1E212E"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="10dp"
+                android:text="⌨"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvStickerHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/sticker_selector_tap_hint"
+            android:textColor="#9AA4C4"
+            android:textSize="10.5sp" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/stickerStyleGridContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
     </LinearLayout>
 
     <!-- 4-Row Gboard Layout + Touch Spark RGB Canvas Keyboard -->

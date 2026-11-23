@@ -68,6 +68,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -77,10 +78,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -98,18 +104,30 @@ import com.example.data.LicenseUiState
 import com.example.engine.BanglaGuideScript
 import com.example.engine.OnlineVoiceTypingController
 import com.example.engine.RgbStickerGenerator
+import com.example.engine.RgbStickerStyle
 import com.example.engine.SmartWordPredictor
+import com.example.engine.StylishFontEngine
+import com.example.engine.StylishFontStyle
 import com.example.engine.VoiceGuideState
+import com.example.model.AppUiLanguage
 import com.example.model.EmojiCatalog
 import com.example.model.ImeStatus
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
 import com.example.model.LanguageCatalog
 import com.example.model.LanguagePackUiState
+import com.example.model.LocalAppStrings
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.rgbkeyboard.RgbKeyboardView as NativeRgbKeyboardView
+import com.example.ui.components.FeatureTourCoordinates
+import com.example.ui.components.FeatureTourTarget
+import com.example.ui.components.StudioAiHubPanel
+import com.example.ui.components.StudioStylishFontPanel
+import com.example.ui.theme.BrandObsidianPill
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.LuxuryCyanStroke
+import com.example.ui.theme.LuxuryPinkStroke
 import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonAmberContainer
 import com.example.ui.theme.NeonCyan
@@ -123,26 +141,13 @@ import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceVariant
 import com.example.ui.theme.OrbitronFamily
+import com.example.ui.theme.RoyalGoldAccent
+import com.example.ui.theme.RoyalGoldPillBg
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
-private enum class StudioOverlayMode { NONE, CLIPBOARD, REACTIONS, EMOJI }
-
-private val studioQuickReactions = listOf(
-    "🔥 Lit!" to "🔥",
-    "⚡ GG WP" to "⚡ GG WP!",
-    "✨ Nice!" to "✨ Nice!",
-    "🚀 Let's Go" to "🚀 Let's go!",
-    "¯\\_(ツ)_/¯" to "¯\\_(ツ)_/¯",
-    "(ง •̀_•́)ง" to "(ง •̀_•́)ง",
-    "❤️ Love it" to "❤️ Love it!",
-    "🎉 Congrats" to "🎉 Congratulations!",
-    "😎 Cool" to "😎",
-    "💯 100%" to "💯",
-    "(♥‿♥)" to "(♥‿♥)",
-    "✨ দারুণ!" to "✨ দারুণ!"
-)
+private enum class StudioOverlayMode { NONE, CLIPBOARD, FONTS, EMOJI, STICKER_SELECTOR, AI_HUB }
 
 @Composable
 fun StudioScreen(
@@ -176,16 +181,28 @@ fun StudioScreen(
     onKeyFeedback: (Boolean) -> Unit,
     onOpenHardwareSettings: () -> Unit,
     onOpenLanguagesTab: () -> Unit,
+    isFeatureTourActive: Boolean = false,
+    featureTourCoordinates: FeatureTourCoordinates? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scrollState = rememberScrollState()
     var showSystemImeTester by remember { mutableStateOf(false) }
     var showEasyGuideDialog by remember { mutableStateOf(false) }
     var systemTestText by remember { mutableStateOf("") }
     var activeOverlay by remember { mutableStateOf(StudioOverlayMode.NONE) }
+    var activeStylishFont by remember { mutableStateOf(StylishFontStyle.NORMAL) }
     var voiceState by remember { mutableStateOf(OnlineVoiceTypingController.VoiceListeningState()) }
     var showVoiceBanner by remember { mutableStateOf(false) }
+    var pendingStickerPhrase by remember { mutableStateOf("") }
     var previewSticker by remember { mutableStateOf<RgbStickerGenerator.StickerArtifact?>(null) }
+
+    LaunchedEffect(isFeatureTourActive) {
+        if (isFeatureTourActive) {
+            activeOverlay = StudioOverlayMode.NONE
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
 
     val latestCommit by rememberUpdatedState(onPlaygroundCommit)
     val latestBackspace by rememberUpdatedState(onPlaygroundBackspace)
@@ -194,6 +211,7 @@ fun StudioScreen(
     val latestFeedback by rememberUpdatedState(onKeyFeedback)
     val latestToggleLanguage by rememberUpdatedState(onToggleLanguage)
     val latestActiveLangId by rememberUpdatedState(settings.activeLanguageId)
+    val latestStylishFont by rememberUpdatedState(activeStylishFont)
 
     val voiceController = remember(context) {
         OnlineVoiceTypingController(
@@ -307,7 +325,7 @@ fun StudioScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
@@ -329,16 +347,21 @@ fun StudioScreen(
                 onOpenEasyGuide = { showEasyGuideDialog = true }
             )
 
+            val appStrings = LocalAppStrings.current
+            val uiBodyFont = if (appStrings.language == AppUiLanguage.BENGALI) NotoSansBengaliFamily else FontFamily.Default
+
             // Quick Active Language Strip (Built-in English + Downloaded JSON Packs + Download Shortcut)
             val enabledLanguages = languagePacks.filter { it.isEnabled }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text(
-                    text = stringResource(R.string.quick_language_label),
+                    text = appStrings.quickLanguageLabel,
+                    fontFamily = uiBodyFont,
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextMuted
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary
                 )
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(end = 8.dp)
                 ) {
                     items(enabledLanguages, key = { it.catalog.id }) { pack ->
@@ -354,18 +377,18 @@ fun StudioScreen(
                         }
                         Row(
                             modifier = Modifier
-                                .heightIn(min = 40.dp)
-                                .clip(RoundedCornerShape(999.dp))
+                                .heightIn(min = 44.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(
-                                    if (selected) NeonCyan.copy(alpha = 0.16f) else ObsidianSurface
+                                    if (selected) Color(0xFF142230) else ObsidianSurface
                                 )
                                 .border(
-                                    width = if (selected) 1.4.dp else 1.dp,
-                                    color = if (selected) NeonCyan else ObsidianBorder,
-                                    shape = RoundedCornerShape(999.dp)
+                                    width = if (selected) 1.25.dp else 1.dp,
+                                    color = if (selected) LuxuryCyanStroke.copy(alpha = 0.85f) else ObsidianBorder,
+                                    shape = RoundedCornerShape(16.dp)
                                 )
                                 .clickable { onSelectLanguageById(pack.catalog.id) }
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .padding(horizontal = 18.dp, vertical = 10.dp)
                                 .testTag("studio_lang_${pack.catalog.id}"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
@@ -373,9 +396,9 @@ fun StudioScreen(
                             Text(
                                 text = pillLabel,
                                 fontFamily = pillFont,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (selected) NeonCyan else TextPrimary,
+                                color = if (selected) Color.White else TextSecondary,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -385,19 +408,21 @@ fun StudioScreen(
                     item(key = "add_more_languages") {
                         Row(
                             modifier = Modifier
-                                .heightIn(min = 40.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(ObsidianSurfaceVariant)
-                                .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
+                                .heightIn(min = 44.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(ObsidianSurface)
+                                .border(1.dp, LuxuryCyanStroke.copy(alpha = 0.42f), RoundedCornerShape(16.dp))
                                 .clickable(onClick = onOpenLanguagesTab)
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
                                 .testTag("studio_btn_more_languages"),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = stringResource(R.string.add_languages_chip),
+                                text = appStrings.addLanguagesChip,
+                                fontFamily = uiBodyFont,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = NeonCyan,
+                                fontWeight = FontWeight.SemiBold,
+                                color = LuxuryCyanStroke,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -406,15 +431,17 @@ fun StudioScreen(
                 }
             }
 
-            // Quick Lighting Mode Chips (Touch Spark default + optional continuous RGB modes)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Quick Lighting Mode Cards (Elevated #111520 studio surfaces with 16dp corners & subtle 1dp glass borders)
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text(
-                    text = stringResource(R.string.quick_effects_label),
+                    text = appStrings.quickEffectsLabel,
+                    fontFamily = uiBodyFont,
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextMuted
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary
                 )
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(end = 8.dp)
                 ) {
                     items(RgbEffect.entries) { effect ->
@@ -422,40 +449,41 @@ fun StudioScreen(
                         val isLockedPreview = licenseState.isFreeStandardMode && effect.isVipEffect
                         Row(
                             modifier = Modifier
-                                .heightIn(min = 40.dp)
-                                .clip(RoundedCornerShape(999.dp))
+                                .heightIn(min = 46.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(
-                                    if (selected) ObsidianSurfaceVariant else ObsidianSurface
+                                    if (selected) Color(0xFF171D2E) else ObsidianSurface
                                 )
                                 .border(
-                                    width = if (selected) 1.35.dp else 1.dp,
+                                    width = if (selected) 1.25.dp else 1.dp,
                                     brush = if (selected) {
-                                        Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber, NeonCyan))
+                                        Brush.horizontalGradient(listOf(LuxuryPinkStroke, LuxuryCyanStroke))
                                     } else {
                                         Brush.horizontalGradient(listOf(ObsidianBorder, ObsidianBorder))
                                     },
-                                    shape = RoundedCornerShape(999.dp)
+                                    shape = RoundedCornerShape(16.dp)
                                 )
                                 .clickable { onSelectEffect(effect) }
-                                .padding(horizontal = 14.dp, vertical = 9.dp)
+                                .padding(horizontal = 16.dp, vertical = 11.dp)
                                 .testTag("quick_effect_${effect.name.lowercase()}"),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.AutoAwesome,
                                 contentDescription = null,
                                 tint = when {
-                                    selected -> NeonCyan
-                                    !effect.isVipEffect -> TextSecondary
-                                    else -> NeonMagenta.copy(alpha = 0.8f)
+                                    selected -> LuxuryCyanStroke
+                                    !effect.isVipEffect -> TextMuted
+                                    else -> LuxuryPinkStroke.copy(alpha = 0.8f)
                                 },
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = if (isLockedPreview) "🔒 ${effect.shortLabel}" else effect.shortLabel,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (selected) TextPrimary else TextSecondary,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) Color.White else TextSecondary,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -504,9 +532,11 @@ fun StudioScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                val demoStrings = LocalAppStrings.current
+                val demoBodyFont = if (demoStrings.language == AppUiLanguage.BENGALI) NotoSansBengaliFamily else FontFamily.Default
                 Text(
-                    text = stringResource(R.string.bn_demo_preview_tag),
-                    fontFamily = NotoSansBengaliFamily,
+                    text = demoStrings.demoPreviewTag,
+                    fontFamily = demoBodyFont,
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = NeonCyan,
@@ -525,8 +555,8 @@ fun StudioScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = stringResource(R.string.bn_btn_apply_to_keyboard),
-                        fontFamily = NotoSansBengaliFamily,
+                        text = demoStrings.btnApplyToKeyboard,
+                        fontFamily = demoBodyFont,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -550,101 +580,152 @@ fun StudioScreen(
                     .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
                     .padding(4.dp)
             ) {
-                // Clean Gboard-style 6-icon evenly spaced top toolbar (Globe key switches Bangla/English)
+                // Ultra-Clean Single-Button Top Toolbar: Rakib official (Permanent Free) | 😊 | 📋 | Aa | 🎙 | ✨ AI
                 if (settings.showToolbar) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(42.dp)
-                            .padding(horizontal = 2.dp),
+                            .height(44.dp)
+                            .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. Feature Menu (4-dots grid) -> Clipboard Manager
-                        GboardToolbarIcon(
-                            iconRes = R.drawable.ic_kb_grid_menu,
-                            contentDescription = stringResource(R.string.cd_clipboard),
-                            active = activeOverlay == StudioOverlayMode.CLIPBOARD,
-                            testTag = "studio_kb_menu",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onKeyFeedback(true)
-                                onRefreshClipboard()
-                                activeOverlay = if (activeOverlay == StudioOverlayMode.CLIPBOARD) {
-                                    StudioOverlayMode.NONE
-                                } else {
-                                    StudioOverlayMode.CLIPBOARD
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(BrandObsidianPill)
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.horizontalGradient(
+                                        listOf(LuxuryPinkStroke, LuxuryCyanStroke)
+                                    ),
+                                    shape = RoundedCornerShape(999.dp)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .testTag("studio_kb_brand_badge"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(R.string.brand_header_title),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = OrbitronFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.35.sp,
+                                    color = Color.White
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        // 1. Emoji (😊)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(
+                                    if (activeOverlay == StudioOverlayMode.EMOJI) Color(0xFF2A1636) else Color.Transparent
+                                )
+                                .border(
+                                    width = if (activeOverlay == StudioOverlayMode.EMOJI) 1.dp else 0.dp,
+                                    color = if (activeOverlay == StudioOverlayMode.EMOJI) NeonMagenta else Color.Transparent,
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .clickable {
+                                    onKeyFeedback(true)
+                                    activeOverlay = if (activeOverlay == StudioOverlayMode.EMOJI) {
+                                        StudioOverlayMode.NONE
+                                    } else {
+                                        StudioOverlayMode.EMOJI
+                                    }
                                 }
-                            }
-                        )
+                                .testTag("studio_kb_emoji"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "😊", fontSize = 18.sp)
+                        }
 
-                        // 2. Emoji / Sticker icon -> Unlimited Categorized Emoji Panel
-                        GboardToolbarIcon(
-                            iconRes = R.drawable.ic_kb_emoji,
-                            contentDescription = stringResource(R.string.cd_emoji),
-                            active = activeOverlay == StudioOverlayMode.EMOJI,
-                            testTag = "studio_kb_emoji",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onKeyFeedback(true)
-                                activeOverlay = if (activeOverlay == StudioOverlayMode.EMOJI) {
-                                    StudioOverlayMode.NONE
-                                } else {
-                                    StudioOverlayMode.EMOJI
+                        // 2. Clipboard (📋)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .onGloballyPositioned { coords ->
+                                    featureTourCoordinates?.registerClipboard(coords.boundsInRoot())
                                 }
-                            }
-                        )
-
-                        // 3. GIF / Quick Reactions icon
-                        GboardToolbarIcon(
-                            iconRes = R.drawable.ic_kb_gif,
-                            contentDescription = stringResource(R.string.cd_gif_reactions),
-                            active = activeOverlay == StudioOverlayMode.REACTIONS,
-                            testTag = "studio_kb_gif",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onKeyFeedback(true)
-                                activeOverlay = if (activeOverlay == StudioOverlayMode.REACTIONS) {
-                                    StudioOverlayMode.NONE
-                                } else {
-                                    StudioOverlayMode.REACTIONS
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(
+                                    if (activeOverlay == StudioOverlayMode.CLIPBOARD) Color(0xFF132838) else Color.Transparent
+                                )
+                                .border(
+                                    width = if (activeOverlay == StudioOverlayMode.CLIPBOARD) 1.dp else 0.dp,
+                                    color = if (activeOverlay == StudioOverlayMode.CLIPBOARD) NeonCyan else Color.Transparent,
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .clickable {
+                                    onKeyFeedback(true)
+                                    onRefreshClipboard()
+                                    activeOverlay = if (activeOverlay == StudioOverlayMode.CLIPBOARD) {
+                                        StudioOverlayMode.NONE
+                                    } else {
+                                        StudioOverlayMode.CLIPBOARD
+                                    }
                                 }
-                            }
-                        )
+                                .testTag("studio_kb_menu"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "📋", fontSize = 17.sp)
+                        }
 
-                        // 4. Settings gear -> Companion Hardware & Feel settings tab
-                        GboardToolbarIcon(
-                            iconRes = R.drawable.ic_kb_settings,
-                            contentDescription = stringResource(R.string.action_open_settings),
-                            active = false,
-                            testTag = "studio_kb_settings",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onKeyFeedback(true)
-                                onOpenHardwareSettings()
-                            }
-                        )
+                        // 3. Stylish Fonts (Aa)
+                        val fontsActive = activeOverlay == StudioOverlayMode.FONTS || activeStylishFont != StylishFontStyle.NORMAL
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .onGloballyPositioned { coords ->
+                                    featureTourCoordinates?.registerFonts(coords.boundsInRoot())
+                                }
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (fontsActive) Color(0xFF132838) else Color.Transparent)
+                                .border(
+                                    width = if (fontsActive) 1.dp else 0.dp,
+                                    color = if (fontsActive) NeonCyan else Color.Transparent,
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .clickable {
+                                    onKeyFeedback(true)
+                                    activeOverlay = if (activeOverlay == StudioOverlayMode.FONTS) {
+                                        StudioOverlayMode.NONE
+                                    } else {
+                                        StudioOverlayMode.FONTS
+                                    }
+                                }
+                                .testTag("studio_kb_fonts"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(R.string.toolbar_stylish_fonts),
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (fontsActive) NeonCyan else TextPrimary
+                            )
+                        }
 
-                        // 5. Theme Palette icon -> Cycles Touch Spark & RGB studio effects
-                        GboardToolbarIcon(
-                            iconRes = R.drawable.ic_kb_palette,
-                            contentDescription = stringResource(R.string.cd_cycle_effect),
-                            active = settings.effect != RgbEffect.TOUCH_SPARK,
-                            testTag = "studio_kb_theme",
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                onKeyFeedback(true)
-                                onCycleEffect()
-                            }
-                        )
-
-                        // 6. Voice Mic icon -> Online Bengali & English SpeechRecognizer
+                        // 4. Voice Mic icon
                         GboardToolbarIcon(
                             iconRes = R.drawable.ic_kb_mic,
                             contentDescription = stringResource(R.string.cd_voice_mic),
                             active = voiceState.isListening,
                             activeColor = NeonEmerald,
                             testTag = "studio_kb_mic",
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .onGloballyPositioned { coords ->
+                                    featureTourCoordinates?.register(FeatureTourTarget.VOICE_AND_GLOBE, coords.boundsInRoot())
+                                },
                             onClick = {
                                 onKeyFeedback(true)
                                 if (voiceController.isCurrentlyListening()) {
@@ -659,6 +740,61 @@ fun StudioScreen(
                                 }
                             }
                         )
+
+                        // 5. Single Unified ✨ AI Hub Button (7-Day VIP Trial / Lifetime VIP)
+                        val isVip = licenseState.isVipActive
+                        val aiActive = activeOverlay == StudioOverlayMode.AI_HUB
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .height(30.dp)
+                                .onGloballyPositioned { coords ->
+                                    featureTourCoordinates?.register(FeatureTourTarget.AI_HUB, coords.boundsInRoot())
+                                }
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        when {
+                                            !isVip -> listOf(Color(0xFF2E1528), Color(0xFF2A1D12))
+                                            aiActive -> listOf(NeonMagenta, Color(0xFF00B4D8))
+                                            else -> listOf(Color(0xFFD81B60), NeonAmber)
+                                        }
+                                    )
+                                )
+                                .border(
+                                    width = 1.2.dp,
+                                    color = when {
+                                        !isVip -> NeonAmber
+                                        aiActive -> NeonCyan
+                                        else -> Color(0xFFFF79B0)
+                                    },
+                                    shape = RoundedCornerShape(999.dp)
+                                )
+                                .clickable {
+                                    onKeyFeedback(true)
+                                    if (!isVip) {
+                                        onOpenUnlockScreen()
+                                    } else {
+                                        activeOverlay = if (aiActive) StudioOverlayMode.NONE else StudioOverlayMode.AI_HUB
+                                    }
+                                }
+                                .padding(horizontal = 11.dp)
+                                .testTag("studio_kb_ai_hub"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isVip) {
+                                    stringResource(R.string.toolbar_ai_hub)
+                                } else {
+                                    stringResource(R.string.toolbar_ai_hub_locked)
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isVip) Color.White else Color(0xFFFFCF70),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
 
@@ -698,18 +834,15 @@ fun StudioScreen(
                         )
                         Text(
                             text = when {
-                                voiceState.partialTranscript.isNotBlank() -> voiceState.partialTranscript
-                                voiceState.isListening && voiceState.locale.isBengali ->
-                                    stringResource(R.string.voice_listening_bn)
-                                voiceState.isListening && voiceState.locale.isHindi ->
-                                    stringResource(R.string.voice_listening_hi)
+                                voiceState.isListening && voiceState.partialTranscript.isNotBlank() ->
+                                    "🎙️ শোনা যাচ্ছে... • ${voiceState.partialTranscript}"
                                 voiceState.isListening ->
-                                    stringResource(R.string.voice_listening_en)
+                                    stringResource(R.string.voice_listening_bn)
                                 !voiceState.errorMessage.isNullOrBlank() ->
                                     voiceState.errorMessage.orEmpty()
                                 else -> stringResource(R.string.voice_tap_to_speak)
                             },
-                            fontFamily = if (voiceState.locale.isBengali) NotoSansBengaliFamily else FontFamily.Default,
+                            fontFamily = NotoSansBengaliFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = if (voiceState.isListening) NeonCyan else NeonAmber,
@@ -737,7 +870,7 @@ fun StudioScreen(
                 // Scrollable Smart Word Prediction & Glowing "✨ RGB Sticker" Strip inside Live Playground
                 if (activeOverlay == StudioOverlayMode.NONE) {
                     val prediction = remember(playgroundText, settings.activeLanguageId) {
-                        SmartWordPredictor.predict(playgroundText, settings.activeLanguageId)
+                        SmartWordPredictor.predict(playgroundText, settings.activeLanguageId, context)
                     }
                     LazyRow(
                         modifier = Modifier
@@ -747,11 +880,17 @@ fun StudioScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (prediction.stickerPhrase.isNotEmpty()) {
+                        val effectiveStickerPhrase = prediction.stickerPhrase.ifEmpty {
+                            if (isFeatureTourActive) "ভালোবাসা" else ""
+                        }
+                        if (effectiveStickerPhrase.isNotEmpty()) {
                             item(key = "rgb_sticker_chip") {
                                 val isVip = licenseState.isVipActive
                                 Box(
                                     modifier = Modifier
+                                        .onGloballyPositioned { coords ->
+                                            featureTourCoordinates?.register(FeatureTourTarget.RGB_STICKER, coords.boundsInRoot())
+                                        }
                                         .clip(RoundedCornerShape(999.dp))
                                         .background(
                                             Brush.horizontalGradient(
@@ -775,13 +914,8 @@ fun StudioScreen(
                                             if (!isVip) {
                                                 onOpenUnlockScreen()
                                             } else {
-                                                val artifact = RgbStickerGenerator.generateSticker(
-                                                    context,
-                                                    prediction.stickerPhrase
-                                                )
-                                                if (artifact != null) {
-                                                    previewSticker = artifact
-                                                }
+                                                pendingStickerPhrase = effectiveStickerPhrase
+                                                activeOverlay = StudioOverlayMode.STICKER_SELECTOR
                                             }
                                         }
                                         .padding(horizontal = 11.dp, vertical = 5.dp)
@@ -805,32 +939,34 @@ fun StudioScreen(
                             }
                         }
 
-                        items(prediction.suggestions, key = { it }) { suggestion ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color(0xFF19132B))
-                                    .border(1.dp, Color(0xFF2F2352), RoundedCornerShape(999.dp))
-                                    .clickable {
-                                        onKeyFeedback(false)
-                                        repeat(prediction.currentTokenLength) {
-                                            onPlaygroundBackspace()
+                        if (settings.smartSuggestionsEnabled) {
+                            items(prediction.suggestions, key = { it }) { suggestion ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(Color(0xFF19132B))
+                                        .border(1.dp, Color(0xFF2F2352), RoundedCornerShape(999.dp))
+                                        .clickable {
+                                            onKeyFeedback(false)
+                                            repeat(prediction.currentTokenLength) {
+                                                onPlaygroundBackspace()
+                                            }
+                                            onPlaygroundCommit("$suggestion ")
                                         }
-                                        onPlaygroundCommit("$suggestion ")
-                                    }
-                                    .padding(horizontal = 11.dp, vertical = 5.dp)
-                                    .testTag("studio_suggestion_$suggestion"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = suggestion,
-                                    fontFamily = if (settings.activeLanguageId == "bn") NotoSansBengaliFamily else FontFamily.Default,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
+                                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                                        .testTag("studio_suggestion_$suggestion"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = suggestion,
+                                        fontFamily = if (settings.activeLanguageId == "bn") NotoSansBengaliFamily else FontFamily.Default,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
@@ -858,13 +994,28 @@ fun StudioScreen(
                         )
                     }
 
-                    StudioOverlayMode.REACTIONS -> {
-                        StudioReactionsPanel(
+                    StudioOverlayMode.FONTS -> {
+                        StudioStylishFontPanel(
+                            activeStyle = activeStylishFont,
                             height = deckHeightDp,
-                            onSelectReaction = { text ->
+                            onSelectStyle = { style ->
                                 onKeyFeedback(false)
-                                onPlaygroundCommit(text)
+                                activeStylishFont = style
                                 activeOverlay = StudioOverlayMode.NONE
+                            },
+                            onClose = {
+                                onKeyFeedback(true)
+                                activeOverlay = StudioOverlayMode.NONE
+                            }
+                        )
+                    }
+
+                    StudioOverlayMode.AI_HUB -> {
+                        StudioAiHubPanel(
+                            height = deckHeightDp,
+                            onInsertText = { text ->
+                                onKeyFeedback(false)
+                                onPlaygroundCommit("$text ")
                             },
                             onClose = {
                                 onKeyFeedback(true)
@@ -892,11 +1043,37 @@ fun StudioScreen(
                         )
                     }
 
+                    StudioOverlayMode.STICKER_SELECTOR -> {
+                        StudioStickerSelectorPanel(
+                            phrase = pendingStickerPhrase,
+                            height = deckHeightDp,
+                            onSelectStyle = { style ->
+                                onKeyFeedback(false)
+                                val artifact = RgbStickerGenerator.generateSticker(
+                                    context = context,
+                                    rawPhrase = pendingStickerPhrase,
+                                    style = style
+                                )
+                                activeOverlay = StudioOverlayMode.NONE
+                                if (artifact != null) {
+                                    previewSticker = artifact
+                                }
+                            },
+                            onClose = {
+                                onKeyFeedback(true)
+                                activeOverlay = StudioOverlayMode.NONE
+                            }
+                        )
+                    }
+
                     StudioOverlayMode.NONE -> {
                         AndroidView(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(deckHeightDp)
+                                .onGloballyPositioned { coords ->
+                                    featureTourCoordinates?.register(FeatureTourTarget.TOUCH_SPARK_DECK, coords.boundsInRoot())
+                                }
                                 .testTag("native_rgb_keyboard_preview"),
                             factory = { ctx ->
                                 NativeRgbKeyboardView(ctx).apply {
@@ -910,7 +1087,7 @@ fun StudioScreen(
                                             "DEL" -> latestBackspace()
                                             "ENTER" -> latestEnter()
                                             " " -> latestSpace()
-                                            else -> latestCommit(key)
+                                            else -> latestCommit(StylishFontEngine.transform(key, latestStylishFont))
                                         }
                                     }
                                     this.onKeyFeedback = { isMod -> latestFeedback(isMod) }
@@ -934,6 +1111,140 @@ fun StudioScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun StudioStickerSelectorPanel(
+    phrase: String,
+    height: androidx.compose.ui.unit.Dp,
+    onSelectStyle: (RgbStickerStyle) -> Unit,
+    onClose: () -> Unit
+) {
+    val pulseTransition = rememberInfiniteTransition(label = "sticker_style_pulse")
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.72f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "sticker_pulse_alpha"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0C0818))
+            .padding(10.dp)
+            .testTag("studio_sticker_selector_panel"),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "✨ \"$phrase\"",
+                fontFamily = NotoSansBengaliFamily,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = NeonCyan,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = "⌨",
+                fontSize = 14.sp,
+                color = TextPrimary,
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1D2030))
+                    .clickable(onClick = onClose)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .testTag("studio_sticker_selector_close")
+            )
+        }
+
+        Text(
+            text = stringResource(R.string.sticker_selector_tap_hint),
+            fontFamily = NotoSansBengaliFamily,
+            fontSize = 10.5.sp,
+            color = TextMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            items(RgbStickerStyle.entries.chunked(2)) { pair ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    pair.forEachIndexed { idx, style ->
+                        val primaryColor = Color(style.accentPrimary)
+                        val secondaryColor = Color(style.accentSecondary)
+                        val borderAlpha = if (idx % 2 == 0) pulseAlpha else (1.72f - pulseAlpha).coerceIn(0.72f, 1f)
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Color(style.cardBgColors.first()),
+                                            Color(style.cardBgColors.last())
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.4.dp,
+                                    brush = Brush.horizontalGradient(
+                                        listOf(
+                                            primaryColor.copy(alpha = borderAlpha),
+                                            secondaryColor.copy(alpha = borderAlpha)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onSelectStyle(style) }
+                                .padding(horizontal = 10.dp, vertical = 9.dp)
+                                .testTag("studio_sticker_style_${style.id}"),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "${style.badgeIcon} ${style.displayName}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = primaryColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = style.subtitle,
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    if (pair.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1098,83 +1409,6 @@ private fun GboardToolbarIcon(
     }
 }
 
-@Composable
-private fun StudioReactionsPanel(
-    height: androidx.compose.ui.unit.Dp,
-    onSelectReaction: (String) -> Unit,
-    onClose: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(height)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF0D0F17))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = stringResource(R.string.reactions_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = Color(0xFF60A5FA)
-            )
-            Text(
-                text = "⌨",
-                fontSize = 14.sp,
-                color = TextPrimary,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF1D2030))
-                    .clickable(onClick = onClose)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .testTag("studio_reactions_close")
-            )
-        }
-
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            items(studioQuickReactions.chunked(2)) { pair ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    pair.forEach { (label, payload) ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF1A1E2B))
-                                .border(1.dp, ObsidianBorder, RoundedCornerShape(10.dp))
-                                .clickable { onSelectReaction(payload) }
-                                .padding(horizontal = 10.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    if (pair.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun StudioClipboardPanel(
@@ -1302,45 +1536,38 @@ private fun HeroStatusCard(
     onToggleVoiceGuideMute: () -> Unit,
     onOpenEasyGuide: () -> Unit
 ) {
-    val glassShape = RoundedCornerShape(24.dp)
+    val glassShape = RoundedCornerShape(22.dp)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(glassShape)
             .background(
-                Brush.linearGradient(
+                Brush.verticalGradient(
                     listOf(
-                        Color(0xFF170D2B),
-                        Color(0xFF0E081C),
-                        Color(0xFF1E0D2E)
+                        Color(0xFF131826),
+                        Color(0xFF0D111C)
                     )
                 )
             )
             .border(
-                width = 1.4.dp,
-                brush = Brush.linearGradient(
-                    listOf(
-                        NeonMagenta.copy(alpha = 0.85f),
-                        NeonAmber.copy(alpha = 0.7f),
-                        NeonCyan.copy(alpha = 0.85f)
-                    )
-                ),
+                width = 1.dp,
+                color = Color(0xFF262F47),
                 shape = glassShape
             )
     ) {
-        // GTA VI Vice City neon sunset ambient glassmorphism sheen
+        // Subtle luxury studio ambient rim sheen
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            NeonMagenta.copy(alpha = 0.14f),
-                            NeonCyan.copy(alpha = 0.08f),
+                            LuxuryPinkStroke.copy(alpha = 0.06f),
+                            LuxuryCyanStroke.copy(alpha = 0.04f),
                             Color.Transparent
                         ),
-                        radius = 780f
+                        radius = 720f
                     )
                 )
         )
@@ -1348,33 +1575,37 @@ private fun HeroStatusCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Clean, Spacious 2-Row Header inside the Glassmorphism Card
-            // Row 1: Left-aligned glowing gradient "Rakib official" title + right-aligned VIP Trial pill with integrated mute/unmute icon
+            // Row 1: Luxury Dark Obsidian "Rakib official" Brand Pill + Royal Amber-Gold VIP Trial Pill + Circular Mute Button
             val voiceTint = when {
                 voiceGuideState.isSpeaking -> NeonError
                 voiceGuideState.isMuted -> TextMuted
-                else -> NeonCyan
+                else -> LuxuryCyanStroke
             }
-            val pillColor = when {
+            val pillBorderColor = when {
+                licenseState.isLifetimeUnlocked -> NeonEmerald.copy(alpha = 0.7f)
+                licenseState.isFreeStandardMode -> LuxuryPinkStroke.copy(alpha = 0.65f)
+                else -> RoyalGoldAccent.copy(alpha = 0.72f)
+            }
+            val pillTextColor = when {
                 licenseState.isLifetimeUnlocked -> NeonEmerald
-                licenseState.isFreeStandardMode -> NeonMagenta
-                else -> NeonAmber
+                licenseState.isFreeStandardMode -> Color(0xFFFF7AA8)
+                else -> RoyalGoldAccent
             }
             val pillBg = when {
-                licenseState.isLifetimeUnlocked -> NeonEmeraldContainer.copy(alpha = 0.7f)
-                licenseState.isFreeStandardMode -> Color(0xFF2D0D25)
-                else -> NeonAmberContainer.copy(alpha = 0.65f)
+                licenseState.isLifetimeUnlocked -> Color(0xFF0E221C)
+                licenseState.isFreeStandardMode -> Color(0xFF231320)
+                else -> RoyalGoldPillBg
             }
+            val strings = LocalAppStrings.current
+            val heroBodyFont = if (strings.language == AppUiLanguage.BENGALI) NotoSansBengaliFamily else FontFamily.Default
+
             val pillText = when {
-                licenseState.isLifetimeUnlocked -> stringResource(R.string.bn_lifetime_unlocked_badge)
-                licenseState.isFreeStandardMode -> stringResource(R.string.bn_free_standard_badge)
-                else -> stringResource(
-                    R.string.bn_trial_badge_format,
-                    licenseState.formattedCompactPillBangla
-                )
+                licenseState.isLifetimeUnlocked -> strings.badgeLifetimeUnlocked
+                licenseState.isFreeStandardMode -> strings.badgeFreeStandard
+                else -> "VIP Trial • ${licenseState.formattedCompactEnglish}"
             }
 
             Row(
@@ -1382,36 +1613,52 @@ private fun HeroStatusCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = stringResource(R.string.studio_title),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = OrbitronFamily,
-                        fontSize = 17.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        brush = Brush.horizontalGradient(
-                            listOf(NeonMagenta, NeonAmber, NeonCyan)
+                // Refined Luxury Dark Obsidian Glass Pill (#141824) with Pink-to-Cyan hairline stroke & bold white typography
+                Box(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(BrandObsidianPill)
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.horizontalGradient(
+                                listOf(LuxuryPinkStroke, LuxuryCyanStroke)
+                            ),
+                            shape = RoundedCornerShape(999.dp)
                         )
-                    ),
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
+                        .padding(horizontal = 13.dp, vertical = 7.dp)
+                        .testTag("hero_brand_pill"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.studio_title),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = OrbitronFamily,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.45.sp,
+                            color = Color.White
+                        ),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Unified sleek right-aligned VIP Trial pill with integrated mute/unmute icon (no overlap or crowding)
+                // Royal Amber-Gold VIP Trial Glass Pill + separate sleek circular Sound Mute Button
                 Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(pillBg)
-                        .border(1.dp, pillColor.copy(alpha = 0.65f), RoundedCornerShape(999.dp)),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     Row(
                         modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(pillBg)
+                            .border(1.dp, pillBorderColor, RoundedCornerShape(999.dp))
                             .clickable(enabled = !licenseState.isLifetimeUnlocked, onClick = onOpenUnlockScreen)
-                            .padding(start = 9.dp, end = 6.dp, top = 6.dp, bottom = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                             .testTag(
                                 when {
                                     licenseState.isLifetimeUnlocked -> "badge_lifetime_unlocked"
@@ -1420,137 +1667,148 @@ private fun HeroStatusCard(
                                 }
                             ),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Icon(
-                            imageVector = if (licenseState.isLifetimeUnlocked) Icons.Filled.Verified else Icons.Filled.Timer,
-                            contentDescription = null,
-                            tint = pillColor,
-                            modifier = Modifier.size(13.dp)
-                        )
+                        if (licenseState.isLifetimeUnlocked) {
+                            Icon(
+                                imageVector = Icons.Filled.Verified,
+                                contentDescription = null,
+                                tint = pillTextColor,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        } else if (!licenseState.isFreeStandardMode) {
+                            Text(
+                                text = "👑",
+                                fontSize = 11.5.sp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Timer,
+                                contentDescription = null,
+                                tint = pillTextColor,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
                         Text(
                             text = pillText,
-                            fontFamily = NotoSansBengaliFamily,
-                            fontSize = 10.sp,
+                            fontFamily = if (!licenseState.isLifetimeUnlocked && !licenseState.isFreeStandardMode) {
+                                FontFamily.Default
+                            } else {
+                                heroBodyFont
+                            },
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = pillColor,
+                            letterSpacing = 0.2.sp,
+                            color = pillTextColor,
                             maxLines = 1,
                             softWrap = false
                         )
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(14.dp)
-                            .background(pillColor.copy(alpha = 0.3f))
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .clickable(onClick = onToggleVoiceGuideMute)
-                            .padding(start = 6.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)
-                            .testTag("btn_voice_guide_mute_toggle"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = when {
-                                voiceGuideState.isSpeaking -> Icons.Filled.Stop
-                                voiceGuideState.isMuted -> Icons.Filled.VolumeOff
-                                else -> Icons.Filled.VolumeUp
-                            },
-                            contentDescription = stringResource(R.string.cd_voice_guide_toggle),
-                            tint = voiceTint,
-                            modifier = Modifier.size(14.dp)
-                        )
+                    if (!(imeStatus.isEnabled && imeStatus.isSelected)) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(ObsidianSurface)
+                                .border(1.dp, ObsidianBorder, CircleShape)
+                                .clickable(onClick = onToggleVoiceGuideMute)
+                                .testTag("btn_voice_guide_mute_toggle"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = when {
+                                    voiceGuideState.isSpeaking -> Icons.Filled.Stop
+                                    voiceGuideState.isMuted -> Icons.Filled.VolumeOff
+                                    else -> Icons.Filled.VolumeUp
+                                },
+                                contentDescription = stringResource(R.string.cd_voice_guide_toggle),
+                                tint = voiceTint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            // Row 2: Full-width glowing cyan-magenta pill banner: "LIFETIME VIP • ONE-TIME PAYMENT (₹20)"
+            // Row 2: Sleek refined Lifetime VIP status strip
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(NeonCyan.copy(alpha = 0.16f), NeonMagenta.copy(alpha = 0.18f))
-                        )
-                    )
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ObsidianSurface)
                     .border(
-                        1.1.dp,
-                        Brush.horizontalGradient(listOf(NeonCyan.copy(alpha = 0.7f), NeonMagenta.copy(alpha = 0.7f))),
-                        RoundedCornerShape(999.dp)
+                        1.dp,
+                        Brush.horizontalGradient(
+                            if (licenseState.isLifetimeUnlocked) {
+                                listOf(NeonEmerald.copy(alpha = 0.55f), LuxuryCyanStroke.copy(alpha = 0.45f))
+                            } else {
+                                listOf(LuxuryPinkStroke.copy(alpha = 0.48f), LuxuryCyanStroke.copy(alpha = 0.48f))
+                            }
+                        ),
+                        RoundedCornerShape(14.dp)
                     )
                     .clickable(enabled = !licenseState.isLifetimeUnlocked, onClick = onOpenUnlockScreen)
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                    .padding(horizontal = 14.dp, vertical = 9.dp)
                     .testTag("hero_lifetime_vip_banner"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
                 Text(
                     text = if (licenseState.isLifetimeUnlocked) {
-                        "✓ LIFETIME VIP UNLOCKED · ALL EFFECTS ACTIVE"
+                        strings.vipBannerUnlocked
                     } else {
-                        stringResource(R.string.vip_one_time_badge)
+                        strings.vipBannerLocked
                     },
                     fontFamily = JetBrainsMonoFamily,
                     fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
-                    color = if (licenseState.isLifetimeUnlocked) NeonEmerald else NeonCyan,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.6.sp,
+                    color = if (licenseState.isLifetimeUnlocked) NeonEmerald else Color(0xFFE4ECF7),
                     maxLines = 1,
                     softWrap = false
                 )
             }
 
-            // Modern 2-Step Minimalist Action Cards
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                // Step 1: ১. কিবোর্ড চালু করুন ("তালিকার নিচে 'Rakib official' অন করুন")
+            // Elevated Flagship 2-Step Setup Cards (#111520 with 16dp corners & subtle 1dp glass borders)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 MinimalistStepCard(
-                    title = stringResource(R.string.bn_setup_step_1_title),
-                    subtitle = stringResource(
-                        if (imeStatus.isEnabled) R.string.bn_setup_step_1_done
-                        else R.string.bn_setup_step_1_subtitle
-                    ),
+                    title = strings.setupStep1Title,
+                    subtitle = if (imeStatus.isEnabled) strings.setupStep1Done else strings.setupStep1Subtitle,
                     isComplete = imeStatus.isEnabled,
-                    completeBadgeText = stringResource(R.string.bn_badge_enabled_short),
+                    completeBadgeText = strings.badgeEnabledShort,
                     completeColor = NeonEmerald,
                     completeContainer = NeonEmeraldContainer,
-                    idleAccent = NeonMagenta,
+                    idleAccent = LuxuryPinkStroke,
                     icon = Icons.Filled.Settings,
                     onClick = onOpenImeSettings,
                     testTag = "btn_enable_ime"
                 )
 
-                // Step 2: ২. কিবোর্ড সিলেক্ট করুন (glowing electric cyan "সক্রিয় ✓" state once selected)
                 MinimalistStepCard(
-                    title = stringResource(R.string.bn_setup_step_2_title),
-                    subtitle = stringResource(
-                        if (imeStatus.isSelected) R.string.bn_setup_step_2_done
-                        else R.string.bn_setup_step_2_subtitle
-                    ),
+                    title = strings.setupStep2Title,
+                    subtitle = if (imeStatus.isSelected) strings.setupStep2Done else strings.setupStep2Subtitle,
                     isComplete = imeStatus.isSelected,
-                    completeBadgeText = stringResource(R.string.bn_badge_active_short),
-                    completeColor = NeonCyan,
-                    completeContainer = Color(0xFF072B27),
-                    idleAccent = NeonCyan,
+                    completeBadgeText = strings.badgeActiveShort,
+                    completeColor = LuxuryCyanStroke,
+                    completeContainer = Color(0xFF0C222B),
+                    idleAccent = LuxuryCyanStroke,
                     icon = Icons.Filled.SwapHoriz,
                     onClick = onShowImePicker,
                     testTag = "btn_select_ime"
                 )
             }
 
-            // Compact, stylish Rounded Cyan Easy Guide Button below the 2 cards
+            // Clean Studio-Grade Easy Guide Pill Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(NeonCyan.copy(alpha = 0.12f))
-                    .border(1.2.dp, NeonCyan.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, LuxuryCyanStroke.copy(alpha = 0.42f), RoundedCornerShape(16.dp))
                     .clickable(onClick = onOpenEasyGuide)
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .padding(horizontal = 16.dp, vertical = 11.dp)
                     .testTag("btn_bangla_easy_guide"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -1558,14 +1816,14 @@ private fun HeroStatusCard(
                 Icon(
                     imageVector = Icons.Filled.HelpOutline,
                     contentDescription = null,
-                    tint = NeonCyan,
-                    modifier = Modifier.size(16.dp)
+                    tint = LuxuryCyanStroke,
+                    modifier = Modifier.size(17.dp)
                 )
-                Spacer(modifier = Modifier.width(7.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = stringResource(R.string.bn_btn_easy_guide),
-                    fontFamily = NotoSansBengaliFamily,
-                    fontSize = 12.5.sp,
+                    text = strings.btnEasyGuide,
+                    fontFamily = heroBodyFont,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextPrimary,
                     maxLines = 1,
@@ -1590,41 +1848,41 @@ private fun MinimalistStepCard(
     testTag: String
 ) {
     val activeAccent = if (isComplete) completeColor else idleAccent
-    val bgColor = if (isComplete) completeContainer.copy(alpha = 0.62f) else Color(0xCC18102C)
-    val borderColor = if (isComplete) completeColor.copy(alpha = 0.82f) else Color(0xFF342258)
+    val bgColor = if (isComplete) completeContainer.copy(alpha = 0.72f) else ObsidianSurface
+    val borderColor = if (isComplete) completeColor.copy(alpha = 0.65f) else ObsidianBorder
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 60.dp)
-            .clip(RoundedCornerShape(15.dp))
+            .heightIn(min = 66.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(bgColor)
-            .border(1.2.dp, borderColor, RoundedCornerShape(15.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .padding(horizontal = 15.dp, vertical = 12.dp)
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(11.dp)
+        horizontalArrangement = Arrangement.spacedBy(13.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(activeAccent.copy(alpha = 0.17f))
-                .border(1.dp, activeAccent.copy(alpha = 0.45f), CircleShape),
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(activeAccent.copy(alpha = 0.14f))
+                .border(1.dp, activeAccent.copy(alpha = 0.36f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (isComplete) Icons.Filled.CheckCircle else icon,
                 contentDescription = null,
                 tint = activeAccent,
-                modifier = Modifier.size(19.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Text(
                 text = title,
@@ -1864,12 +2122,15 @@ private fun PlaygroundReadoutCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val playgroundStrings = LocalAppStrings.current
+            val playgroundBodyFont = if (playgroundStrings.language == AppUiLanguage.BENGALI) NotoSansBengaliFamily else FontFamily.Default
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = stringResource(R.string.playground_title),
+                    text = playgroundStrings.playgroundTitle,
+                    fontFamily = playgroundBodyFont,
                     style = MaterialTheme.typography.labelMedium,
                     color = NeonCyan
                 )
@@ -1922,7 +2183,8 @@ private fun PlaygroundReadoutCard(
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = stringResource(R.string.playground_system_ime),
+                        text = playgroundStrings.playgroundSystemIme,
+                        fontFamily = playgroundBodyFont,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (showSystemImeTester) NeonCyan else TextSecondary
                     )

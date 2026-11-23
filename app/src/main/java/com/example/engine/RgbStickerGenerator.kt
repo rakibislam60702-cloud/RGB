@@ -9,6 +9,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -27,9 +28,187 @@ import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.example.R
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.PI
+import kotlin.math.sin
 
 /**
- * Generates high-resolution GTA VI Vice City RGB neon glass text stickers as PNGs
+ * 6 distinct neon RGB sticker styles selectable inline inside AI Keyboard.
+ */
+enum class RgbStickerStyle(
+    val id: String,
+    val displayName: String,
+    val subtitle: String,
+    val badgeIcon: String,
+    val borderColors: IntArray,
+    val textColors: IntArray,
+    val cardBgColors: IntArray,
+    val haloColor: Int,
+    val accentPrimary: Int,
+    val accentSecondary: Int,
+    val accentSymbol: String
+) {
+    VICE_CITY_SUNSET(
+        id = "vice_city_sunset",
+        displayName = "Vice City Sunset",
+        subtitle = "Pink-Orange Neon Glow",
+        badgeIcon = "🌴",
+        borderColors = intArrayOf(
+            Color.parseColor("#FF2A85"),
+            Color.parseColor("#FF6D00"),
+            Color.parseColor("#FF9E00"),
+            Color.parseColor("#FF2A85")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#FF74B8"),
+            Color.parseColor("#FFD166"),
+            Color.parseColor("#FF9E00")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#F01C0B2A"),
+            Color.parseColor("#F40E0618"),
+            Color.parseColor("#F02A0C26")
+        ),
+        haloColor = Color.parseColor("#CCFF2A85"),
+        accentPrimary = Color.parseColor("#FF2A85"),
+        accentSecondary = Color.parseColor("#FF9E00"),
+        accentSymbol = "✦"
+    ),
+    ELECTRIC_CYAN(
+        id = "electric_cyan",
+        displayName = "Electric Cyan",
+        subtitle = "Cyber Blue Glow",
+        badgeIcon = "⚡",
+        borderColors = intArrayOf(
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#00B4D8"),
+            Color.parseColor("#38BDF8"),
+            Color.parseColor("#00F5D4")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#E0FBFC"),
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#38BDF8")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#F0071A2B"),
+            Color.parseColor("#F4050E1B"),
+            Color.parseColor("#F00A2238")
+        ),
+        haloColor = Color.parseColor("#CC00E5FF"),
+        accentPrimary = Color.parseColor("#00F5D4"),
+        accentSecondary = Color.parseColor("#38BDF8"),
+        accentSymbol = "⚡"
+    ),
+    MATRIX_PULSE(
+        id = "matrix_pulse",
+        displayName = "Matrix Pulse",
+        subtitle = "Neon Green Frame",
+        badgeIcon = "🟩",
+        borderColors = intArrayOf(
+            Color.parseColor("#00FF66"),
+            Color.parseColor("#00D68F"),
+            Color.parseColor("#70FFBA"),
+            Color.parseColor("#00C853")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#D8FFE8"),
+            Color.parseColor("#00FF66"),
+            Color.parseColor("#00E676")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#F0061B12"),
+            Color.parseColor("#F4030E09"),
+            Color.parseColor("#F0092619")
+        ),
+        haloColor = Color.parseColor("#CC00FF66"),
+        accentPrimary = Color.parseColor("#00FF66"),
+        accentSecondary = Color.parseColor("#70FFBA"),
+        accentSymbol = "◈"
+    ),
+    ROYAL_GOLD(
+        id = "royal_gold",
+        displayName = "Royal Gold",
+        subtitle = "Luxury Amber Glow",
+        badgeIcon = "👑",
+        borderColors = intArrayOf(
+            Color.parseColor("#FFF3B0"),
+            Color.parseColor("#FFD60A"),
+            Color.parseColor("#FF9E00"),
+            Color.parseColor("#FFD60A")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#FFF8D6"),
+            Color.parseColor("#FFD60A"),
+            Color.parseColor("#FF9E00")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#F21C1408"),
+            Color.parseColor("#F5100B05"),
+            Color.parseColor("#F224190A")
+        ),
+        haloColor = Color.parseColor("#CCFFB703"),
+        accentPrimary = Color.parseColor("#FFD60A"),
+        accentSecondary = Color.parseColor("#FF9E00"),
+        accentSymbol = "♛"
+    ),
+    FIRE_WAVE(
+        id = "fire_wave",
+        displayName = "Fire Wave",
+        subtitle = "Multi-Color Gradient",
+        badgeIcon = "🔥",
+        borderColors = intArrayOf(
+            Color.parseColor("#FF2A85"),
+            Color.parseColor("#FF5E00"),
+            Color.parseColor("#FFD60A"),
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#9D4EDD")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#FF4D6D"),
+            Color.parseColor("#FFD60A"),
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#FF74B8")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#F0220A1E"),
+            Color.parseColor("#F4120718"),
+            Color.parseColor("#F0141C2B")
+        ),
+        haloColor = Color.parseColor("#CCFF5E00"),
+        accentPrimary = Color.parseColor("#FF5E00"),
+        accentSecondary = Color.parseColor("#00F5D4"),
+        accentSymbol = "🔥"
+    ),
+    GALAXY_NEON(
+        id = "galaxy_neon",
+        displayName = "Galaxy Neon",
+        subtitle = "Purple-Cyan Starlight",
+        badgeIcon = "🌌",
+        borderColors = intArrayOf(
+            Color.parseColor("#C77DFF"),
+            Color.parseColor("#9D4EDD"),
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#7209B7")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#F3D9FF"),
+            Color.parseColor("#C77DFF"),
+            Color.parseColor("#00F5D4")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#F2140A2C"),
+            Color.parseColor("#F50A0619"),
+            Color.parseColor("#F2111834")
+        ),
+        haloColor = Color.parseColor("#CC9D4EDD"),
+        accentPrimary = Color.parseColor("#C77DFF"),
+        accentSecondary = Color.parseColor("#00F5D4"),
+        accentSymbol = "★"
+    )
+}
+
+/**
+ * Generates high-resolution multi-style RGB neon glass text stickers as PNGs
  * inside `cacheDir/stickers/` and commits them directly to WhatsApp, Messenger,
  * Telegram, Instagram, etc. via `InputConnectionCompat.commitContent()` (with an
  * `ACTION_SEND` fallback when an editor does not declare `image/png` support).
@@ -37,7 +216,7 @@ import java.io.FileOutputStream
 object RgbStickerGenerator {
 
     private const val STICKER_DIR = "stickers"
-    private const val MAX_CACHED_STICKERS = 10
+    private const val MAX_CACHED_STICKERS = 12
     private const val STICKER_WIDTH = 512
     private const val STICKER_HEIGHT = 512
 
@@ -45,20 +224,25 @@ object RgbStickerGenerator {
         val file: File,
         val uri: Uri,
         val bitmap: Bitmap,
-        val phrase: String
+        val phrase: String,
+        val style: RgbStickerStyle
     )
 
-    fun generateSticker(context: Context, rawPhrase: String): StickerArtifact? {
+    fun generateSticker(
+        context: Context,
+        rawPhrase: String,
+        style: RgbStickerStyle = RgbStickerStyle.VICE_CITY_SUNSET
+    ): StickerArtifact? {
         val phrase = rawPhrase.trim().take(64)
         if (phrase.isEmpty()) return null
 
-        val bitmap = renderStickerBitmap(context, phrase)
+        val bitmap = renderStickerBitmap(context, phrase, style)
         val stickersDir = File(context.cacheDir, STICKER_DIR).apply {
             if (!exists()) mkdirs()
         }
         pruneOldStickers(stickersDir)
 
-        val outFile = File(stickersDir, "rgb_sticker_${System.currentTimeMillis()}.png")
+        val outFile = File(stickersDir, "rgb_sticker_${style.id}_${System.currentTimeMillis()}.png")
         val saved = runCatching {
             FileOutputStream(outFile).use { fos ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
@@ -84,7 +268,8 @@ object RgbStickerGenerator {
             file = outFile,
             uri = contentUri,
             bitmap = bitmap,
-            phrase = phrase
+            phrase = phrase,
+            style = style
         )
     }
 
@@ -145,7 +330,6 @@ object RgbStickerGenerator {
             }
         }
 
-        // Fallback: open share sheet so user can still send sticker in apps without commitContent support
         shareStickerFallback(context, artifact)
         return false
     }
@@ -164,7 +348,11 @@ object RgbStickerGenerator {
         runCatching { context.startActivity(chooser) }
     }
 
-    private fun renderStickerBitmap(context: Context, phrase: String): Bitmap {
+    private fun renderStickerBitmap(
+        context: Context,
+        phrase: String,
+        style: RgbStickerStyle
+    ): Bitmap {
         val bitmap = Bitmap.createBitmap(STICKER_WIDTH, STICKER_HEIGHT, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.TRANSPARENT)
@@ -173,7 +361,6 @@ object RgbStickerGenerator {
             ResourcesCompat.getFont(context, R.font.noto_sans_bengali)
         }.getOrNull() ?: Typeface.DEFAULT_BOLD
 
-        // Measure dynamic text block first so the rounded glass card hugs the phrase cleanly
         val horizontalCardMargin = 42f
         val innerTextPaddingX = 36f
         val maxTextWidth = (STICKER_WIDTH - (horizontalCardMargin + innerTextPaddingX) * 2).toInt().coerceAtLeast(180)
@@ -187,9 +374,9 @@ object RgbStickerGenerator {
         textPaint.textSize = chosenSize
         val textLayout = buildCenteredLayout(phrase, textPaint, maxTextWidth)
 
-        val minCardHeight = 200f
+        val minCardHeight = 204f
         val maxCardHeight = STICKER_HEIGHT - 84f
-        val cardHeight = (textLayout.height + 116f).coerceIn(minCardHeight, maxCardHeight)
+        val cardHeight = (textLayout.height + 120f).coerceIn(minCardHeight, maxCardHeight)
         val cardTop = (STICKER_HEIGHT - cardHeight) / 2f
         val cardRect = RectF(
             horizontalCardMargin,
@@ -197,99 +384,120 @@ object RgbStickerGenerator {
             STICKER_WIDTH - horizontalCardMargin,
             cardTop + cardHeight
         )
-        val cornerRadius = 46f
+        val cornerRadius = when (style) {
+            RgbStickerStyle.MATRIX_PULSE -> 26f
+            RgbStickerStyle.ROYAL_GOLD -> 34f
+            else -> 46f
+        }
 
         val neonBorderShader = LinearGradient(
             cardRect.left,
             cardRect.top,
             cardRect.right,
             cardRect.bottom,
-            intArrayOf(
-                Color.parseColor("#FF2A85"), // Vice Sunset Pink
-                Color.parseColor("#FF9E00"), // Miami Sunset Gold
-                Color.parseColor("#00F5D4"), // Electric Cyan
-                Color.parseColor("#B5179E")  // Deep Vice Violet
-            ),
-            floatArrayOf(0f, 0.34f, 0.7f, 1f),
+            style.borderColors,
+            null,
             Shader.TileMode.CLAMP
         )
 
         // 1. Wide ambient outer RGB neon halo
         val outerGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 18f
+            this.style = Paint.Style.STROKE
+            strokeWidth = 20f
             shader = neonBorderShader
-            maskFilter = BlurMaskFilter(22f, BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(24f, BlurMaskFilter.Blur.NORMAL)
         }
         canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, outerGlowPaint)
 
-        // 2. Frosted dark obsidian glass card fill
+        // 2. Frosted dark glass card fill styled for this theme
         val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
+            this.style = Paint.Style.FILL
             shader = LinearGradient(
                 cardRect.left,
                 cardRect.top,
                 cardRect.right,
                 cardRect.bottom,
-                intArrayOf(
-                    Color.parseColor("#EC150B28"),
-                    Color.parseColor("#F00A0614"),
-                    Color.parseColor("#EC1B0E2E")
-                ),
+                style.cardBgColors,
                 null,
                 Shader.TileMode.CLAMP
             )
         }
         canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardFillPaint)
 
-        // 3. Top glass specular highlight wash
+        // 3. Style-specific decorative backdrop inside clipped glass card
+        canvas.save()
+        val clipPath = Path().apply {
+            addRoundRect(cardRect, cornerRadius, cornerRadius, Path.Direction.CW)
+        }
+        canvas.clipPath(clipPath)
+        drawStyleBackdropArt(canvas, cardRect, style)
+
+        // Top glass specular sheen
         val glassSheenRect = RectF(
             cardRect.left + 8f,
             cardRect.top + 8f,
             cardRect.right - 8f,
-            cardRect.top + cardHeight * 0.44f
+            cardRect.top + cardHeight * 0.42f
         )
         val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
+            this.style = Paint.Style.FILL
             shader = LinearGradient(
                 0f,
                 glassSheenRect.top,
                 0f,
                 glassSheenRect.bottom,
-                Color.parseColor("#2AFFFFFF"),
+                Color.parseColor("#26FFFFFF"),
                 Color.TRANSPARENT,
                 Shader.TileMode.CLAMP
             )
         }
         canvas.drawRoundRect(glassSheenRect, cornerRadius - 6f, cornerRadius - 6f, sheenPaint)
+        canvas.restore()
 
         // 4. Crisp glowing RGB neon border stroke
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 6.5f
+            this.style = Paint.Style.STROKE
+            strokeWidth = 7f
             shader = neonBorderShader
         }
         canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, borderPaint)
 
-        // 5. Subtle sparkle accents in corners
+        // Optional luxury double inner hairline for Royal Gold & Matrix Pulse
+        if (style == RgbStickerStyle.ROYAL_GOLD || style == RgbStickerStyle.MATRIX_PULSE) {
+            val innerRect = RectF(
+                cardRect.left + 12f,
+                cardRect.top + 12f,
+                cardRect.right - 12f,
+                cardRect.bottom - 12f
+            )
+            val innerStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.style = Paint.Style.STROKE
+                strokeWidth = 2f
+                color = style.accentPrimary
+                alpha = 115
+            }
+            canvas.drawRoundRect(innerRect, (cornerRadius - 8f).coerceAtLeast(10f), (cornerRadius - 8f).coerceAtLeast(10f), innerStroke)
+        }
+
+        // 5. Corner sparkle / theme accents
         val sparklePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 24f
-            color = Color.parseColor("#CC00F5D4")
+            textSize = 23f
+            color = style.accentPrimary
+            alpha = 215
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("✦", cardRect.left + 32f, cardRect.top + 38f, sparklePaint)
-        sparklePaint.color = Color.parseColor("#CCFF2A85")
-        canvas.drawText("✦", cardRect.right - 32f, cardRect.bottom - 20f, sparklePaint)
+        canvas.drawText(style.accentSymbol, cardRect.left + 32f, cardRect.top + 38f, sparklePaint)
+        sparklePaint.color = style.accentSecondary
+        canvas.drawText(style.accentSymbol, cardRect.right - 32f, cardRect.bottom - 20f, sparklePaint)
 
         // 6. Glowing neon gradient phrase text centered inside card
         val textOriginX = cardRect.left + (cardRect.width() - maxTextWidth) / 2f
         val textOriginY = cardRect.centerY() - textLayout.height / 2f - 4f
 
-        // Soft neon halo pass behind text
         val textHaloPaint = TextPaint(textPaint).apply {
             shader = null
-            color = Color.parseColor("#AAFF2A85")
-            maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.NORMAL)
+            color = style.haloColor
+            maskFilter = BlurMaskFilter(13f, BlurMaskFilter.Blur.NORMAL)
         }
         val haloLayout = buildCenteredLayout(phrase, textHaloPaint, maxTextWidth)
 
@@ -297,35 +505,111 @@ object RgbStickerGenerator {
         canvas.translate(textOriginX, textOriginY)
         haloLayout.draw(canvas)
 
-        // Primary crisp gradient text pass
         textPaint.shader = LinearGradient(
             0f,
             0f,
             maxTextWidth.toFloat(),
             textLayout.height.toFloat(),
-            intArrayOf(
-                Color.parseColor("#FF74B8"),
-                Color.parseColor("#FFF07C"),
-                Color.parseColor("#00F5D4")
-            ),
-            floatArrayOf(0f, 0.48f, 1f),
+            style.textColors,
+            null,
             Shader.TileMode.CLAMP
         )
         val gradientLayout = buildCenteredLayout(phrase, textPaint, maxTextWidth)
         gradientLayout.draw(canvas)
         canvas.restore()
 
-        // 7. Tiny subtle bottom brand pill inside glass card
+        // 7. Signature "RAKIB OFFICIAL" neon footer inside card
         val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 15f
+            textSize = 14.5f
             this.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            color = Color.parseColor("#8800F5D4")
+            color = style.accentSecondary
+            alpha = 165
             textAlign = Paint.Align.CENTER
-            letterSpacing = 0.14f
+            letterSpacing = 0.16f
         }
         canvas.drawText("RAKIB OFFICIAL", cardRect.centerX(), cardRect.bottom - 18f, brandPaint)
 
         return bitmap
+    }
+
+    private fun drawStyleBackdropArt(canvas: Canvas, rect: RectF, style: RgbStickerStyle) {
+        when (style) {
+            RgbStickerStyle.GALAXY_NEON -> {
+                val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.style = Paint.Style.FILL
+                }
+                val coords = listOf(
+                    0.14f to 0.24f, 0.28f to 0.18f, 0.72f to 0.20f, 0.86f to 0.30f,
+                    0.18f to 0.78f, 0.36f to 0.84f, 0.68f to 0.82f, 0.84f to 0.72f,
+                    0.50f to 0.14f, 0.90f to 0.52f, 0.10f to 0.50f
+                )
+                coords.forEachIndexed { idx, (fx, fy) ->
+                    starPaint.color = if (idx % 2 == 0) style.accentSecondary else Color.WHITE
+                    starPaint.alpha = if (idx % 3 == 0) 200 else 120
+                    val radius = if (idx % 3 == 0) 3.6f else 2.2f
+                    canvas.drawCircle(rect.left + rect.width() * fx, rect.top + rect.height() * fy, radius, starPaint)
+                }
+            }
+            RgbStickerStyle.MATRIX_PULSE -> {
+                val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.style = Paint.Style.STROKE
+                    strokeWidth = 1.5f
+                    color = style.accentPrimary
+                    alpha = 32
+                }
+                var x = rect.left + 32f
+                while (x < rect.right) {
+                    canvas.drawLine(x, rect.top, x, rect.bottom, gridPaint)
+                    x += 36f
+                }
+            }
+            RgbStickerStyle.FIRE_WAVE -> {
+                val wavePath = Path()
+                val baseY = rect.bottom - 34f
+                wavePath.moveTo(rect.left, baseY)
+                val steps = 24
+                for (i in 0..steps) {
+                    val ratio = i.toFloat() / steps
+                    val x = rect.left + rect.width() * ratio
+                    val y = baseY + (sin(ratio * 4f * PI) * 9f).toFloat()
+                    wavePath.lineTo(x, y)
+                }
+                val wavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.style = Paint.Style.STROKE
+                    strokeWidth = 5f
+                    shader = LinearGradient(
+                        rect.left, baseY, rect.right, baseY,
+                        style.borderColors, null, Shader.TileMode.CLAMP
+                    )
+                    alpha = 140
+                }
+                canvas.drawPath(wavePath, wavePaint)
+            }
+            RgbStickerStyle.ELECTRIC_CYAN -> {
+                val scanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.style = Paint.Style.STROKE
+                    strokeWidth = 1.4f
+                    color = style.accentPrimary
+                    alpha = 26
+                }
+                var y = rect.top + 22f
+                while (y < rect.bottom) {
+                    canvas.drawLine(rect.left, y, rect.right, y, scanPaint)
+                    y += 18f
+                }
+            }
+            RgbStickerStyle.VICE_CITY_SUNSET, RgbStickerStyle.ROYAL_GOLD -> {
+                val orbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.style = Paint.Style.FILL
+                    color = style.accentPrimary
+                    alpha = 28
+                    maskFilter = BlurMaskFilter(36f, BlurMaskFilter.Blur.NORMAL)
+                }
+                canvas.drawCircle(rect.left + rect.width() * 0.22f, rect.top + rect.height() * 0.25f, 68f, orbPaint)
+                orbPaint.color = style.accentSecondary
+                canvas.drawCircle(rect.right - rect.width() * 0.22f, rect.bottom - rect.height() * 0.25f, 68f, orbPaint)
+            }
+        }
     }
 
     private fun pickOptimalTextSize(phrase: String, paint: TextPaint, maxWidth: Int): Float {

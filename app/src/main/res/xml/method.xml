@@ -5,15 +5,15 @@
     <subtype
         android:imeSubtypeLocale="en_US"
         android:imeSubtypeMode="keyboard"
-        android:label="English (QWERTY)" />
+        android:label="@string/subtype_en_us" />
     <subtype
         android:imeSubtypeLocale="bn_BD"
         android:imeSubtypeMode="keyboard"
-        android:label="বাংলা (Bengali)" />
+        android:label="@string/subtype_bn_bd" />
     <subtype
         android:imeSubtypeLocale="hi_IN"
         android:imeSubtypeMode="keyboard"
-        android:label="हिन्दी (Hindi)" />
+        android:label="@string/subtype_hi_in" />
     <subtype
         android:imeSubtypeLocale="ar_SA"
         android:imeSubtypeMode="keyboard"

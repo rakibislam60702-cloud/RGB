@@ -19,23 +19,23 @@ import kotlinx.coroutines.flow.asStateFlow
 enum class BanglaGuideScript(val utteranceId: String, val bengaliText: String) {
     WELCOME_STEP_1(
         utteranceId = "bn_guide_step_1",
-        bengaliText = "রাকিব অফিশিয়াল কিবোর্ডে আপনাকে স্বাগতম। কিবোর্ডটি চালু করতে নিচের এক নম্বর বাটনে চাপ দিন এবং তালিকা থেকে রাকিব অফিশিয়াল অপশনটি অন করে দিন।"
+        bengaliText = "এ আই কিবোর্ডে আপনাকে স্বাগতম। কিবোর্ডটি চালু করতে নিচের এক নম্বর বাটনে চাপ দিন এবং তালিকা থেকে AI Keyboard অপশনটি অন করে দিন।"
     ),
     STEP_2(
         utteranceId = "bn_guide_step_2",
-        bengaliText = "দারুণ! এবার দুই নম্বর বাটনে চাপ দিয়ে পপ-আপ তালিকা থেকে রাকিব অফিশিয়াল কিবোর্ডটি সিলেক্ট করুন।"
+        bengaliText = "দারুণ! এবার দুই নম্বর বাটনে চাপ দিয়ে পপ-আপ তালিকা থেকে AI Keyboard সিলেক্ট করুন।"
     ),
     COMPLETE(
         utteranceId = "bn_guide_complete",
-        bengaliText = "অভিনন্দন! আপনার কিবোর্ড সম্পূর্ণ প্রস্তুত। পৃথিবী বাটনে চাপ দিয়ে বাংলা ও ইংরেজি পরিবর্তন করতে পারবেন এবং মাইক বাটনে চাপ দিয়ে বাংলায় ভয়েস টাইপিং করতে পারবেন।"
+        bengaliText = "অভিনন্দন! আপনার AI Keyboard সম্পূর্ণ প্রস্তুত। পৃথিবী বাটনে চাপ দিয়ে বাংলা, ইংরেজি ও হিন্দি পরিবর্তন করতে পারবেন এবং মাইক বাটনে চাপ দিয়ে সরাসরি ভয়েস টাইপিং করতে পারবেন।"
     ),
     USAGE_GUIDE(
         utteranceId = "bn_guide_usage",
-        bengaliText = "রাকিব অফিশিয়াল কিবোর্ড ব্যবহার করা খুবই সহজ। পৃথিবী বাটনে চাপ দিয়ে বাংলা ও ইংরেজি পরিবর্তন করতে পারবেন। মাইক বাটনে চাপ দিয়ে বাংলায় ভয়েস টাইপিং করতে পারবেন। বাম দিকের তীর বাটনে দুবার চাপ দিয়ে ক্যাপস লক চালু করতে পারবেন, এবং ইফেক্টস ট্যাব থেকে ব্যানার বা গ্যালারির ছবি ব্যাকগ্রাউন্ডে বসাতে পারবেন।"
+        bengaliText = "AI Keyboard ব্যবহার করা খুবই সহজ। পৃথিবী বাটনে চাপ দিয়ে বাংলা, ইংরেজি ও হিন্দি পরিবর্তন করতে পারবেন। মাইক বাটনে চাপ দিয়ে সরাসরি ভয়েস টাইপিং করতে পারবেন। লেখা টাইপ করে আর জি বি স্টিকার বাটনে চাপ দিয়ে ৬টি নিয়ন স্টাইলে স্টিকার পাঠাতে পারবেন।"
     ),
     PAYMENT_UNLOCKED(
         utteranceId = "bn_guide_payment_unlocked",
-        bengaliText = "অভিনন্দন! আপনার পেমেন্ট সফল হয়েছে এবং রাকিব অফিশিয়াল কিবোর্ডের সমস্ত VIP ফিচার চিরজীবনের জন্য আনলক হয়েছে।"
+        bengaliText = "অভিনন্দন! আপনার পেমেন্ট সফল হয়েছে এবং AI Keyboard-এর সমস্ত VIP ফিচার চিরজীবনের জন্য আনলক হয়েছে।"
     )
 }
 
@@ -175,19 +175,23 @@ class BanglaVoiceGuideController(
     }
 
     /**
-     * Automatically speaks the warm Bengali welcome & Step 1 instruction on first launch
-     * (or Step 2 / Complete depending on current keyboard setup status).
+     * Stage 1: Plays the Bengali voice guide ONLY during the 2 initial setup steps
+     * (enabling AI Keyboard and selecting AI Keyboard). Stops TTS immediately if setup is complete.
      */
     fun triggerFirstLaunchWelcomeIfNeeded(isEnabled: Boolean, isSelected: Boolean) {
+        if (isEnabled && isSelected) {
+            stopSpeaking()
+            return
+        }
         if (_state.value.isMuted) return
         val alreadySpoken = prefs.getBoolean(KEY_FIRST_WELCOME_SPOKEN, false)
         if (alreadySpoken) return
 
         prefs.edit().putBoolean(KEY_FIRST_WELCOME_SPOKEN, true).apply()
-        val script = when {
-            !isEnabled -> BanglaGuideScript.WELCOME_STEP_1
-            !isSelected -> BanglaGuideScript.STEP_2
-            else -> BanglaGuideScript.COMPLETE
+        val script = if (!isEnabled) {
+            BanglaGuideScript.WELCOME_STEP_1
+        } else {
+            BanglaGuideScript.STEP_2
         }
         speak(script, forceUnmute = false)
     }

@@ -1,6 +1,6 @@
 {
-  "name": "Pro RGB Keyboard",
-  "description": "A customizable Android RGB mechanical keyboard input method (IME) with real-time wave, ripple, breathing, matrix, and starlight lighting effects, mechanical switch acoustics, haptic feedback, and a live studio preview.",
+  "name": "AI Keyboard",
+  "description": "AI Keyboard by Rakib official — GTA VI neon RGB keyboard with 6-style RGB text stickers, real-time voice typing, tri-language smart word prediction, and custom photo themes.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Pro RGB Keyboard"
+rootProject.name = "AI Keyboard"
 
 include(":app")

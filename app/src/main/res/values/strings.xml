@@ -1,7 +1,8 @@
 <resources>
-    <string name="app_name">Pro RGB Keyboard</string>
+    <string name="app_name">AI Keyboard</string>
     <string name="subtype_en_us">English (QWERTY)</string>
     <string name="subtype_bn_bd">বাংলা (Bengali)</string>
+    <string name="subtype_hi_in">हिन्दी (Hindi)</string>
     <string name="quick_language_label">KEYBOARD LANGUAGE</string>
     <string name="label_default_language">Active Input Language</string>
     <string name="cd_switch_language">Switch keyboard language</string>
@@ -19,8 +20,8 @@
     <string name="status_active">Active Keyboard</string>
     <string name="status_enabled">Enabled · Tap to Select</string>
     <string name="status_not_enabled">Setup Required</string>
-    <string name="action_enable_ime">Step 1: Enable Rakib official Keyboard</string>
-    <string name="action_select_ime">Step 2: Select Active Keyboard</string>
+    <string name="action_enable_ime">Step 1: Enable AI Keyboard</string>
+    <string name="action_select_ime">Step 2: Select AI Keyboard</string>
     <string name="action_active_ready">Active &amp; Ready</string>
     <string name="action_open_settings">Keyboard Settings</string>
     <string name="setup_step_1_card_subtitle">Opens Android keyboard settings · Auto-detects when enabled</string>
@@ -72,10 +73,10 @@
     <string name="label_double_space_period">Double-Space Period</string>
     <string name="label_double_space_period_desc">Insert a period when double-tapping Space</string>
     <string name="section_setup_guide">System IME Setup</string>
-    <string name="setup_step_1_title">1. Enable Pro RGB Keyboard</string>
-    <string name="setup_step_1_desc">Toggle Pro RGB Keyboard on inside Android On-Screen Keyboard settings.</string>
-    <string name="setup_step_2_title">2. Select as Default IME</string>
-    <string name="setup_step_2_desc">Pick Pro RGB Keyboard from the system input switcher to type anywhere.</string>
+    <string name="setup_step_1_title">1. Enable AI Keyboard</string>
+    <string name="setup_step_1_desc">Toggle AI Keyboard on inside Android On-Screen Keyboard settings.</string>
+    <string name="setup_step_2_title">2. Select AI Keyboard as Default</string>
+    <string name="setup_step_2_desc">Pick AI Keyboard from the system input switcher to type anywhere.</string>
     <string name="reset_defaults">Reset to Factory Defaults</string>
 
     <!-- Content descriptions -->
@@ -87,7 +88,7 @@
     <string name="cd_emoji">Emoji panel</string>
     <string name="cd_cycle_effect">Cycle RGB lighting effect</string>
     <string name="cd_cycle_palette">Cycle RGB color palette</string>
-    <string name="cd_open_app">Open Pro RGB Keyboard studio</string>
+    <string name="cd_open_app">Open AI Keyboard studio</string>
     <string name="cd_switch_ime">Switch input method</string>
     <string name="cd_hide_keyboard">Hide keyboard</string>
     <string name="cd_clear_text">Clear playground text</string>
@@ -127,9 +128,9 @@
     <string name="cd_custom_photo_preview">Custom keyboard background photo preview</string>
 
     <!-- Online Voice Typing -->
-    <string name="voice_listening_bn">শুনছি (বাংলা)… বলুন</string>
-    <string name="voice_listening_en">Listening (English)… Speak now</string>
-    <string name="voice_listening_hi">सुन रहा हूँ (हिन्दी)… बोलिए</string>
+    <string name="voice_listening_bn">🎙️ শোনা যাচ্ছে... (বলুন)</string>
+    <string name="voice_listening_en">🎙️ শোনা যাচ্ছে... (বলুন)</string>
+    <string name="voice_listening_hi">🎙️ শোনা যাচ্ছে... (বলুন)</string>
     <string name="voice_tap_to_speak">Tap mic to speak directly</string>
     <string name="voice_permission_needed">Microphone permission required for voice typing</string>
     <string name="voice_error_retry">Could not hear clearly — tap mic to retry</string>
@@ -137,17 +138,46 @@
     <!-- Instant RGB Neon Text Stickers & Smart Suggestions -->
     <string name="chip_rgb_sticker">✨ RGB Sticker</string>
     <string name="chip_rgb_sticker_vip_locked">🔒 VIP • RGB Sticker</string>
+    <string name="sticker_selector_title">✨ RGB Sticker Style</string>
+    <string name="sticker_selector_tap_hint">যেকোনো স্টাইলে ট্যাপ করলেই স্টিকার সেন্ড হবে</string>
     <string name="sticker_preview_title">✨ RGB Neon Text Sticker</string>
     <string name="sticker_share_btn">Share Sticker</string>
     <string name="sticker_close_btn">Close</string>
 
+    <!-- Unified ✨ AI Shayari & Smart Reply Hub + Stylish Fonts -->
+    <string name="toolbar_ai_hub">✨ AI</string>
+    <string name="toolbar_ai_hub_locked">🔒 AI</string>
+    <string name="toolbar_stylish_fonts">Aa</string>
+    <string name="cd_ai_hub">AI Shayari and Smart Reply Hub</string>
+    <string name="cd_stylish_fonts">Stylish Unicode Fonts</string>
+    <string name="stylish_fonts_title">Aa Stylish Fonts</string>
+    <string name="ai_hub_topic_hint">বিষয় লিখুন (যেমন: বৃষ্টি, ভালোবাসা, বন্ধু)…</string>
+    <string name="ai_hub_generate_btn">Generate ✨</string>
+    <string name="ai_hub_back_to_vault">← সব শায়ারি</string>
+    <string name="ai_hub_topic_mode_label">✨ বিষয় লিখুন:</string>
+
+    <!-- 3-Stage Onboarding: Silent Feature Tour & 3-Second Auto-Disappearing Final VIP Banner -->
+    <string name="tour_skip_button">Skip ✕</string>
+    <string name="tour_tap_pointed_area_hint">এগোতে চিহ্নিত জায়গায় ট্যাপ করুন</string>
+    <string name="tour_step_1_title">✨ AI শায়ারি ও স্মার্ট রিপ্লাই</string>
+    <string name="tour_step_1_desc">১৬০+ বাংলা ও ইংরেজি শায়ারি এবং নিজের বিষয় লিখে অটো শায়ারি তৈরি করুন।</string>
+    <string name="tour_step_2_title">✨ RGB Neon Sticker</string>
+    <string name="tour_step_2_desc">যেকোনো লেখা টাইপ করে ৬টি গ্লোয়িং নিয়ন স্টাইলে সরাসরি স্টিকার পাঠান।</string>
+    <string name="tour_step_3_title">Aa স্টাইলিশ ফন্ট ও 📋 ক্লিপবোর্ড</string>
+    <string name="tour_step_3_desc">Aa দিয়ে স্টাইলিশ ফন্টে লিখুন এবং 📋 দিয়ে কপি করা লেখা ১-ট্যাপে পেস্ট করুন।</string>
+    <string name="tour_step_4_title">🎙️ ভয়েস টাইপিং ও 🌐 ভাষা পরিবর্তন</string>
+    <string name="tour_step_4_desc">🎙️ চেপে সরাসরি মুখে বলুন আর স্পেসবারের পাশে 🌐 চেপে বাংলা, EN ও हिन्दी বদলান।</string>
+    <string name="tour_step_5_title">Touch Spark RGB কিবোর্ড</string>
+    <string name="tour_step_5_desc">প্রতিটি বাটনে চাপলেই জ্বলবে দারুণ Touch Spark নিয়ন আলো!</string>
+    <string name="tour_final_vip_banner_text">👑 চাইলে Lifetime VIP নিতে পারেন (প্রথম ৭ দিন সম্পূর্ণ ফ্রি!)</string>
+
     <!-- Minimalist Bangla Setup Cards & Interactive Bangla Voice Guide -->
-    <string name="bn_setup_step_1_title">১. কিবোর্ড চালু করুন</string>
-    <string name="bn_setup_step_1_subtitle">তালিকার নিচে \'Rakib official\' অন করুন</string>
-    <string name="bn_setup_step_1_done">চালু করা হয়েছে ✓</string>
-    <string name="bn_setup_step_2_title">২. কিবোর্ড সিলেক্ট করুন</string>
-    <string name="bn_setup_step_2_subtitle">তালিকা থেকে \'Rakib official\' বেছে নিন</string>
-    <string name="bn_setup_step_2_done">ব্যবহারের জন্য প্রস্তুত</string>
+    <string name="bn_setup_step_1_title">১. AI Keyboard চালু করুন</string>
+    <string name="bn_setup_step_1_subtitle">তালিকার নিচে \'AI Keyboard\' অন করুন</string>
+    <string name="bn_setup_step_1_done">AI Keyboard চালু হয়েছে ✓</string>
+    <string name="bn_setup_step_2_title">২. AI Keyboard সিলেক্ট করুন</string>
+    <string name="bn_setup_step_2_subtitle">তালিকা থেকে \'AI Keyboard\' বেছে নিন</string>
+    <string name="bn_setup_step_2_done">AI Keyboard ব্যবহারের জন্য প্রস্তুত</string>
     <string name="bn_badge_enabled_short">চালু ✓</string>
     <string name="bn_badge_active_short">সক্রিয় ✓</string>
     <string name="bn_hero_pro_badge">VICE RGB</string>
@@ -187,9 +217,9 @@
     <string name="bn_btn_apply_to_keyboard">Save / Apply to Keyboard</string>
     <string name="bn_btn_apply_to_real_keyboard">🔒 Save / Apply to Keyboard (₹20 Lifetime VIP)</string>
     <string name="bn_unlock_screen_title">Rakib official · Lifetime VIP</string>
-    <string name="bn_unlock_expired_message">আপনার ৭ দিনের ফ্রি VIP ট্রায়াল শেষ হয়েছে! আপনার কিবোর্ড এখন Classic Black (No RGB) ফ্রি মোডে চলছে। সব RGB লাইট, Vice City থিম ও কাস্টম ফটো আনলক করতে এককালীন মাত্র ₹20 পেমেন্ট করুন।</string>
-    <string name="bn_unlock_active_trial_message">এককালীন মাত্র ₹20 পেমেন্টে Touch Spark RGB লাইট, Vice City থিম ও কাস্টম ফটো চিরজীবনের জন্য আনলক করুন।</string>
-    <string name="bn_btn_upi_pay">PhonePe / GPay দিয়ে ₹20 পেমেন্ট করুন (Lifetime VIP)</string>
+    <string name="bn_unlock_expired_message">আপনার ৭ দিনের ফ্রি VIP ট্রায়াল শেষ হয়েছে! আপনার কিবোর্ড এখন Classic Black (No RGB) ফ্রি মোডে চলছে। সব RGB লাইট, ✨ AI শায়ারি হাব, Vice City থিম ও কাস্টম ফটো আনলক করতে এককালীন মাত্র ₹20 পেমেন্ট করুন।</string>
+    <string name="bn_unlock_active_trial_message">এককালীন মাত্র ₹20 পেমেন্টে Touch Spark RGB লাইট, ✨ AI শায়ারি হাব, Vice City থিম ও কাস্টম ফটো চিরজীবনের জন্য আনলক করুন।</string>
+    <string name="bn_btn_upi_pay">PhonePe / GPay দিয়ে ₹20 পেমেন্ট করুন</string>
     <string name="bn_owner_pin_helper_link">পেমেন্ট সফল হয়েছে কিন্তু আনলক হয়নি? মালিকের পিন দিয়ে খুলুন</string>
     <string name="bn_device_id_label">আপনার ডিভাইস আইডি (Device ID)</string>
     <string name="bn_device_id_copied">ডিভাইস আইডি কপি করা হয়েছে</string>
@@ -211,8 +241,8 @@
     <string name="bn_ime_locked_button">🔓 ₹২০ দিয়ে Lifetime VIP আনলক করুন</string>
     <string name="bn_unlock_benefits_title">LIFETIME VIP • ONE-TIME PAYMENT (₹20):</string>
     <string name="bn_unlock_benefit_1">✨ Touch Spark, Spectrum Wave, Ripple, Matrix ও সব RGB লাইট</string>
-    <string name="bn_unlock_benefit_2">🌴 Vice City Sunset ব্যানার ও কাস্টম গ্যালারি ফটো ব্যাকগ্রাউন্ড</string>
-    <string name="bn_unlock_benefit_3">🎨 Vice City Sunset প্যালেট, কীক্যাপ স্টাইল ও গ্লো টিউনিং</string>
+    <string name="bn_unlock_benefit_2">💬 ✨ AI শায়ারি ও স্মার্ট রিপ্লাই হাব (১৬০+ বাংলা ও ইংরেজি লাইন)</string>
+    <string name="bn_unlock_benefit_3">🌴 Vice City Sunset ব্যানার, RGB স্টিকার ও কাস্টম গ্যালারি ফটো</string>
     <string name="bn_unlock_benefit_4">✅ English, বাংলা, हिन्दी, ভয়েস টাইপিং ও Classic Black সবসময় ফ্রি!</string>
     <string name="bn_mobile_number_label">আপনার মোবাইল নম্বর (সিম থেকে ১-ট্যাপে নিন)</string>
     <string name="bn_mobile_pick_sim_btn">📱 ১-ট্যাপে সিম নম্বর নিন</string>

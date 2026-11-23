@@ -16,15 +16,15 @@ import com.example.data.CustomPhotoTheme
 import com.example.data.KeyboardPreferencesRepository
 import com.example.data.LanguagePackManager
 import com.example.data.LicenseUiState
-import com.example.data.PinVerificationResult
-import com.example.data.RestoreVipResult
 import com.example.data.TrialLicenseManager
 import com.example.data.UpiVerificationResult
 import com.example.engine.BanglaGuideScript
 import com.example.engine.BanglaVoiceGuideController
 import com.example.engine.MechanicalFeedbackEngine
+import com.example.engine.SmartWordPredictor
 import com.example.engine.VoiceGuideState
 import com.example.keyboard.ShiftState
+import com.example.model.AppUiLanguage
 import com.example.model.ImeStatus
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardLanguage
@@ -35,6 +35,7 @@ import com.example.model.LanguagePackUiState
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.model.SwitchSoundProfile
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -111,11 +112,30 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val _playgroundShift = MutableStateFlow(ShiftState.ONCE)
     val playgroundShift: StateFlow<ShiftState> = _playgroundShift.asStateFlow()
 
+    private val onboardingPrefs = application.getSharedPreferences(PREFS_ONBOARDING, Context.MODE_PRIVATE)
+    private val uiLanguagePrefs = application.getSharedPreferences(PREFS_UI_LANGUAGE, Context.MODE_PRIVATE)
+    private var hasCompletedFeatureTour: Boolean =
+        onboardingPrefs.getBoolean(KEY_HAS_COMPLETED_FEATURE_TOUR, false)
+
+    private val _appUiLanguage = MutableStateFlow(
+        AppUiLanguage.fromCode(uiLanguagePrefs.getString(KEY_APP_UI_LANGUAGE, AppUiLanguage.BENGALI.code))
+    )
+    val appUiLanguage: StateFlow<AppUiLanguage> = _appUiLanguage.asStateFlow()
+
+    private val _showFeatureTour = MutableStateFlow(false)
+    val showFeatureTour: StateFlow<Boolean> = _showFeatureTour.asStateFlow()
+
+    private val _showFinalVipBanner = MutableStateFlow(false)
+    val showFinalVipBanner: StateFlow<Boolean> = _showFinalVipBanner.asStateFlow()
+
+    private var finalVipBannerJob: Job? = null
+
     private var hasInitializedImeStatus: Boolean = false
     private var lastShiftTapMs: Long = 0L
     private var lastSpaceTapMs: Long = 0L
 
     init {
+        SmartWordPredictor.init(application)
         trialLicenseManager.tryAutoRestoreFromLicenseFile()
         refreshImeStatus()
         startTrialCountdownTicker()
@@ -137,10 +157,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         trialLicenseManager.refreshState()
     }
 
-    fun savePendingMobileNumber(rawMobile: String): String {
-        return trialLicenseManager.savePendingMobileNumber(rawMobile)
-    }
-
     fun createOfficialUpiIntent(): Pair<String, Intent> {
         return trialLicenseManager.createOfficialUpiIntent()
     }
@@ -148,39 +164,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun verifyUpiPaymentResult(
         resultCode: Int,
         data: Intent?,
-        expectedTxnRef: String?,
-        mobileNumber: String
+        expectedTxnRef: String?
     ): UpiVerificationResult {
-        val result = trialLicenseManager.verifyUpiIntentResult(
+        return trialLicenseManager.verifyUpiIntentResult(
             resultCode = resultCode,
             data = data,
-            expectedTxnRef = expectedTxnRef,
-            rawMobileNumber = mobileNumber
+            expectedTxnRef = expectedTxnRef
         )
-        if (result is UpiVerificationResult.Success) {
-            voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
-        }
-        return result
-    }
-
-    fun restoreVipByMobile(mobileNumber: String): RestoreVipResult {
-        val result = trialLicenseManager.restoreVipByMobileNumber(mobileNumber)
-        if (result is RestoreVipResult.Restored) {
-            voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
-        }
-        return result
-    }
-
-    fun verifyOwnerUnlockPin(pin: String): PinVerificationResult {
-        val result = trialLicenseManager.verifyOwnerPin(pin)
-        if (result is PinVerificationResult.Success) {
-            voiceGuideController.speak(BanglaGuideScript.PAYMENT_UNLOCKED, forceUnmute = true)
-        }
-        return result
-    }
-
-    fun buildWhatsAppReceiptUri(): Uri {
-        return trialLicenseManager.buildWhatsAppReceiptUri()
     }
 
     fun buildUpiQrPayload(): String {
@@ -217,32 +207,96 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         )
         _imeStatus.value = updated
 
+        val setupCompleted = updated.isEnabled && updated.isSelected
+
         if (!hasInitializedImeStatus) {
             hasInitializedImeStatus = true
-            voiceGuideController.triggerFirstLaunchWelcomeIfNeeded(isEnabled, isSelected)
+            // Stage 1: Play Bengali TTS voice ONLY during the 2 initial setup steps
+            if (setupCompleted) {
+                voiceGuideController.stopSpeaking()
+                maybeLaunchSilentFeatureTour()
+            } else {
+                voiceGuideController.triggerFirstLaunchWelcomeIfNeeded(isEnabled, isSelected)
+            }
         } else {
-            // Automatically narrate next Bengali step when user completes Step 1 or Step 2
             when {
-                !previous.isSelected && updated.isSelected -> {
-                    voiceGuideController.speak(BanglaGuideScript.COMPLETE, forceUnmute = false)
+                setupCompleted -> {
+                    // Stage 1 complete: immediately stop all TTS voice and launch Stage 2 silent tour if pending
+                    voiceGuideController.stopSpeaking()
+                    maybeLaunchSilentFeatureTour()
                 }
                 !previous.isEnabled && updated.isEnabled && !updated.isSelected -> {
+                    // Stage 1 Step 2: narrate Step 2 instruction
                     voiceGuideController.speak(BanglaGuideScript.STEP_2, forceUnmute = false)
                 }
             }
         }
     }
 
+    private fun maybeLaunchSilentFeatureTour() {
+        if (!hasCompletedFeatureTour && !_showFeatureTour.value && !_showFinalVipBanner.value) {
+            voiceGuideController.stopSpeaking()
+            _showFeatureTour.value = true
+        }
+    }
+
+    /**
+     * Stage 3: Called when the final arrow step is tapped OR top-right "Skip ✕" is tapped.
+     * Saves `has_completed_feature_tour = true`, shows the glowing center Lifetime VIP banner,
+     * and automatically fades it out completely after 3 seconds (`delay(3000)`).
+     */
+    fun finishOrSkipFeatureTour() {
+        voiceGuideController.stopSpeaking()
+        _showFeatureTour.value = false
+        if (!hasCompletedFeatureTour) {
+            hasCompletedFeatureTour = true
+            onboardingPrefs.edit().putBoolean(KEY_HAS_COMPLETED_FEATURE_TOUR, true).apply()
+        }
+        finalVipBannerJob?.cancel()
+        _showFinalVipBanner.value = true
+        finalVipBannerJob = viewModelScope.launch {
+            delay(3_000L)
+            _showFinalVipBanner.value = false
+        }
+    }
+
+    /**
+     * Replays Stage 2 silent bouncing-arrow interactive guide on demand from Settings.
+     */
+    fun replayFeatureTour() {
+        voiceGuideController.stopSpeaking()
+        finalVipBannerJob?.cancel()
+        _showFinalVipBanner.value = false
+        _showFeatureTour.value = true
+    }
+
+    fun setAppUiLanguage(language: AppUiLanguage) {
+        _appUiLanguage.value = language
+        uiLanguagePrefs.edit().putString(KEY_APP_UI_LANGUAGE, language.code).apply()
+    }
+
     fun speakBanglaGuide(script: BanglaGuideScript) {
-        voiceGuideController.speak(script, forceUnmute = true)
+        val status = _imeStatus.value
+        // Stage 1 rule: Bengali voice guide plays ONLY during initial 2-step setup
+        if (status.isEnabled && status.isSelected) {
+            voiceGuideController.stopSpeaking()
+            return
+        }
+        if (script == BanglaGuideScript.WELCOME_STEP_1 || script == BanglaGuideScript.STEP_2) {
+            voiceGuideController.speak(script, forceUnmute = true)
+        }
     }
 
     fun toggleVoiceGuideStopOrMute() {
         val status = _imeStatus.value
-        val recommended = when {
-            !status.isEnabled -> BanglaGuideScript.WELCOME_STEP_1
-            !status.isSelected -> BanglaGuideScript.STEP_2
-            else -> BanglaGuideScript.COMPLETE
+        if (status.isEnabled && status.isSelected) {
+            voiceGuideController.stopSpeaking()
+            return
+        }
+        val recommended = if (!status.isEnabled) {
+            BanglaGuideScript.WELCOME_STEP_1
+        } else {
+            BanglaGuideScript.STEP_2
         }
         voiceGuideController.toggleStopOrMute(recommended)
     }
@@ -306,6 +360,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
+        if (settings.value.smartSuggestionsEnabled && current.isNotBlank()) {
+            SmartWordPredictor.learnFromCompletedInput(getApplication(), current, activeId)
+        }
         _playgroundText.value = "$current "
         lastSpaceTapMs = now
         if (isEnglish &&
@@ -318,7 +375,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun onPlaygroundEnter() {
-        _playgroundText.value += "\n"
+        val current = _playgroundText.value
+        if (settings.value.smartSuggestionsEnabled && current.isNotBlank()) {
+            SmartWordPredictor.learnFromCompletedInput(getApplication(), current, settings.value.activeLanguageId)
+        }
+        _playgroundText.value = "$current\n"
         lastSpaceTapMs = 0L
         if (settings.value.activeLanguageId == LanguageCatalog.ENGLISH_ID &&
             settings.value.autoCapitalize &&
@@ -512,6 +573,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { repository.updateDoubleSpacePeriod(enabled) }
     }
 
+    fun setSmartSuggestionsEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.updateSmartSuggestionsEnabled(enabled) }
+    }
+
     fun selectBannerPreset(presetId: String) {
         customBackgroundManager.selectPreset(presetId)
     }
@@ -536,7 +601,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        finalVipBannerJob?.cancel()
         feedbackEngine.release()
         voiceGuideController.release()
+    }
+
+    companion object {
+        private const val PREFS_ONBOARDING = "ai_keyboard_onboarding_prefs"
+        private const val KEY_HAS_COMPLETED_FEATURE_TOUR = "has_completed_feature_tour"
+        private const val PREFS_UI_LANGUAGE = "ai_keyboard_ui_lang_prefs"
+        private const val KEY_APP_UI_LANGUAGE = "app_ui_language"
     }
 }

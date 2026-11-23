@@ -1,12 +1,17 @@
 package com.example
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.PorterDuff
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.inputmethodservice.InputMethodService
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
@@ -24,6 +29,7 @@ import android.widget.GridView
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import com.example.data.ClipboardHistoryManager
@@ -33,15 +39,20 @@ import com.example.data.KeyboardPreferencesRepository
 import com.example.data.LanguagePackManager
 import com.example.data.LicenseUiState
 import com.example.data.TrialLicenseManager
+import com.example.engine.GeneratedShayariResult
 import com.example.engine.MechanicalFeedbackEngine
 import com.example.engine.OnlineVoiceTypingController
 import com.example.engine.RgbStickerGenerator
+import com.example.engine.RgbStickerStyle
+import com.example.engine.ShayariCategory
+import com.example.engine.ShayariVault
 import com.example.engine.SmartWordPredictor
+import com.example.engine.StylishFontEngine
+import com.example.engine.StylishFontStyle
 import com.example.model.EmojiCatalog
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
 import com.example.model.LanguageCatalog
-import com.example.model.RgbEffect
 import com.example.rgbkeyboard.RgbKeyboardView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,10 +83,15 @@ class RgbKeyboardService : InputMethodService() {
     private lateinit var voiceController: OnlineVoiceTypingController
 
     private var topBar: View? = null
+    private var tvBrandSignature: TextView? = null
     private var voiceBar: View? = null
     private var tvVoiceLangBadge: TextView? = null
     private var tvVoiceStatus: TextView? = null
     private var btnVoiceStop: Button? = null
+    private var aiTopicTypingBar: View? = null
+    private var tvAiTopicDraft: TextView? = null
+    private var btnAiTopicGenerateNow: TextView? = null
+    private var btnAiTopicCancel: TextView? = null
     private var suggestionBar: HorizontalScrollView? = null
     private var suggestionContainer: LinearLayout? = null
 
@@ -85,8 +101,23 @@ class RgbKeyboardService : InputMethodService() {
     private var clipboardPanel: View? = null
     private var clipboardContainer: LinearLayout? = null
     private var tvClipboardEmpty: TextView? = null
-    private var reactionsPanel: View? = null
-    private var reactionsContainer: LinearLayout? = null
+    private var stylishFontPanel: View? = null
+    private var stylishFontContainer: LinearLayout? = null
+    private var aiHubPanel: View? = null
+    private var tvAiTopicBox: TextView? = null
+    private var btnAiGenerate: TextView? = null
+    private var btnAiHubClose: TextView? = null
+    private var aiCategoryTabs: LinearLayout? = null
+    private var aiQuickTopicsContainer: LinearLayout? = null
+    private var aiShayariScroll: ScrollView? = null
+    private var aiShayariContainer: LinearLayout? = null
+
+    private var stickerPanel: View? = null
+    private var tvStickerPhrasePreview: TextView? = null
+    private var stickerStyleGridContainer: LinearLayout? = null
+    private var stickerPulseAnimator: ValueAnimator? = null
+    private val stickerCardViews = mutableListOf<View>()
+    private var pendingStickerPhrase: String = ""
 
     private var emojiPanel: View? = null
     private var emojiCategoryTabs: LinearLayout? = null
@@ -98,38 +129,31 @@ class RgbKeyboardService : InputMethodService() {
     private var selectedEmojiCategoryIndex: Int = 0
     private var isEmojiBackspaceRepeating: Boolean = false
 
-    private var btnMenu: ImageButton? = null
-    private var btnEmoji: ImageButton? = null
-    private var btnGif: ImageButton? = null
-    private var btnTheme: ImageButton? = null
+    private var btnEmoji: TextView? = null
+    private var btnClipboard: TextView? = null
+    private var btnStylishFonts: TextView? = null
     private var btnMic: ImageButton? = null
+    private var btnAiHub: TextView? = null
 
     private var currentSettings: KeyboardSettings = KeyboardSettings()
     private var currentPhotoTheme: CustomPhotoTheme = CustomPhotoTheme()
     private var currentLicenseState: LicenseUiState = LicenseUiState()
     private var activeOverlay: OverlayMode = OverlayMode.NONE
+    private var activeStylishFont: StylishFontStyle = StylishFontStyle.NORMAL
+    private var selectedAiCategory: ShayariCategory = ShayariCategory.ROMANTIC
+    private var generatedAiResult: GeneratedShayariResult? = null
+    private var expandedShayariIndex: Int? = null
+    private var aiTopicDraft: String = ""
+    private var isAiTopicTypingMode: Boolean = false
+    private var aiGenerationSeed: Int = 0
+
     private var lastSpaceTapTimeMs: Long = 0L
     private var latestVoiceState = OnlineVoiceTypingController.VoiceListeningState()
     private var hasActiveVoiceComposing: Boolean = false
     private var isGeneratingSticker: Boolean = false
     private var bengaliTypeface: Typeface? = null
 
-    private enum class OverlayMode { NONE, CLIPBOARD, REACTIONS, EMOJI }
-
-    private val quickReactions = listOf(
-        "🔥 Lit!" to "🔥",
-        "⚡ GG WP" to "⚡ GG WP!",
-        "✨ Nice!" to "✨ Nice!",
-        "🚀 Let's Go" to "🚀 Let's go!",
-        "¯\\_(ツ)_/¯" to "¯\\_(ツ)_/¯",
-        "(ง •̀_•́)ง" to "(ง •̀_•́)ง",
-        "❤️ Love it" to "❤️ Love it!",
-        "🎉 Congrats" to "🎉 Congratulations!",
-        "😎 Cool" to "😎",
-        "💯 100%" to "💯",
-        "(♥‿♥)" to "(♥‿♥)",
-        "✨ দারুণ!" to "✨ দারুণ!"
-    )
+    private enum class OverlayMode { NONE, CLIPBOARD, FONTS, EMOJI, STICKER_SELECTOR, AI_HUB }
 
     private val emojiBackspaceRepeatRunnable = object : Runnable {
         override fun run() {
@@ -152,6 +176,7 @@ class RgbKeyboardService : InputMethodService() {
         currentPhotoTheme = customBackgroundManager.getCurrentTheme()
         currentLicenseState = trialLicenseManager.refreshState()
 
+        SmartWordPredictor.init(applicationContext)
         bengaliTypeface = runCatching {
             ResourcesCompat.getFont(applicationContext, R.font.noto_sans_bengali)
         }.getOrNull()
@@ -175,6 +200,11 @@ class RgbKeyboardService : InputMethodService() {
             onFinalText = { spokenText ->
                 uiHandler.post {
                     hasActiveVoiceComposing = false
+                    SmartWordPredictor.learnFromCompletedInput(
+                        applicationContext,
+                        spokenText,
+                        currentSettings.activeLanguageId
+                    )
                     handleCommitText("$spokenText ")
                 }
             }
@@ -219,19 +249,26 @@ class RgbKeyboardService : InputMethodService() {
         val root = layoutInflater.inflate(R.layout.keyboard_view, null)
 
         topBar = root.findViewById(R.id.topBar)
+        tvBrandSignature = root.findViewById(R.id.tvBrandSignature)
+        styleBrandSignatureBadge(tvBrandSignature)
         voiceBar = root.findViewById(R.id.voiceBar)
         tvVoiceLangBadge = root.findViewById(R.id.tvVoiceLangBadge)
         tvVoiceStatus = root.findViewById(R.id.tvVoiceStatus)
         btnVoiceStop = root.findViewById(R.id.btnVoiceStop)
+        aiTopicTypingBar = root.findViewById(R.id.aiTopicTypingBar)
+        tvAiTopicDraft = root.findViewById(R.id.tvAiTopicDraft)
+        btnAiTopicGenerateNow = root.findViewById(R.id.btnAiTopicGenerateNow)
+        btnAiTopicCancel = root.findViewById(R.id.btnAiTopicCancel)
         suggestionBar = root.findViewById(R.id.suggestionBar)
         suggestionContainer = root.findViewById(R.id.suggestionContainer)
+        styleVoiceStatusBar()
+        styleAiTopicTypingBar()
 
-        btnMenu = root.findViewById(R.id.btnMenu)
         btnEmoji = root.findViewById(R.id.btnEmoji)
-        btnGif = root.findViewById(R.id.btnGif)
-        val btnSettings: ImageButton? = root.findViewById(R.id.btnSettings)
-        btnTheme = root.findViewById(R.id.btnTheme)
+        btnClipboard = root.findViewById(R.id.btnClipboard)
+        btnStylishFonts = root.findViewById(R.id.btnStylishFonts)
         btnMic = root.findViewById(R.id.btnMic)
+        btnAiHub = root.findViewById(R.id.btnAiHub)
 
         clipboardPanel = root.findViewById(R.id.clipboardPanel)
         clipboardContainer = root.findViewById(R.id.clipboardContainer)
@@ -239,9 +276,28 @@ class RgbKeyboardService : InputMethodService() {
         val btnClipboardClear: Button? = root.findViewById(R.id.btnClipboardClear)
         val btnClipboardClose: Button? = root.findViewById(R.id.btnClipboardClose)
 
-        reactionsPanel = root.findViewById(R.id.reactionsPanel)
-        reactionsContainer = root.findViewById(R.id.reactionsContainer)
-        val btnReactionsClose: Button? = root.findViewById(R.id.btnReactionsClose)
+        stylishFontPanel = root.findViewById(R.id.stylishFontPanel)
+        stylishFontContainer = root.findViewById(R.id.stylishFontContainer)
+        val btnFontsClose: Button? = root.findViewById(R.id.btnFontsClose)
+
+        aiHubPanel = root.findViewById(R.id.aiHubPanel)
+        tvAiTopicBox = root.findViewById(R.id.tvAiTopicBox)
+        btnAiGenerate = root.findViewById(R.id.btnAiGenerate)
+        btnAiHubClose = root.findViewById(R.id.btnAiHubClose)
+        aiCategoryTabs = root.findViewById(R.id.aiCategoryTabs)
+        aiQuickTopicsContainer = root.findViewById(R.id.aiQuickTopicsContainer)
+        aiShayariScroll = root.findViewById(R.id.aiShayariScroll)
+        aiShayariContainer = root.findViewById(R.id.aiShayariContainer)
+        styleAiHubChrome()
+
+        stickerPanel = root.findViewById(R.id.stickerPanel)
+        tvStickerPhrasePreview = root.findViewById(R.id.tvStickerPhrasePreview)
+        stickerStyleGridContainer = root.findViewById(R.id.stickerStyleGridContainer)
+        val btnStickerClose: Button? = root.findViewById(R.id.btnStickerClose)
+        btnStickerClose?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            setOverlay(OverlayMode.NONE)
+        }
 
         emojiPanel = root.findViewById(R.id.emojiPanel)
         emojiCategoryTabs = root.findViewById(R.id.emojiCategoryTabs)
@@ -261,14 +317,20 @@ class RgbKeyboardService : InputMethodService() {
         }
 
         rgbView.onKeyAction = { key ->
-            when (key) {
-                "DEL" -> handleBackspace()
-                "ENTER" -> handleEnter()
-                " " -> handleSpace()
-                else -> handleCommitText(key)
+            if (isAiTopicTypingMode) {
+                handleAiTopicKeyInput(key)
+            } else {
+                when (key) {
+                    "DEL" -> handleBackspace()
+                    "ENTER" -> handleEnter()
+                    " " -> handleSpace()
+                    else -> handleCommitText(StylishFontEngine.transform(key, activeStylishFont))
+                }
             }
         }
-        rgbView.onCursorMove = { steps -> handleCursorMove(steps) }
+        rgbView.onCursorMove = { steps ->
+            if (!isAiTopicTypingMode) handleCursorMove(steps)
+        }
         rgbView.onKeyFeedback = { isModifier ->
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier)
         }
@@ -276,50 +338,83 @@ class RgbKeyboardService : InputMethodService() {
             handleToggleLanguage()
         }
         rgbView.onEmojiOpenRequested = {
+            isAiTopicTypingMode = false
             setOverlay(OverlayMode.EMOJI)
         }
 
-        // 1. Feature Menu (4-dots grid) -> Opens Clipboard Manager
-        btnMenu?.setOnClickListener {
+        // 1. Emoji (😊) -> Unlimited Categorized Emoji Panel
+        btnEmoji?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            isAiTopicTypingMode = false
+            setOverlay(if (activeOverlay == OverlayMode.EMOJI) OverlayMode.NONE else OverlayMode.EMOJI)
+        }
+
+        // 2. Clipboard (📋) -> Clipboard History Manager
+        btnClipboard?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            isAiTopicTypingMode = false
             clipboardManager.captureCurrentPrimaryClip()
             setOverlay(if (activeOverlay == OverlayMode.CLIPBOARD) OverlayMode.NONE else OverlayMode.CLIPBOARD)
         }
 
-        // 2. Emoji / Sticker icon -> Opens Unlimited Categorized Emoji Panel
-        btnEmoji?.setOnClickListener {
+        // 3. Stylish Fonts (Aa) -> Unicode Stylish Font Picker
+        btnStylishFonts?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-            setOverlay(if (activeOverlay == OverlayMode.EMOJI) OverlayMode.NONE else OverlayMode.EMOJI)
+            isAiTopicTypingMode = false
+            setOverlay(if (activeOverlay == OverlayMode.FONTS) OverlayMode.NONE else OverlayMode.FONTS)
         }
 
-        // 3. GIF / Quick Reactions icon
-        btnGif?.setOnClickListener {
+        // 4. Voice Mic -> Direct Same-Language SpeechRecognizer (bn-BD / en-IN / hi-IN)
+        btnMic?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-            setOverlay(if (activeOverlay == OverlayMode.REACTIONS) OverlayMode.NONE else OverlayMode.REACTIONS)
+            isAiTopicTypingMode = false
+            handleOnlineVoiceTyping()
         }
 
-        // 4. Settings gear
-        btnSettings?.setOnClickListener {
-            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-            handleOpenSettings()
-        }
-
-        // 5. Theme Palette icon: cycles RGB lighting when VIP is active, or opens ₹20 VIP Unlock when in free standard mode
-        btnTheme?.setOnClickListener {
+        // 5. Single Unified ✨ AI Hub Button (Unlocked during 7-day trial & Lifetime VIP; 🔒 VIP after 7 days)
+        btnAiHub?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
             val latestLicense = trialLicenseManager.refreshState()
             currentLicenseState = latestLicense
-            if (latestLicense.isVipActive) {
-                serviceScope.launch { preferencesRepository.cycleEffect() }
-            } else {
+            if (!latestLicense.isVipActive) {
                 handleOpenUnlockScreen()
+                return@setOnClickListener
+            }
+            if (isAiTopicTypingMode) {
+                isAiTopicTypingMode = false
+                setOverlay(OverlayMode.AI_HUB)
+            } else {
+                setOverlay(if (activeOverlay == OverlayMode.AI_HUB) OverlayMode.NONE else OverlayMode.AI_HUB)
             }
         }
 
-        // 6. Voice Mic icon -> Direct Same-Language SpeechRecognizer (bn-BD / en-IN / hi-IN)
-        btnMic?.setOnClickListener {
+        tvAiTopicBox?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-            handleOnlineVoiceTyping()
+            enterAiTopicTypingMode()
+        }
+
+        btnAiGenerate?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            triggerAiShayariGeneration()
+        }
+
+        btnAiHubClose?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            isAiTopicTypingMode = false
+            setOverlay(OverlayMode.NONE)
+        }
+
+        btnAiTopicGenerateNow?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            isAiTopicTypingMode = false
+            triggerAiShayariGeneration()
+            setOverlay(OverlayMode.AI_HUB)
+        }
+
+        btnAiTopicCancel?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            isAiTopicTypingMode = false
+            setOverlay(OverlayMode.AI_HUB)
         }
 
         btnVoiceStop?.setOnClickListener {
@@ -343,7 +438,7 @@ class RgbKeyboardService : InputMethodService() {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
             setOverlay(OverlayMode.NONE)
         }
-        btnReactionsClose?.setOnClickListener {
+        btnFontsClose?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
             setOverlay(OverlayMode.NONE)
         }
@@ -372,7 +467,9 @@ class RgbKeyboardService : InputMethodService() {
         }
 
         setupEmojiPanel()
-        populateReactionsPanel()
+        populateStylishFontsPanel()
+        populateStickerStyleSelector()
+        renderAiHubPanel()
         applySettingsToViews(currentSettings)
         rgbView.updatePhotoTheme(currentPhotoTheme)
         renderClipboardSnippets(clipboardManager.clips.value)
@@ -417,6 +514,7 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        stopStickerPulseAnimation()
         if (hasActiveVoiceComposing) {
             currentInputConnection?.finishComposingText()
             hasActiveVoiceComposing = false
@@ -444,6 +542,8 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopStickerPulseAnimation()
+        stickerCardViews.clear()
         isEmojiBackspaceRepeating = false
         uiHandler.removeCallbacksAndMessages(null)
         serviceScope.cancel()
@@ -454,10 +554,15 @@ class RgbKeyboardService : InputMethodService() {
             feedbackEngine.release()
         }
         topBar = null
+        tvBrandSignature = null
         voiceBar = null
         tvVoiceLangBadge = null
         tvVoiceStatus = null
         btnVoiceStop = null
+        aiTopicTypingBar = null
+        tvAiTopicDraft = null
+        btnAiTopicGenerateNow = null
+        btnAiTopicCancel = null
         suggestionBar = null
         suggestionContainer = null
         keyboardView = null
@@ -466,8 +571,19 @@ class RgbKeyboardService : InputMethodService() {
         clipboardPanel = null
         clipboardContainer = null
         tvClipboardEmpty = null
-        reactionsPanel = null
-        reactionsContainer = null
+        stylishFontPanel = null
+        stylishFontContainer = null
+        aiHubPanel = null
+        tvAiTopicBox = null
+        btnAiGenerate = null
+        btnAiHubClose = null
+        aiCategoryTabs = null
+        aiQuickTopicsContainer = null
+        aiShayariScroll = null
+        aiShayariContainer = null
+        stickerPanel = null
+        tvStickerPhrasePreview = null
+        stickerStyleGridContainer = null
         emojiPanel = null
         emojiCategoryTabs = null
         emojiGridView = null
@@ -475,23 +591,31 @@ class RgbKeyboardService : InputMethodService() {
         btnEmojiClose = null
         btnEmojiBackspace = null
         emojiGridAdapter = null
-        btnMenu = null
         btnEmoji = null
-        btnGif = null
-        btnTheme = null
+        btnClipboard = null
+        btnStylishFonts = null
         btnMic = null
+        btnAiHub = null
     }
 
     /**
      * Never locks out basic typing! During the 7-day VIP trial or after ₹20 Lifetime VIP unlock,
-     * enables Touch Spark RGB, continuous animations, custom photo/banner backgrounds, and RGB Text Stickers.
-     * After 7 days without unlock, seamlessly switches to Classic Black (No RGB) free mode
-     * while keeping Bangla/English/Hindi typing, Voice Typing, Smart Suggestions, Emojis, and Caps Lock active.
+     * enables Touch Spark RGB, continuous animations, custom photo/banner backgrounds, RGB Stickers,
+     * and the unified ✨ AI Shayari & Smart Reply Hub.
+     * The glowing "Rakib official" signature badge stays permanently visible and 100% free.
      */
     private fun applyTrialLockState() {
         trialLockPanel?.visibility = View.GONE
         topBar?.visibility = if (currentSettings.showToolbar) View.VISIBLE else View.GONE
-        suggestionBar?.visibility = if (activeOverlay == OverlayMode.NONE) View.VISIBLE else View.GONE
+        if (!currentLicenseState.isVipActive && (activeOverlay == OverlayMode.AI_HUB || activeOverlay == OverlayMode.STICKER_SELECTOR)) {
+            isAiTopicTypingMode = false
+            activeOverlay = OverlayMode.NONE
+            aiHubPanel?.visibility = View.GONE
+            stickerPanel?.visibility = View.GONE
+            aiTopicTypingBar?.visibility = View.GONE
+            keyboardView?.visibility = View.VISIBLE
+        }
+        suggestionBar?.visibility = if (activeOverlay == OverlayMode.NONE && !isAiTopicTypingMode) View.VISIBLE else View.GONE
         keyboardView?.setVipVisualsEnabled(currentLicenseState.isVipActive)
         updateToolbarTints()
         refreshSuggestions()
@@ -499,35 +623,97 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun setOverlay(mode: OverlayMode) {
         activeOverlay = mode
+        if (mode != OverlayMode.NONE) {
+            isAiTopicTypingMode = false
+        }
         trialLockPanel?.visibility = View.GONE
+        aiTopicTypingBar?.visibility = if (isAiTopicTypingMode && mode == OverlayMode.NONE) View.VISIBLE else View.GONE
         clipboardPanel?.visibility = if (mode == OverlayMode.CLIPBOARD) View.VISIBLE else View.GONE
-        reactionsPanel?.visibility = if (mode == OverlayMode.REACTIONS) View.VISIBLE else View.GONE
+        stylishFontPanel?.visibility = if (mode == OverlayMode.FONTS) View.VISIBLE else View.GONE
         emojiPanel?.visibility = if (mode == OverlayMode.EMOJI) View.VISIBLE else View.GONE
+        stickerPanel?.visibility = if (mode == OverlayMode.STICKER_SELECTOR) View.VISIBLE else View.GONE
+        aiHubPanel?.visibility = if (mode == OverlayMode.AI_HUB) View.VISIBLE else View.GONE
         keyboardView?.visibility = if (mode == OverlayMode.NONE) View.VISIBLE else View.GONE
-        suggestionBar?.visibility = if (mode == OverlayMode.NONE) View.VISIBLE else View.GONE
+        suggestionBar?.visibility = if (mode == OverlayMode.NONE && !isAiTopicTypingMode) View.VISIBLE else View.GONE
         if (mode == OverlayMode.EMOJI) {
             btnEmojiClose?.text = if (currentSettings.activeLanguageId == "bn") "কখগ" else "ABC"
+        }
+        if (mode == OverlayMode.AI_HUB) {
+            renderAiHubPanel()
+        }
+        if (mode == OverlayMode.FONTS) {
+            populateStylishFontsPanel()
+        }
+        if (mode == OverlayMode.STICKER_SELECTOR) {
+            startStickerPulseAnimation()
+        } else {
+            stopStickerPulseAnimation()
         }
         updateToolbarTints()
     }
 
     private fun updateToolbarTints() {
+        val density = resources.displayMetrics.density
         val defaultTint = Color.parseColor("#D5DCEF")
-        val activePink = Color.parseColor("#FF2A85")
         val activeCyan = Color.parseColor("#00F5D4")
+        val activePink = Color.parseColor("#FF2A85")
         val activeVoice = Color.parseColor("#00F59B")
 
-        btnMenu?.setColorFilter(if (activeOverlay == OverlayMode.CLIPBOARD) activeCyan else defaultTint, PorterDuff.Mode.SRC_IN)
-        btnEmoji?.setColorFilter(if (activeOverlay == OverlayMode.EMOJI) activePink else defaultTint, PorterDuff.Mode.SRC_IN)
-        btnGif?.setColorFilter(if (activeOverlay == OverlayMode.REACTIONS) activeCyan else defaultTint, PorterDuff.Mode.SRC_IN)
-        btnTheme?.setColorFilter(
-            if (currentLicenseState.isVipActive &&
-                currentSettings.effect != RgbEffect.NORMAL_DEFAULT &&
-                currentSettings.effect != RgbEffect.TOUCH_SPARK
-            ) activePink else defaultTint,
-            PorterDuff.Mode.SRC_IN
-        )
+        btnEmoji?.background = if (activeOverlay == OverlayMode.EMOJI) {
+            GradientDrawable().apply {
+                setColor(Color.parseColor("#2A1636"))
+                cornerRadius = 8f * density
+                setStroke((1f * density).toInt(), activePink)
+            }
+        } else {
+            null
+        }
+        btnClipboard?.background = if (activeOverlay == OverlayMode.CLIPBOARD) {
+            GradientDrawable().apply {
+                setColor(Color.parseColor("#132838"))
+                cornerRadius = 8f * density
+                setStroke((1f * density).toInt(), activeCyan)
+            }
+        } else {
+            null
+        }
+        val fontsHighlighted = activeOverlay == OverlayMode.FONTS || activeStylishFont != StylishFontStyle.NORMAL
+        btnStylishFonts?.setTextColor(if (fontsHighlighted) activeCyan else Color.parseColor("#E2E8F0"))
+        btnStylishFonts?.background = if (fontsHighlighted) {
+            GradientDrawable().apply {
+                setColor(Color.parseColor("#132838"))
+                cornerRadius = 8f * density
+                setStroke((1f * density).toInt(), activeCyan)
+            }
+        } else {
+            null
+        }
         btnMic?.setColorFilter(if (latestVoiceState.isListening) activeVoice else defaultTint, PorterDuff.Mode.SRC_IN)
+
+        val isVip = currentLicenseState.isVipActive
+        val aiActive = activeOverlay == OverlayMode.AI_HUB || isAiTopicTypingMode
+        btnAiHub?.apply {
+            text = if (isVip) getString(R.string.toolbar_ai_hub) else getString(R.string.toolbar_ai_hub_locked)
+            setTextColor(if (isVip) Color.WHITE else Color.parseColor("#FFCF70"))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                when {
+                    !isVip -> intArrayOf(Color.parseColor("#2E1528"), Color.parseColor("#2A1D12"))
+                    aiActive -> intArrayOf(Color.parseColor("#FF2A85"), Color.parseColor("#00B4D8"))
+                    else -> intArrayOf(Color.parseColor("#D81B60"), Color.parseColor("#FF8F00"))
+                }
+            ).apply {
+                cornerRadius = 999f * density
+                setStroke(
+                    (1.2f * density).toInt(),
+                    when {
+                        !isVip -> Color.parseColor("#FF9E00")
+                        aiActive -> activeCyan
+                        else -> Color.parseColor("#FF79B0")
+                    }
+                )
+            }
+        }
     }
 
     private fun setupEmojiPanel() {
@@ -646,16 +832,16 @@ class RgbKeyboardService : InputMethodService() {
     private fun renderVoiceState(state: OnlineVoiceTypingController.VoiceListeningState) {
         updateToolbarTints()
         tvVoiceLangBadge?.text = state.locale.badge
+        tvVoiceStatus?.typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
 
         when {
             state.isListening -> {
                 voiceBar?.visibility = View.VISIBLE
                 tvVoiceStatus?.setTextColor(Color.parseColor("#00F5D4"))
-                tvVoiceStatus?.text = when {
-                    state.partialTranscript.isNotBlank() -> "🎙 ${state.partialTranscript}"
-                    state.locale.isBengali -> "🎙 ${getString(R.string.voice_listening_bn)}"
-                    state.locale.isHindi -> "🎙 ${getString(R.string.voice_listening_hi)}"
-                    else -> "🎙 ${getString(R.string.voice_listening_en)}"
+                tvVoiceStatus?.text = if (state.partialTranscript.isNotBlank()) {
+                    "🎙️ শোনা যাচ্ছে... • ${state.partialTranscript}"
+                } else {
+                    getString(R.string.voice_listening_bn)
                 }
             }
             !state.errorMessage.isNullOrBlank() -> {
@@ -691,7 +877,11 @@ class RgbKeyboardService : InputMethodService() {
             currentInputConnection?.getTextBeforeCursor(80, 0)?.toString().orEmpty()
         }.getOrDefault("")
 
-        val prediction = SmartWordPredictor.predict(before, currentSettings.activeLanguageId)
+        val prediction = SmartWordPredictor.predict(
+            textBeforeCursor = before,
+            languageId = currentSettings.activeLanguageId,
+            context = applicationContext
+        )
         val density = resources.displayMetrics.density
         container.removeAllViews()
 
@@ -744,44 +934,49 @@ class RgbKeyboardService : InputMethodService() {
             container.addView(stickerChip)
         }
 
-        // 2. Smart Word Prediction & Next-Word Suggestion Chips
-        prediction.suggestions.forEach { suggestion ->
-            val wordChip = TextView(this).apply {
-                text = suggestion
-                textSize = 13f
-                typeface = bengaliTypeface ?: Typeface.DEFAULT
-                setTextColor(Color.parseColor("#F1F5FF"))
-                gravity = Gravity.CENTER
-                maxLines = 1
-                setPadding(
-                    (11 * density).toInt(),
-                    (4 * density).toInt(),
-                    (11 * density).toInt(),
-                    (4 * density).toInt()
-                )
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#19132B"))
-                    cornerRadius = 999f * density
-                    setStroke((1f * density).toInt(), Color.parseColor("#2F2352"))
+        // 2. Smart Word Prediction & Next-Word Suggestion Chips (only when Smart Auto-Suggestions enabled)
+        if (currentSettings.smartSuggestionsEnabled) {
+            prediction.suggestions.forEach { suggestion ->
+                val wordChip = TextView(this).apply {
+                    text = suggestion
+                    textSize = 13f
+                    typeface = bengaliTypeface ?: Typeface.DEFAULT
+                    setTextColor(Color.parseColor("#F1F5FF"))
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    setPadding(
+                        (11 * density).toInt(),
+                        (4 * density).toInt(),
+                        (11 * density).toInt(),
+                        (4 * density).toInt()
+                    )
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#19132B"))
+                        cornerRadius = 999f * density
+                        setStroke((1f * density).toInt(), Color.parseColor("#2F2352"))
+                    }
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        (28 * density).toInt()
+                    ).apply {
+                        marginEnd = (6 * density).toInt()
+                    }
+                    setOnClickListener {
+                        feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                        applyWordSuggestion(suggestion, prediction.currentTokenLength)
+                    }
                 }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    (28 * density).toInt()
-                ).apply {
-                    marginEnd = (6 * density).toInt()
-                }
-                setOnClickListener {
-                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
-                    applyWordSuggestion(suggestion, prediction.currentTokenLength)
-                }
+                container.addView(wordChip)
             }
-            container.addView(wordChip)
         }
     }
 
     private fun applyWordSuggestion(word: String, replaceTokenLength: Int) {
         syncVipVisualsQuietly()
         val ic = currentInputConnection ?: return
+        val before = runCatching {
+            ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        }.getOrDefault("")
         ic.beginBatchEdit()
         try {
             if (replaceTokenLength > 0) {
@@ -790,6 +985,18 @@ class RgbKeyboardService : InputMethodService() {
             ic.commitText("$word ", 1)
         } finally {
             ic.endBatchEdit()
+        }
+        val prefixWithoutToken = if (replaceTokenLength > 0 && before.length >= replaceTokenLength) {
+            before.dropLast(replaceTokenLength)
+        } else {
+            before
+        }
+        if (currentSettings.smartSuggestionsEnabled) {
+            SmartWordPredictor.learnFromCompletedInput(
+                applicationContext,
+                "$prefixWithoutToken$word",
+                currentSettings.activeLanguageId
+            )
         }
         lastSpaceTapTimeMs = 0L
         refreshSuggestions()
@@ -802,13 +1009,157 @@ class RgbKeyboardService : InputMethodService() {
             handleOpenUnlockScreen()
             return
         }
-        if (isGeneratingSticker) return
+        pendingStickerPhrase = phrase
+        tvStickerPhrasePreview?.text = "✨ \"$phrase\""
+        tvStickerPhrasePreview?.typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+        setOverlay(OverlayMode.STICKER_SELECTOR)
+    }
+
+    private fun styleBrandSignatureBadge(view: TextView?) {
+        val tv = view ?: return
+        val density = resources.displayMetrics.density
+        tv.paint.shader = null
+        tv.setTextColor(Color.WHITE)
+        tv.setTypeface(tv.typeface, Typeface.BOLD)
+        tv.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        tv.elevation = 2f * density
+
+        val strokePx = (1.1f * density).toInt().coerceAtLeast(1)
+        val gradientRing = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(
+                Color.parseColor("#FF2E63"),
+                Color.parseColor("#00D4FF")
+            )
+        ).apply {
+            cornerRadius = 999f * density
+        }
+        val obsidianFill = GradientDrawable().apply {
+            setColor(Color.parseColor("#141824"))
+            cornerRadius = 999f * density
+        }
+        val pillDrawable = LayerDrawable(arrayOf(gradientRing, obsidianFill)).apply {
+            setLayerInset(1, strokePx, strokePx, strokePx, strokePx)
+        }
+        tv.background = pillDrawable
+    }
+
+    private fun styleVoiceStatusBar() {
+        val density = resources.displayMetrics.density
+        voiceBar?.background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.parseColor("#1D0D2E"), Color.parseColor("#0E1D2F"))
+        ).apply {
+            cornerRadius = 10f * density
+            setStroke((1.15f * density).toInt(), Color.parseColor("#00F5D4"))
+        }
+        tvVoiceLangBadge?.background = GradientDrawable().apply {
+            setColor(Color.parseColor("#2B1648"))
+            cornerRadius = 6f * density
+            setStroke((1f * density).toInt(), Color.parseColor("#FF2A85"))
+        }
+    }
+
+    private fun populateStickerStyleSelector() {
+        val container = stickerStyleGridContainer ?: return
+        container.removeAllViews()
+        stickerCardViews.clear()
+        val density = resources.displayMetrics.density
+
+        RgbStickerStyle.entries.chunked(2).forEach { pair ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (7 * density).toInt()
+                }
+            }
+            pair.forEachIndexed { idx, style ->
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    val padH = (10 * density).toInt()
+                    val padV = (9 * density).toInt()
+                    setPadding(padH, padV, padH, padV)
+                    background = GradientDrawable(
+                        GradientDrawable.Orientation.TL_BR,
+                        intArrayOf(style.cardBgColors.first(), style.cardBgColors.last())
+                    ).apply {
+                        cornerRadius = 12f * density
+                        setStroke((1.6f * density).toInt(), style.accentPrimary)
+                    }
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        if (idx == 0) marginEnd = (7 * density).toInt()
+                    }
+                    setOnClickListener {
+                        feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                        sendStyledRgbSticker(style)
+                    }
+                }
+
+                val titleTv = TextView(this).apply {
+                    text = "${style.badgeIcon} ${style.displayName}"
+                    textSize = 12.5f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(style.accentPrimary)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                val subTv = TextView(this).apply {
+                    text = style.subtitle
+                    textSize = 10f
+                    setTextColor(Color.parseColor("#CBD5E1"))
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                card.addView(titleTv)
+                card.addView(subTv)
+                stickerCardViews.add(card)
+                row.addView(card)
+            }
+            container.addView(row)
+        }
+    }
+
+    private fun startStickerPulseAnimation() {
+        stopStickerPulseAnimation()
+        if (stickerCardViews.isEmpty()) return
+        stickerPulseAnimator = ValueAnimator.ofFloat(0.84f, 1.0f).apply {
+            duration = 950L
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { anim ->
+                val value = anim.animatedValue as Float
+                stickerCardViews.forEachIndexed { index, card ->
+                    val phaseAlpha = if (index % 2 == 0) value else (1.84f - value).coerceIn(0.84f, 1.0f)
+                    card.alpha = phaseAlpha
+                }
+            }
+            start()
+        }
+    }
+
+    private fun stopStickerPulseAnimation() {
+        stickerPulseAnimator?.cancel()
+        stickerPulseAnimator = null
+        stickerCardViews.forEach { it.alpha = 1f }
+    }
+
+    private fun sendStyledRgbSticker(style: RgbStickerStyle) {
+        val phrase = pendingStickerPhrase.trim()
+        if (phrase.isEmpty() || isGeneratingSticker) {
+            setOverlay(OverlayMode.NONE)
+            return
+        }
         isGeneratingSticker = true
+        setOverlay(OverlayMode.NONE)
 
         serviceScope.launch {
             try {
                 val artifact = withContext(Dispatchers.Default) {
-                    RgbStickerGenerator.generateSticker(applicationContext, phrase)
+                    RgbStickerGenerator.generateSticker(applicationContext, phrase, style)
                 }
                 if (artifact != null) {
                     val committedDirectly = RgbStickerGenerator.sendStickerToActiveApp(
@@ -838,40 +1189,416 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
-    private fun populateReactionsPanel() {
-        val container = reactionsContainer ?: return
+    private fun styleAiTopicTypingBar() {
+        val density = resources.displayMetrics.density
+        aiTopicTypingBar?.background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.parseColor("#1D0E30"), Color.parseColor("#0F1D30"))
+        ).apply {
+            cornerRadius = 10f * density
+            setStroke((1.2f * density).toInt(), Color.parseColor("#FF2A85"))
+        }
+        btnAiTopicGenerateNow?.background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.parseColor("#FF2A85"), Color.parseColor("#FF9E00"))
+        ).apply {
+            cornerRadius = 8f * density
+        }
+        btnAiTopicCancel?.background = GradientDrawable().apply {
+            setColor(Color.parseColor("#33152A"))
+            cornerRadius = 8f * density
+        }
+        tvAiTopicDraft?.typeface = bengaliTypeface ?: Typeface.DEFAULT
+    }
+
+    private fun styleAiHubChrome() {
+        val density = resources.displayMetrics.density
+        tvAiTopicBox?.apply {
+            typeface = bengaliTypeface ?: Typeface.DEFAULT
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#161028"))
+                cornerRadius = 10f * density
+                setStroke((1f * density).toInt(), Color.parseColor("#35285E"))
+            }
+        }
+        btnAiGenerate?.background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.parseColor("#FF2A85"), Color.parseColor("#FF9E00"))
+        ).apply {
+            cornerRadius = 10f * density
+        }
+        btnAiHubClose?.background = GradientDrawable().apply {
+            setColor(Color.parseColor("#1E2235"))
+            cornerRadius = 10f * density
+        }
+    }
+
+    private fun enterAiTopicTypingMode() {
+        isAiTopicTypingMode = true
+        activeOverlay = OverlayMode.NONE
+        aiHubPanel?.visibility = View.GONE
+        clipboardPanel?.visibility = View.GONE
+        stylishFontPanel?.visibility = View.GONE
+        emojiPanel?.visibility = View.GONE
+        stickerPanel?.visibility = View.GONE
+        suggestionBar?.visibility = View.GONE
+        aiTopicTypingBar?.visibility = View.VISIBLE
+        keyboardView?.visibility = View.VISIBLE
+        refreshAiTopicDraftViews()
+        updateToolbarTints()
+    }
+
+    private fun handleAiTopicKeyInput(key: String) {
+        when (key) {
+            "DEL" -> {
+                if (aiTopicDraft.isNotEmpty()) {
+                    val lastCp = aiTopicDraft.codePointBefore(aiTopicDraft.length)
+                    aiTopicDraft = aiTopicDraft.substring(0, aiTopicDraft.length - Character.charCount(lastCp))
+                }
+            }
+            "ENTER" -> {
+                isAiTopicTypingMode = false
+                triggerAiShayariGeneration()
+                setOverlay(OverlayMode.AI_HUB)
+                return
+            }
+            " " -> {
+                if (aiTopicDraft.isNotEmpty() && !aiTopicDraft.endsWith(" ") && aiTopicDraft.length < 28) {
+                    aiTopicDraft += " "
+                }
+            }
+            else -> {
+                if (aiTopicDraft.length + key.length <= 28) {
+                    aiTopicDraft += key
+                }
+            }
+        }
+        refreshAiTopicDraftViews()
+    }
+
+    private fun refreshAiTopicDraftViews() {
+        val hint = getString(R.string.ai_hub_topic_hint)
+        val hasDraft = aiTopicDraft.isNotBlank()
+        tvAiTopicBox?.text = if (hasDraft) aiTopicDraft else hint
+        tvAiTopicBox?.setTextColor(
+            if (hasDraft) Color.parseColor("#F1F5FF") else Color.parseColor("#9AA4C4")
+        )
+        tvAiTopicDraft?.text = if (hasDraft) {
+            "${getString(R.string.ai_hub_topic_mode_label)} $aiTopicDraft|"
+        } else {
+            "${getString(R.string.ai_hub_topic_mode_label)} $hint"
+        }
+    }
+
+    private fun triggerAiShayariGeneration() {
+        aiGenerationSeed += 1
+        generatedAiResult = ShayariVault.generatePoeticShayaris(aiTopicDraft, aiGenerationSeed)
+        expandedShayariIndex = null
+        renderAiHubPanel()
+        aiShayariScroll?.scrollTo(0, 0)
+    }
+
+    private fun renderAiHubPanel() {
+        refreshAiTopicDraftViews()
+        renderAiCategoryTabs()
+        renderAiQuickTopicsOrBanner()
+        renderAiShayariCards()
+    }
+
+    private fun renderAiCategoryTabs() {
+        val container = aiCategoryTabs ?: return
         container.removeAllViews()
         val density = resources.displayMetrics.density
 
-        quickReactions.chunked(2).forEach { pair ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
+        ShayariCategory.entries.forEach { category ->
+            val isSelected = generatedAiResult == null && category == selectedAiCategory
+            val tab = TextView(this).apply {
+                text = "${category.emoji} ${category.tabTitle}"
+                textSize = 11.5f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+                if (isSelected) setTypeface(typeface, Typeface.BOLD)
+                setTextColor(if (isSelected) category.accentHex else Color.parseColor("#C4CCE0"))
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding((10 * density).toInt(), (3 * density).toInt(), (10 * density).toInt(), (3 * density).toInt())
+                background = GradientDrawable().apply {
+                    setColor(
+                        if (isSelected) Color.argb(
+                            54,
+                            Color.red(category.accentHex),
+                            Color.green(category.accentHex),
+                            Color.blue(category.accentHex)
+                        ) else Color.parseColor("#161028")
+                    )
+                    cornerRadius = 999f * density
+                    setStroke(
+                        (1.2f * density).toInt(),
+                        if (isSelected) category.accentHex else Color.parseColor("#2B2248")
+                    )
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (28 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                    selectedAiCategory = category
+                    generatedAiResult = null
+                    expandedShayariIndex = null
+                    renderAiHubPanel()
+                    aiShayariScroll?.scrollTo(0, 0)
+                }
+            }
+            container.addView(tab)
+        }
+    }
+
+    private fun renderAiQuickTopicsOrBanner() {
+        val container = aiQuickTopicsContainer ?: return
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+
+        val gen = generatedAiResult
+        if (gen != null) {
+            val backChip = TextView(this).apply {
+                text = getString(R.string.ai_hub_back_to_vault)
+                textSize = 10.5f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(Color.parseColor("#FF2A85"))
+                gravity = Gravity.CENTER
+                setPadding((9 * density).toInt(), (2 * density).toInt(), (9 * density).toInt(), (2 * density).toInt())
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#2B112B"))
+                    cornerRadius = 999f * density
+                    setStroke((1f * density).toInt(), Color.parseColor("#FF2A85"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (24 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                    generatedAiResult = null
+                    expandedShayariIndex = null
+                    renderAiHubPanel()
+                }
+            }
+            container.addView(backChip)
+
+            val labelChip = TextView(this).apply {
+                text = if (gen.usedFallbackTheme) {
+                    "✨ কিউরেটেড থিম: ${gen.resolvedTopic}"
+                } else {
+                    "✨ বিষয়: ${gen.resolvedTopic} (৪টি শায়ারি)"
+                }
+                textSize = 11f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#00F5D4"))
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (24 * density).toInt()
+                )
+            }
+            container.addView(labelChip)
+            return
+        }
+
+        ShayariVault.quickTopicSuggestions.forEach { topic ->
+            val chip = TextView(this).apply {
+                text = "✨ $topic"
+                textSize = 10.5f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT
+                setTextColor(Color.parseColor("#9AE6FF"))
+                gravity = Gravity.CENTER
+                setPadding((9 * density).toInt(), (2 * density).toInt(), (9 * density).toInt(), (2 * density).toInt())
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#14192E"))
+                    cornerRadius = 999f * density
+                    setStroke((1f * density).toInt(), Color.parseColor("#273A5C"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (24 * density).toInt()
+                ).apply {
+                    marginEnd = (5 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                    aiTopicDraft = topic
+                    triggerAiShayariGeneration()
+                }
+            }
+            container.addView(chip)
+        }
+    }
+
+    private fun renderAiShayariCards() {
+        val container = aiShayariContainer ?: return
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+
+        val gen = generatedAiResult
+        val effectiveCategory = if (gen != null) ShayariCategory.ROMANTIC else selectedAiCategory
+        val lines = gen?.lines ?: ShayariVault.linesForCategory(selectedAiCategory)
+
+        lines.forEachIndexed { idx, line ->
+            val isExpanded = expandedShayariIndex == idx
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                val padH = (11 * density).toInt()
+                val padV = (8 * density).toInt()
+                setPadding(padH, padV, padH, padV)
+                background = GradientDrawable().apply {
+                    setColor(if (isExpanded) Color.parseColor("#1B1333") else Color.parseColor("#140F24"))
+                    cornerRadius = 11f * density
+                    setStroke(
+                        ((if (isExpanded) 1.3f else 1f) * density).toInt().coerceAtLeast(1),
+                        if (isExpanded) effectiveCategory.accentHex else Color.parseColor("#281F44")
+                    )
+                }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
                     bottomMargin = (6 * density).toInt()
                 }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                    expandedShayariIndex = if (isExpanded) null else idx
+                    renderAiShayariCards()
+                }
             }
-            pair.forEachIndexed { idx, (label, output) ->
+
+            val lineTv = TextView(this).apply {
+                text = line
+                textSize = 12.5f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT
+                setTextColor(Color.parseColor("#F1F5FF"))
+                setLineSpacing(2f * density, 1f)
+            }
+            card.addView(lineTv)
+
+            if (isExpanded) {
+                val variations = ShayariVault.buildVariations(line, effectiveCategory)
+                val gridWrapper = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        topMargin = (7 * density).toInt()
+                    }
+                }
+                variations.chunked(2).forEachIndexed { rowIdx, pair ->
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            if (rowIdx == 0) bottomMargin = (5 * density).toInt()
+                        }
+                    }
+                    pair.forEachIndexed { colIdx, variation ->
+                        val isDirect = variation.chipLabel == "সরাসরি পাঠান"
+                        val chipTv = TextView(this).apply {
+                            text = variation.chipLabel
+                            textSize = 11f
+                            typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+                            setTypeface(typeface, Typeface.BOLD)
+                            setTextColor(if (isDirect) Color.WHITE else Color.parseColor("#00F5D4"))
+                            gravity = Gravity.CENTER
+                            maxLines = 1
+                            ellipsize = TextUtils.TruncateAt.END
+                            setPadding(
+                                (8 * density).toInt(),
+                                (6 * density).toInt(),
+                                (8 * density).toInt(),
+                                (6 * density).toInt()
+                            )
+                            background = GradientDrawable(
+                                GradientDrawable.Orientation.LEFT_RIGHT,
+                                if (isDirect) {
+                                    intArrayOf(Color.parseColor("#FF2A85"), Color.parseColor("#FF9E00"))
+                                } else {
+                                    intArrayOf(Color.parseColor("#231842"), Color.parseColor("#182A3D"))
+                                }
+                            ).apply {
+                                cornerRadius = 8f * density
+                                if (!isDirect) {
+                                    setStroke((1f * density).toInt(), Color.parseColor("#00F5D4"))
+                                }
+                            }
+                            layoutParams = LinearLayout.LayoutParams(
+                                0,
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                                1f
+                            ).apply {
+                                if (colIdx == 0) marginEnd = (6 * density).toInt()
+                            }
+                            setOnClickListener {
+                                feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                                handleCommitText("${variation.text} ")
+                                expandedShayariIndex = null
+                                renderAiShayariCards()
+                            }
+                        }
+                        row.addView(chipTv)
+                    }
+                    gridWrapper.addView(row)
+                }
+                card.addView(gridWrapper)
+            }
+
+            container.addView(card)
+        }
+    }
+
+    private fun populateStylishFontsPanel() {
+        val container = stylishFontContainer ?: return
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+
+        StylishFontStyle.entries.chunked(2).forEach { pair ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (7 * density).toInt()
+                }
+            }
+            pair.forEachIndexed { idx, style ->
+                val selected = style == activeStylishFont
                 val chip = TextView(this).apply {
-                    text = label
-                    setTextColor(Color.parseColor("#EFF4FF"))
-                    textSize = 13f
+                    text = style.label
+                    setTextColor(if (selected) Color.parseColor("#00F5D4") else Color.parseColor("#EFF4FF"))
+                    textSize = 13.5f
                     gravity = Gravity.CENTER
-                    val padV = (11 * density).toInt()
+                    val padV = (10 * density).toInt()
                     setPadding((8 * density).toInt(), padV, (8 * density).toInt(), padV)
                     background = GradientDrawable().apply {
-                        setColor(Color.parseColor("#1D202C"))
+                        setColor(if (selected) Color.parseColor("#152D3D") else Color.parseColor("#1D202C"))
                         cornerRadius = 10f * density
-                        setStroke((1f * density).toInt(), Color.parseColor("#2B3146"))
+                        setStroke(
+                            ((if (selected) 1.4f else 1f) * density).toInt().coerceAtLeast(1),
+                            if (selected) Color.parseColor("#00F5D4") else Color.parseColor("#2B3146")
+                        )
                     }
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        if (idx == 0) marginEnd = (6 * density).toInt()
+                        if (idx == 0) marginEnd = (7 * density).toInt()
                     }
                     setOnClickListener {
                         feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
-                        handleCommitText(output)
+                        activeStylishFont = style
+                        updateToolbarTints()
                         setOverlay(OverlayMode.NONE)
                     }
                 }
@@ -934,16 +1661,24 @@ class RgbKeyboardService : InputMethodService() {
             KeyboardHeightPreset.TALL -> 260 + extraRowHeightDp
         }
         val targetPx = (targetHeightDp * resources.displayMetrics.density).toInt()
-        listOf(keyboardView, clipboardPanel, reactionsPanel, emojiPanel, trialLockPanel).forEach { view ->
+        listOf(keyboardView, clipboardPanel, stylishFontPanel, emojiPanel, stickerPanel, trialLockPanel).forEach { view ->
             val lp = view?.layoutParams
             if (lp != null && lp.height != targetPx) {
                 lp.height = targetPx
                 view.layoutParams = lp
             }
         }
+        val aiHubPx = (maxOf(targetHeightDp, 268) * resources.displayMetrics.density).toInt()
+        aiHubPanel?.layoutParams?.let { lp ->
+            if (lp.height != aiHubPx) {
+                lp.height = aiHubPx
+                aiHubPanel?.layoutParams = lp
+            }
+        }
         keyboardView?.updateSettings(settings)
         applyTrialLockState()
         updateToolbarTints()
+        refreshSuggestions()
     }
 
     private fun syncVipVisualsQuietly() {
@@ -995,6 +1730,16 @@ class RgbKeyboardService : InputMethodService() {
     private fun handleSpace() {
         syncVipVisualsQuietly()
         val ic = currentInputConnection ?: return
+        val beforeContext = runCatching {
+            ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        if (currentSettings.smartSuggestionsEnabled && beforeContext.isNotBlank() && !beforeContext.last().isWhitespace()) {
+            SmartWordPredictor.learnFromCompletedInput(
+                applicationContext,
+                beforeContext,
+                currentSettings.activeLanguageId
+            )
+        }
         val now = System.currentTimeMillis()
         if (currentSettings.doubleSpacePeriod && (now - lastSpaceTapTimeMs) in 40L..420L) {
             val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
@@ -1015,6 +1760,16 @@ class RgbKeyboardService : InputMethodService() {
     private fun handleEnter() {
         syncVipVisualsQuietly()
         val ic = currentInputConnection ?: return
+        val beforeContext = runCatching {
+            ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        if (currentSettings.smartSuggestionsEnabled && beforeContext.isNotBlank()) {
+            SmartWordPredictor.learnFromCompletedInput(
+                applicationContext,
+                beforeContext,
+                currentSettings.activeLanguageId
+            )
+        }
         val info = currentInputEditorInfo
         val actionId = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         val isNoEnterAction = (info?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0

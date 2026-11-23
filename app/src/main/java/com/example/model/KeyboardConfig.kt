@@ -164,9 +164,9 @@ enum class SwitchSoundProfile(
     val accentHex: Long
 ) {
     SAMSUNG_SOFT(
-        displayName = "Samsung Soft",
-        actuationLabel = "Flagship · Soft Pop",
-        description = "Smooth, rounded flagship keypress pop tuned for effortless daily typing",
+        displayName = "Soft Modern",
+        actuationLabel = "Subtle · Low Volume",
+        description = "Gentle, low-volume modern keypress tap tuned for quiet daily typing",
         accentHex = 0xFF00F59B
     ),
     CLICKY_BLUE(
@@ -253,13 +253,14 @@ data class KeyboardSettings(
     val keyCornerRadiusDp: Float = 9f,
     val illuminatedLegends: Boolean = true,
     val chassisAura: Boolean = true,
-    val hapticEnabled: Boolean = true,
+    val hapticEnabled: Boolean = false,
     val hapticStrength: Float = 0.45f,
     val heightPreset: KeyboardHeightPreset = KeyboardHeightPreset.STANDARD,
     val showNumberRow: Boolean = false,
     val showToolbar: Boolean = true,
     val autoCapitalize: Boolean = true,
-    val doubleSpacePeriod: Boolean = true
+    val doubleSpacePeriod: Boolean = true,
+    val smartSuggestionsEnabled: Boolean = true
 )
 
 @Immutable

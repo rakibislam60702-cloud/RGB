@@ -49,6 +49,7 @@ class KeyboardPreferencesRepository private constructor(
         val SHOW_TOOLBAR = booleanPreferencesKey("show_toolbar")
         val AUTO_CAPITALIZE = booleanPreferencesKey("auto_capitalize")
         val DOUBLE_SPACE_PERIOD = booleanPreferencesKey("double_space_period")
+        val SMART_SUGGESTIONS = booleanPreferencesKey("smart_suggestions_enabled")
     }
 
     val settingsFlow: Flow<KeyboardSettings> = context.rgbKeyboardDataStore.data
@@ -86,7 +87,7 @@ class KeyboardPreferencesRepository private constructor(
                 keyCornerRadiusDp = (prefs[Keys.CORNER_RADIUS] ?: 9f).coerceIn(2f, 16f),
                 illuminatedLegends = prefs[Keys.ILLUMINATED_LEGENDS] ?: true,
                 chassisAura = prefs[Keys.CHASSIS_AURA] ?: true,
-                hapticEnabled = prefs[Keys.HAPTIC_ENABLED] ?: true,
+                hapticEnabled = prefs[Keys.HAPTIC_ENABLED] ?: false,
                 hapticStrength = (prefs[Keys.HAPTIC_STRENGTH] ?: 0.45f).coerceIn(0.15f, 1.0f),
                 heightPreset = prefs[Keys.HEIGHT_PRESET]?.let { name ->
                     KeyboardHeightPreset.entries.find { it.name == name }
@@ -94,7 +95,8 @@ class KeyboardPreferencesRepository private constructor(
                 showNumberRow = prefs[Keys.SHOW_NUMBER_ROW] ?: false,
                 showToolbar = prefs[Keys.SHOW_TOOLBAR] ?: true,
                 autoCapitalize = prefs[Keys.AUTO_CAPITALIZE] ?: true,
-                doubleSpacePeriod = prefs[Keys.DOUBLE_SPACE_PERIOD] ?: true
+                doubleSpacePeriod = prefs[Keys.DOUBLE_SPACE_PERIOD] ?: true,
+                smartSuggestionsEnabled = prefs[Keys.SMART_SUGGESTIONS] ?: true
             )
         }
 
@@ -242,6 +244,10 @@ class KeyboardPreferencesRepository private constructor(
 
     suspend fun updateDoubleSpacePeriod(enabled: Boolean) {
         context.rgbKeyboardDataStore.edit { it[Keys.DOUBLE_SPACE_PERIOD] = enabled }
+    }
+
+    suspend fun updateSmartSuggestionsEnabled(enabled: Boolean) {
+        context.rgbKeyboardDataStore.edit { it[Keys.SMART_SUGGESTIONS] = enabled }
     }
 
     suspend fun resetDefaults() {
