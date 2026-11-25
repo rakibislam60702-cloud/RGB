@@ -30,7 +30,9 @@ object SmartWordPredictor {
     data class PredictionResult(
         val suggestions: List<String>,
         val currentTokenLength: Int,
-        val stickerPhrase: String
+        val stickerPhrase: String,
+        val banglaConvertSource: String = "",
+        val banglaConvertPreview: String = ""
     )
 
     fun init(context: Context) {
@@ -52,7 +54,14 @@ object SmartWordPredictor {
         val lang = normalizeLang(languageId)
         ensureLoaded(lang)
 
-        val tokens = textBeforeCursor
+        // In Banglish (BN-EN), always store strictly Romanized English words (never Bengali Unicode script)
+        val effectiveInput = if (lang == "bn_en" && BengaliTransliterator.containsBengaliScript(textBeforeCursor)) {
+            BengaliTransliterator.transliterate(textBeforeCursor, capitalizeSentences = false)
+        } else {
+            textBeforeCursor
+        }
+
+        val tokens = effectiveInput
             .trim()
             .split(Regex("[\\s.,!?।;:\\n]+"))
             .map { it.trim() }
@@ -61,15 +70,17 @@ object SmartWordPredictor {
         if (tokens.isEmpty()) return
         val lastWord = tokens.last()
         val prevWord = if (tokens.size >= 2) tokens[tokens.size - 2] else null
+        if (lang == "bn_en" && BengaliTransliterator.containsBengaliScript(lastWord)) return
 
         synchronized(this) {
             val wordsMap = userWordFreqs.getOrPut(lang) { linkedMapOf() }
-            val canonicalLast = if (lang == "en") lastWord.lowercase() else lastWord
+            val isLatinLang = lang == "en" || lang == "bn_en"
+            val canonicalLast = if (isLatinLang) lastWord.lowercase() else lastWord
             wordsMap[canonicalLast] = (wordsMap[canonicalLast] ?: 0) + 1
             trimWordMapIfNeeded(wordsMap)
 
-            if (!prevWord.isNullOrBlank()) {
-                val canonicalPrev = if (lang == "en") prevWord.lowercase() else prevWord
+            if (!prevWord.isNullOrBlank() && !(lang == "bn_en" && BengaliTransliterator.containsBengaliScript(prevWord))) {
+                val canonicalPrev = if (isLatinLang) prevWord.lowercase() else prevWord
                 val bigramMap = userBigrams.getOrPut(lang) { linkedMapOf() }
                 val nexts = bigramMap.getOrPut(canonicalPrev) { linkedMapOf() }
                 nexts[lastWord] = (nexts[lastWord] ?: 0) + 1
@@ -91,11 +102,25 @@ object SmartWordPredictor {
         val stickerPhrase = extractStickerPhrase(textBeforeCursor)
         val endedWithSpace = textBeforeCursor.isNotEmpty() && textBeforeCursor.last().isWhitespace()
 
+        // In Banglish (BN-EN) mode, detect any Bengali Unicode text before cursor for 1-tap বাংলা -> বাংলিশ conversion
+        val banglaSource = if (lang == "bn_en") {
+            BengaliTransliterator.extractConvertibleBengaliSegment(textBeforeCursor)
+        } else {
+            ""
+        }
+        val banglaPreview = if (banglaSource.isNotEmpty()) {
+            BengaliTransliterator.transliterate(banglaSource, capitalizeSentences = true)
+        } else {
+            ""
+        }
+
         if (textBeforeCursor.isBlank()) {
             return PredictionResult(
                 suggestions = mergedStarters(lang),
                 currentTokenLength = 0,
-                stickerPhrase = ""
+                stickerPhrase = "",
+                banglaConvertSource = banglaSource,
+                banglaConvertPreview = banglaPreview
             )
         }
 
@@ -105,7 +130,9 @@ object SmartWordPredictor {
             return PredictionResult(
                 suggestions = nextWords.ifEmpty { mergedStarters(lang) },
                 currentTokenLength = 0,
-                stickerPhrase = stickerPhrase
+                stickerPhrase = stickerPhrase,
+                banglaConvertSource = banglaSource,
+                banglaConvertPreview = banglaPreview
             )
         }
 
@@ -114,15 +141,30 @@ object SmartWordPredictor {
             return PredictionResult(
                 suggestions = mergedStarters(lang),
                 currentTokenLength = 0,
-                stickerPhrase = stickerPhrase
+                stickerPhrase = stickerPhrase,
+                banglaConvertSource = banglaSource,
+                banglaConvertPreview = banglaPreview
             )
         }
 
-        val prefixMatches = prefixPredictions(currentWord, lang)
+        val prefixMatches = prefixPredictions(currentWord, lang).let { matches ->
+            if (lang == "bn_en" && BengaliTransliterator.containsBengaliScript(currentWord)) {
+                val beforeToken = textBeforeCursor.dropLast(currentWord.length)
+                if (BengaliTransliterator.isSentenceStartContext(beforeToken)) {
+                    matches.map { w -> w.replaceFirstChar { if (it.isLowerCase()) it.uppercaseChar() else it } }
+                } else {
+                    matches
+                }
+            } else {
+                matches
+            }
+        }
         return PredictionResult(
             suggestions = prefixMatches.ifEmpty { mergedStarters(lang).take(4) },
             currentTokenLength = currentWord.length,
-            stickerPhrase = stickerPhrase
+            stickerPhrase = stickerPhrase,
+            banglaConvertSource = banglaSource,
+            banglaConvertPreview = banglaPreview
         )
     }
 
@@ -137,7 +179,7 @@ object SmartWordPredictor {
     }
 
     private fun normalizeLang(languageId: String): String = when (languageId) {
-        "bn", "hi", "en" -> languageId
+        "bn", "bn_en", "hi", "en" -> languageId
         else -> "en"
     }
 
@@ -252,10 +294,15 @@ object SmartWordPredictor {
                 .entries
                 .filter { it.value >= 2 }
                 .sortedByDescending { it.value }
-                .take(2)
                 .map { it.key }
+                .filter { word ->
+                    // Never surface Bengali Unicode script inside Banglish (BN-EN) or pure English modes
+                    if (lang == "bn_en" || lang == "en") !BengaliTransliterator.containsBengaliScript(word) else true
+                }
+                .take(2)
         }
         val base = when (lang) {
+            "bn_en" -> listOf("Tumi", "Ami", "Valo", "Kemon", "Ekhon", "Accha")
             "bn" -> listOf("আমি", "হ্যাঁ", "ঠিক আছে", "কেমন আছো?", "ভালো আছি", "আসছি")
             "hi" -> listOf("मैं", "हाँ", "ठीक है", "कैसे हो?", "अभी", "धन्यवाद")
             else -> listOf("I'm", "Hello", "Okay", "Good", "Thanks", "On my way")
@@ -265,24 +312,33 @@ object SmartWordPredictor {
 
     private fun nextWordPredictions(prevWord: String, lang: String): List<String> {
         if (prevWord.isEmpty()) return emptyList()
-        val lookupPrev = if (lang == "en") prevWord.lowercase() else prevWord
+        val lookupPrev = when (lang) {
+            "bn_en" -> if (BengaliTransliterator.containsBengaliScript(prevWord)) {
+                BengaliTransliterator.transliterateWord(prevWord).lowercase()
+            } else {
+                prevWord.lowercase()
+            }
+            "en" -> prevWord.lowercase()
+            else -> prevWord
+        }
 
         val learnedNext = synchronized(this) {
             userBigrams[lang]?.get(lookupPrev)
                 ?.entries
                 ?.sortedByDescending { it.value }
                 ?.map { it.key }
+                ?.filter { word ->
+                    if (lang == "bn_en" || lang == "en") !BengaliTransliterator.containsBengaliScript(word) else true
+                }
                 .orEmpty()
         }
 
         val builtInNext = when (lang) {
-            "bn" -> bengaliBigrams[prevWord]
-                ?: romanizedBanglaBigrams[prevWord.lowercase()]
-                ?: emptyList()
+            "bn_en" -> banglishRomanizedBigrams[lookupPrev]
+                ?: listOf("kemon", "valo", "ekhon", "kothay", "korcho", "thik")
+            "bn" -> bengaliBigrams[prevWord] ?: emptyList()
             "hi" -> hindiBigrams[prevWord].orEmpty()
-            else -> englishBigrams[prevWord.lowercase()]
-                ?: romanizedBanglaBigrams[prevWord.lowercase()]
-                ?: emptyList()
+            else -> englishBigrams[lookupPrev].orEmpty()
         }
 
         return (learnedNext + builtInNext).distinct().take(6)
@@ -291,17 +347,14 @@ object SmartWordPredictor {
     private fun prefixPredictions(prefix: String, lang: String): List<String> {
         val lower = prefix.lowercase()
 
-        // Special romanized Banglish shortcut (e.g., typing "ki" or "ami" in EN or BN)
-        val phoneticExact = romanizedBanglaShortcuts[lower].orEmpty()
-
         val learnedMatches = synchronized(this) {
             userWordFreqs[lang].orEmpty()
                 .entries
                 .filter { (word, _) ->
-                    if (lang == "en") {
-                        word.startsWith(lower) && !word.equals(lower, ignoreCase = true)
-                    } else {
-                        word.startsWith(prefix) && word != prefix
+                    when (lang) {
+                        "bn_en", "en" -> !BengaliTransliterator.containsBengaliScript(word) &&
+                            word.startsWith(lower) && !word.equals(lower, ignoreCase = true)
+                        else -> word.startsWith(prefix) && word != prefix
                     }
                 }
                 .sortedByDescending { it.value }
@@ -309,8 +362,30 @@ object SmartWordPredictor {
         }
 
         return when (lang) {
+            "bn_en" -> {
+                // Strictly one-way Bengali -> Romanized English (NEVER English -> Bengali Unicode!)
+                val shouldCap = prefix.firstOrNull()?.isUpperCase() == true
+                val romanizedSuggestions = BengaliTransliterator.suggestRomanizedBanglish(prefix, maxItems = 6)
+                val formattedLearned = learnedMatches.map { w ->
+                    if (shouldCap && w.firstOrNull()?.isLetter() == true && w.first().code < 128) {
+                        w.replaceFirstChar { it.uppercase() }
+                    } else w
+                }
+                val englishFallback = if (!BengaliTransliterator.containsBengaliScript(prefix) && romanizedSuggestions.size < 4) {
+                    englishDictionary
+                        .filter { it.startsWith(lower) && !it.equals(lower, ignoreCase = true) }
+                        .take(3)
+                        .map { word -> if (shouldCap) word.replaceFirstChar { it.uppercase() } else word }
+                } else {
+                    emptyList()
+                }
+                (romanizedSuggestions + formattedLearned + englishFallback)
+                    .filter { !BengaliTransliterator.containsBengaliScript(it) }
+                    .distinct()
+                    .take(6)
+            }
             "bn" -> {
-                // If user typed "কি" or "কী" without trailing space, include contextual suggestions too
+                // Pure Bengali Unicode script stays strictly inside the 'বাংলা' tab
                 val inlineFollowups = if (prefix == "কি" || prefix == "কী") {
                     listOf("করছ", "হয়েছে", "খবর", "ব্যাপার", "কিছু", "কিন্তু")
                 } else emptyList()
@@ -318,7 +393,7 @@ object SmartWordPredictor {
                 val contains = if (exactPrefix.size + learnedMatches.size < 6) {
                     bengaliDictionary.filter { it.contains(prefix) && !it.startsWith(prefix) }
                 } else emptyList()
-                (learnedMatches + phoneticExact + inlineFollowups + exactPrefix + contains)
+                (learnedMatches + inlineFollowups + exactPrefix + contains)
                     .distinct()
                     .take(6)
             }
@@ -334,7 +409,7 @@ object SmartWordPredictor {
                 val isAllCaps = prefix.length > 1 && prefix.all { it.isUpperCase() }
                 val dictMatches = englishDictionary
                     .filter { it.startsWith(lower) && !it.equals(lower, ignoreCase = true) }
-                val formattedEnglish = (learnedMatches + dictMatches)
+                (learnedMatches + dictMatches)
                     .distinct()
                     .map { word ->
                         when {
@@ -343,32 +418,25 @@ object SmartWordPredictor {
                             else -> word
                         }
                     }
-                (phoneticExact + formattedEnglish).distinct().take(6)
+                    .take(6)
             }
         }
     }
 
-    // ── Romanized Banglish Quick Shortcuts (e.g., "ki" -> করছ, হয়েছে, খবর, ব্যাপার) ──
-    private val romanizedBanglaShortcuts: Map<String, List<String>> = mapOf(
-        "ki" to listOf("করছ", "হয়েছে", "খবর", "ব্যাপার"),
-        "ami" to listOf("আমি", "যাচ্ছি", "ভালো আছি", "আসছি"),
-        "tumi" to listOf("তুমি", "কেমন আছো?", "কোথায়?", "কি করছ?"),
-        "kemon" to listOf("কেমন আছো?", "কেমন আছেন?", "কেমন চলছে?"),
-        "valo" to listOf("ভালো আছি", "ভালো", "ভালো থেকো"),
-        "bhalo" to listOf("ভালো আছি", "ভালো", "ভালো থেকো"),
-        "thik" to listOf("ঠিক আছে", "ঠিক", "ঠিক বলেছ"),
-        "accha" to listOf("আচ্ছা", "ঠিক আছে", "হ্যাঁ"),
-        "aschi" to listOf("আসছি", "একটু পরে আসছি"),
-        "jacchi" to listOf("যাচ্ছি", "এখন যাচ্ছি"),
-        "kothay" to listOf("কোথায়?", "কোথায় আছো?")
-    )
-
-    private val romanizedBanglaBigrams: Map<String, List<String>> = mapOf(
-        "ki" to listOf("করছ", "হয়েছে", "খবর", "ব্যাপার", "বলো"),
-        "ami" to listOf("যাচ্ছি", "এখন", "ভালো আছি", "পারব না", "আসছি"),
-        "tumi" to listOf("কেমন আছো?", "কোথায়?", "কি করছ?", "আসবে?"),
-        "kemon" to listOf("আছো?", "আছেন?", "লাগছে?", "হয়েছে?"),
-        "thik" to listOf("আছে", "আছে ভাই", "বলেছ", "হয়েছে")
+    // ── Indian Banglish (BN-EN) Strictly Romanized Next-Word Bigrams (Zero Bengali Unicode) ──
+    private val banglishRomanizedBigrams: Map<String, List<String>> = mapOf(
+        "tumi" to listOf("kemon", "kothay", "ki", "ekhon", "valo", "asbe"),
+        "ami" to listOf("valo", "jacchi", "aschi", "ekhon", "bari", "bolchi"),
+        "kemon" to listOf("acho", "achen", "lagche", "cholche", "achis", "hoyeche"),
+        "valo" to listOf("achi", "theko", "lagche", "hoyeche", "kotha", "khobor"),
+        "ekhon" to listOf("ki", "kothay", "jacchi", "bari", "free", "busy"),
+        "ki" to listOf("korcho", "khobor", "hoyeche", "byapar", "bolo", "lagbe"),
+        "thik" to listOf("ache", "bolecho", "hoyeche", "korecho", "somoye", "bhai"),
+        "kothay" to listOf("acho", "jaccho", "ekhon", "thako", "asbe", "gele"),
+        "pore" to listOf("kotha", "asbo", "call", "janacchi", "dekha", "bolbo"),
+        "bari" to listOf("jacchi", "achi", "ferbo", "theke", "aschi", "phirchi"),
+        "khub" to listOf("valo", "sundor", "khushi", "dorkar", "moja", "darun"),
+        "accha" to listOf("thik", "pore", "bolchi", "tahole", "ok", "dekha")
     )
 
     // ── Bengali Next-Word Bigrams ───────────────────────────────────────────────

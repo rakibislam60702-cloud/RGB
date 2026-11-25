@@ -43,19 +43,27 @@ class LanguagePackManager private constructor(
 
     private fun ensureDefaultTriLanguagePacks() {
         val prefs = context.getSharedPreferences("rakib_lang_pack_prefs", Context.MODE_PRIVATE)
-        if (prefs.getBoolean("preseeded_tri_lang_v1", false)) return
+        val alreadyV2 = prefs.getBoolean("preseeded_tri_lang_v2", false)
         listOf("bn", "hi").forEach { langId ->
             runCatching {
                 val target = layoutFileFor(langId)
-                if (!target.exists() || target.length() <= 0L) {
+                // Always refresh bn.json when upgrading from v1 -> v2, or seed if missing
+                val shouldWrite = !target.exists() || target.length() <= 0L || (!alreadyV2 && langId == "bn")
+                if (shouldWrite) {
                     val rawJson = context.assets.open("language_packs/$langId.json")
                         .bufferedReader(Charsets.UTF_8)
                         .use { it.readText() }
                     target.writeText(rawJson, Charsets.UTF_8)
+                    layoutCache.remove(langId)
                 }
             }
         }
-        prefs.edit().putBoolean("preseeded_tri_lang_v1", true).apply()
+        if (!alreadyV2) {
+            prefs.edit()
+                .putBoolean("preseeded_tri_lang_v1", true)
+                .putBoolean("preseeded_tri_lang_v2", true)
+                .apply()
+        }
     }
 
     fun refreshDownloadedPacks() {
@@ -70,9 +78,27 @@ class LanguagePackManager private constructor(
     }
 
     fun isDownloaded(langId: String): Boolean {
-        if (langId == LanguageCatalog.ENGLISH_ID) return true
+        if (LanguageCatalog.isBuiltInId(langId)) return true
         val file = layoutFileFor(langId)
-        return file.exists() && file.length() > 0L
+        if (file.exists() && file.length() > 0L) return true
+        // Guarantee bundled Bangla & Hindi are immediately available even if filesDir was cleared
+        if (langId == "bn" || langId == "hi") {
+            ensureBundledPackOnDisk(langId)
+            return file.exists() && file.length() > 0L
+        }
+        return false
+    }
+
+    private fun ensureBundledPackOnDisk(langId: String): File? {
+        return runCatching {
+            val target = layoutFileFor(langId)
+            val rawJson = context.assets.open("language_packs/$langId.json")
+                .bufferedReader(Charsets.UTF_8)
+                .use { it.readText() }
+            target.writeText(rawJson, Charsets.UTF_8)
+            refreshDownloadedPacks()
+            target
+        }.getOrNull()
     }
 
     fun layoutFileFor(langId: String): File = File(layoutsDir, "$langId.json")
@@ -108,7 +134,7 @@ class LanguagePackManager private constructor(
      * Removes a downloaded JSON layout pack from `filesDir/layouts/`.
      */
     suspend fun deleteLanguagePack(langId: String) = withContext(Dispatchers.IO) {
-        if (langId == LanguageCatalog.ENGLISH_ID) return@withContext
+        if (LanguageCatalog.isBuiltInId(langId)) return@withContext
         val file = layoutFileFor(langId)
         if (file.exists()) {
             file.delete()
@@ -119,11 +145,16 @@ class LanguagePackManager private constructor(
 
     /**
      * Dynamically loads a downloaded JSON layout from `filesDir/layouts/<langId>.json`.
-     * Returns null for built-in English or if the pack has not been downloaded yet.
+     * Returns null for built-in English/Banglish or if the pack has not been downloaded yet.
      */
     fun loadLayoutFromDisk(langId: String): DynamicKeyboardLayout? {
-        if (langId == LanguageCatalog.ENGLISH_ID) return null
-        val file = layoutFileFor(langId)
+        if (LanguageCatalog.isBuiltInId(langId)) return null
+        var file = layoutFileFor(langId)
+        if (!file.exists() || file.length() <= 0L) {
+            if (langId == "bn" || langId == "hi") {
+                ensureBundledPackOnDisk(langId)?.let { file = it }
+            }
+        }
         if (!file.exists() || file.length() <= 0L) {
             layoutCache.remove(langId)
             return null
@@ -141,7 +172,17 @@ class LanguagePackManager private constructor(
             val parsed = parseLayoutJson(raw)
             layoutCache[langId] = CachedLayout(modTime, parsed)
             parsed
-        }.getOrNull()
+        }.getOrElse {
+            // Direct asset fallback so Bangla never degrades to English
+            runCatching {
+                val raw = context.assets.open("language_packs/$langId.json")
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+                parseLayoutJson(raw).also { parsed ->
+                    layoutCache[langId] = CachedLayout(System.currentTimeMillis(), parsed)
+                }
+            }.getOrNull()
+        }
     }
 
     fun getDownloadedLanguageIds(): Set<String> {

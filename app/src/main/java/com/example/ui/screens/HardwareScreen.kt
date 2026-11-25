@@ -62,32 +62,43 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.text.font.FontFamily
 import com.example.R
+import com.example.data.LicenseUiState
 import com.example.model.ImeStatus
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
 import com.example.model.LanguagePackUiState
 import com.example.model.SwitchSoundProfile
+import com.example.ui.theme.FlagshipCyanMagentaBrush
+import com.example.ui.theme.FlagshipGlassRimGoldSubtle
+import com.example.ui.theme.FlagshipGlassRimSubtle
+import com.example.ui.theme.FlagshipGoldAmberBrush
+import com.example.ui.theme.FlagshipGoldCyanBrush
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceVariant
+import com.example.ui.theme.RoyalGold
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.luminousGlassCard
 
 @Composable
 fun HardwareScreen(
     settings: KeyboardSettings,
     imeStatus: ImeStatus,
+    licenseState: LicenseUiState,
     languagePacks: List<LanguagePackUiState>,
     onSelectSwitchSound: (SwitchSoundProfile) -> Unit,
     onAuditionSwitch: (SwitchSoundProfile) -> Unit,
     onHapticEnabledChange: (Boolean) -> Unit,
     onHapticStrengthChange: (Float) -> Unit,
     onSelectLanguageById: (String) -> Unit,
+    onOpenUnlockScreen: () -> Unit,
     onOpenLanguagesTab: () -> Unit,
     onHeightPresetChange: (KeyboardHeightPreset) -> Unit,
     onShowToolbarChange: (Boolean) -> Unit,
@@ -138,12 +149,13 @@ fun HardwareScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (selected) ObsidianSurfaceVariant else ObsidianSurface)
-                            .border(
-                                width = if (selected) 1.5.dp else 1.dp,
-                                color = if (selected) accent else ObsidianBorder,
-                                shape = RoundedCornerShape(14.dp)
+                            .luminousGlassCard(
+                                shape = RoundedCornerShape(16.dp),
+                                borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                                borderWidth = if (selected) 1.5.dp else 1.dp,
+                                glowColor = accent,
+                                glowElevation = if (selected) 12.dp else 6.dp,
+                                surfaceColor = if (selected) ObsidianSurfaceVariant else ObsidianSurface
                             )
                             .clickable { onSelectSwitchSound(profile) }
                             .padding(14.dp)
@@ -153,16 +165,20 @@ fun HardwareScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(accent.copy(alpha = 0.16f))
-                                .border(1.dp, accent.copy(alpha = 0.7f), RoundedCornerShape(10.dp)),
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(accent.copy(alpha = 0.34f), ObsidianCanvas)
+                                    )
+                                )
+                                .border(1.1.dp, accent.copy(alpha = 0.72f), RoundedCornerShape(11.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.GraphicEq,
                                 contentDescription = null,
-                                tint = accent,
+                                tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -178,18 +194,19 @@ fun HardwareScreen(
                                 Text(
                                     text = profile.displayName,
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = TextPrimary
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
                                 )
                                 Text(
                                     text = profile.actuationLabel,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = accent
+                                    color = Color.White.copy(alpha = 0.88f)
                                 )
                             }
                             Text(
                                 text = profile.description,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextMuted
+                                color = Color.White.copy(alpha = 0.84f)
                             )
                         }
                     }
@@ -201,9 +218,13 @@ fun HardwareScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(ObsidianSurface)
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
+                    .luminousGlassCard(
+                        shape = RoundedCornerShape(20.dp),
+                        borderBrush = FlagshipGlassRimSubtle,
+                        borderWidth = 1.2.dp,
+                        glowColor = NeonCyan,
+                        glowElevation = 10.dp
+                    )
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -231,9 +252,13 @@ fun HardwareScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(ObsidianSurface)
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
+                    .luminousGlassCard(
+                        shape = RoundedCornerShape(20.dp),
+                        borderBrush = FlagshipGlassRimGoldSubtle,
+                        borderWidth = 1.2.dp,
+                        glowColor = RoyalGold,
+                        glowElevation = 10.dp
+                    )
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
@@ -249,28 +274,46 @@ fun HardwareScreen(
                         contentPadding = PaddingValues(end = 4.dp)
                     ) {
                         items(languagePacks.filter { it.isEnabled }, key = { it.catalog.id }) { pack ->
-                            val selected = pack.isActive
-                            Box(
+                            val isVipLocked = pack.catalog.isVipOnly && !licenseState.isBanglishUnlocked
+                            val selected = pack.isActive && !isVipLocked
+                            Row(
                                 modifier = Modifier
                                     .heightIn(min = 44.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (selected) NeonCyan.copy(alpha = 0.18f) else ObsidianCanvas)
                                     .border(
                                         width = if (selected) 1.5.dp else 1.dp,
-                                        color = if (selected) NeonCyan else ObsidianBorder,
+                                        color = when {
+                                            selected -> NeonCyan
+                                            isVipLocked -> NeonAmber.copy(alpha = 0.72f)
+                                            else -> ObsidianBorder
+                                        },
                                         shape = RoundedCornerShape(12.dp)
                                     )
-                                    .clickable { onSelectLanguageById(pack.catalog.id) }
+                                    .clickable {
+                                        if (isVipLocked) onOpenUnlockScreen() else onSelectLanguageById(pack.catalog.id)
+                                    }
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
                                     .testTag("hardware_lang_${pack.catalog.id}"),
-                                contentAlignment = Alignment.Center
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
                                     text = pack.catalog.nativeName,
                                     fontFamily = FontFamily.Default,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) NeonCyan else TextSecondary
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
                                 )
+                                if (isVipLocked) {
+                                    Text(
+                                        text = "🔒 VIP",
+                                        fontFamily = JetBrainsMonoFamily,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = NeonAmber
+                                    )
+                                }
                             }
                         }
 
@@ -280,7 +323,7 @@ fun HardwareScreen(
                                     .heightIn(min = 44.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(ObsidianSurfaceVariant)
-                                    .border(1.dp, NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                                    .border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
                                     .clickable(onClick = onOpenLanguagesTab)
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
                                     .testTag("hardware_btn_more_languages"),
@@ -289,7 +332,8 @@ fun HardwareScreen(
                                 Text(
                                     text = stringResource(R.string.add_languages_chip),
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = NeonCyan
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
                                 )
                             }
                         }
@@ -300,7 +344,8 @@ fun HardwareScreen(
                     Text(
                         text = stringResource(R.string.label_keyboard_height),
                         style = MaterialTheme.typography.titleSmall,
-                        color = TextPrimary
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -313,10 +358,10 @@ fun HardwareScreen(
                                     .weight(1f)
                                     .heightIn(min = 44.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(if (selected) NeonCyan.copy(alpha = 0.18f) else ObsidianCanvas)
+                                    .background(if (selected) ObsidianSurfaceVariant else ObsidianCanvas)
                                     .border(
                                         width = if (selected) 1.5.dp else 1.dp,
-                                        color = if (selected) NeonCyan else ObsidianBorder,
+                                        color = if (selected) Color.White else ObsidianBorder,
                                         shape = RoundedCornerShape(12.dp)
                                     )
                                     .clickable { onHeightPresetChange(preset) }
@@ -326,7 +371,8 @@ fun HardwareScreen(
                                 Text(
                                     text = preset.displayName,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) NeonCyan else TextSecondary
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
                                 )
                             }
                         }
@@ -361,9 +407,13 @@ fun HardwareScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(ObsidianSurface)
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
+                    .luminousGlassCard(
+                        shape = RoundedCornerShape(20.dp),
+                        borderBrush = FlagshipCyanMagentaBrush,
+                        borderWidth = 1.25.dp,
+                        glowColor = NeonCyan,
+                        glowElevation = 12.dp
+                    )
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -386,8 +436,8 @@ fun HardwareScreen(
                         onClick = onOpenImeSettings,
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonCyan,
-                            contentColor = Color(0xFF001B22)
+                            containerColor = Color.White,
+                            contentColor = Color(0xFF0D1B3E)
                         ),
                         modifier = Modifier
                             .weight(1f)
@@ -396,7 +446,7 @@ fun HardwareScreen(
                     ) {
                         Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = stringResource(R.string.action_open_settings), style = MaterialTheme.typography.labelLarge)
+                        Text(text = stringResource(R.string.action_open_settings), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(
                         onClick = onShowImePicker,
@@ -406,9 +456,9 @@ fun HardwareScreen(
                             .heightIn(min = 48.dp)
                             .testTag("guide_btn_picker")
                     ) {
-                        Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = stringResource(R.string.action_select_ime), color = TextPrimary, style = MaterialTheme.typography.labelLarge)
+                        Text(text = stringResource(R.string.action_select_ime), color = Color.White, style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -425,14 +475,14 @@ fun HardwareScreen(
                 Icon(
                     imageVector = Icons.Filled.RestartAlt,
                     contentDescription = null,
-                    tint = TextSecondary,
+                    tint = Color.White,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = stringResource(R.string.reset_defaults),
                     style = MaterialTheme.typography.labelLarge,
-                    color = TextSecondary
+                    color = Color.White
                 )
             }
 
@@ -461,9 +511,13 @@ private fun SwitchAuditionDeck(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(ObsidianSurface)
-            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
+            .luminousGlassCard(
+                shape = RoundedCornerShape(20.dp),
+                borderBrush = FlagshipGoldCyanBrush,
+                borderWidth = 1.35.dp,
+                glowColor = accent,
+                glowElevation = 14.dp
+            )
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -543,7 +597,7 @@ private fun SwitchAuditionDeck(
                 Text(
                     text = "${activeProfile.actuationLabel} · $tapCount actuations",
                     style = MaterialTheme.typography.labelSmall,
-                    color = accent
+                    color = Color.White
                 )
             }
         }
@@ -564,7 +618,7 @@ private fun SetupStepRow(
         Icon(
             imageVector = if (completed) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
             contentDescription = null,
-            tint = if (completed) NeonEmerald else TextMuted,
+            tint = if (completed) NeonEmerald else Color.White,
             modifier = Modifier
                 .padding(top = 2.dp)
                 .size(20.dp)
@@ -573,12 +627,13 @@ private fun SetupStepRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                color = if (completed) NeonEmerald else TextPrimary
+                fontWeight = FontWeight.Bold,
+                color = Color.White
             )
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodySmall,
-                color = TextMuted
+                color = Color.White.copy(alpha = 0.86f)
             )
         }
     }

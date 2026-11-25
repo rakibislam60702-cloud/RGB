@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.RgbKeyboardService
 import com.example.data.ClipboardHistoryManager
+import com.example.data.ComboThemePreset
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.KeyboardPreferencesRepository
@@ -18,11 +19,9 @@ import com.example.data.LanguagePackManager
 import com.example.data.LicenseUiState
 import com.example.data.TrialLicenseManager
 import com.example.data.UpiVerificationResult
-import com.example.engine.BanglaGuideScript
-import com.example.engine.BanglaVoiceGuideController
+import com.example.engine.BengaliTransliterator
 import com.example.engine.MechanicalFeedbackEngine
 import com.example.engine.SmartWordPredictor
-import com.example.engine.VoiceGuideState
 import com.example.keyboard.ShiftState
 import com.example.model.AppUiLanguage
 import com.example.model.ImeStatus
@@ -55,10 +54,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val trialLicenseManager = TrialLicenseManager.getInstance(application)
     private val clipboardManager = ClipboardHistoryManager.getInstance(application)
     private val feedbackEngine = MechanicalFeedbackEngine(application)
-    private val voiceGuideController = BanglaVoiceGuideController(application)
 
     val customPhotoTheme: StateFlow<CustomPhotoTheme> = customBackgroundManager.theme
-    val voiceGuideState: StateFlow<VoiceGuideState> = voiceGuideController.state
     val licenseState: StateFlow<LicenseUiState> = trialLicenseManager.licenseState
 
     val settings: StateFlow<KeyboardSettings> = repository.settingsFlow.stateIn(
@@ -133,10 +130,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var hasInitializedImeStatus: Boolean = false
     private var lastShiftTapMs: Long = 0L
     private var lastSpaceTapMs: Long = 0L
+    private val playgroundBanglishRawBuffer = StringBuilder()
+    private var playgroundBanglishBaseText: String = ""
 
     init {
         SmartWordPredictor.init(application)
-        trialLicenseManager.tryAutoRestoreFromLicenseFile()
+        trialLicenseManager.syncStorageInBackground(forcePersistToDocuments = false)
         refreshImeStatus()
         startTrialCountdownTicker()
     }
@@ -145,36 +144,85 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             while (isActive) {
                 val state = trialLicenseManager.refreshState()
-                if (state.isLifetimeUnlocked) {
-                    break
-                }
-                delay(1_000L)
+                enforceBanglishVipLockIfExpired(state)
+                delay(15_000L)
             }
         }
     }
 
     fun refreshLicenseState() {
-        trialLicenseManager.refreshState()
+        val state = trialLicenseManager.refreshState()
+        enforceBanglishVipLockIfExpired(state)
     }
 
-    fun createOfficialUpiIntent(): Pair<String, Intent> {
-        return trialLicenseManager.createOfficialUpiIntent()
+    private fun enforceBanglishVipLockIfExpired(state: LicenseUiState) {
+        if (!state.isBanglishUnlocked && settings.value.activeLanguageId == LanguageCatalog.BANGLISH_ID) {
+            viewModelScope.launch {
+                repository.updateActiveLanguage(LanguageCatalog.ENGLISH_ID)
+            }
+        }
+    }
+
+    fun generateDiscountedUniqueAmount(baseAmountInr: Int): String {
+        return trialLicenseManager.generateDiscountedUniqueAmount(baseAmountInr)
+    }
+
+    fun registerPendingPayment(
+        planScope: String,
+        baseAmountInr: Int,
+        uniqueAmountFormatted: String,
+        durationDays: Int
+    ): String {
+        return trialLicenseManager.registerPendingPayment(
+            planScope = planScope,
+            baseAmountInr = baseAmountInr,
+            uniqueAmountFormatted = uniqueAmountFormatted,
+            durationDays = durationDays
+        )
+    }
+
+    fun createOfficialUpiIntent(
+        planScope: String = TrialLicenseManager.PLAN_SCOPE_VIP_FEATURES,
+        amountInr: Int? = null,
+        uniqueAmountFormatted: String? = null,
+        durationDays: Int? = null
+    ): Pair<String, Intent> {
+        return trialLicenseManager.createOfficialUpiIntent(
+            planScope = planScope,
+            overrideAmountInr = amountInr,
+            uniqueAmountFormatted = uniqueAmountFormatted,
+            overrideDurationDays = durationDays
+        )
     }
 
     fun verifyUpiPaymentResult(
         resultCode: Int,
         data: Intent?,
-        expectedTxnRef: String?
+        expectedTxnRef: String?,
+        planScope: String = TrialLicenseManager.PLAN_SCOPE_VIP_FEATURES,
+        purchasedDurationDays: Int? = null
     ): UpiVerificationResult {
         return trialLicenseManager.verifyUpiIntentResult(
             resultCode = resultCode,
             data = data,
-            expectedTxnRef = expectedTxnRef
+            expectedTxnRef = expectedTxnRef,
+            planScope = planScope,
+            purchasedDurationDays = purchasedDurationDays
         )
     }
 
-    fun buildUpiQrPayload(): String {
-        return trialLicenseManager.buildUpiQrPayload()
+    fun buildUpiQrPayload(
+        planScope: String = TrialLicenseManager.PLAN_SCOPE_VIP_FEATURES,
+        amountInr: Int? = null,
+        uniqueAmountFormatted: String? = null,
+        durationDays: Int? = null
+    ): String {
+        return trialLicenseManager.buildUpiQrPayload(
+            planScope = planScope,
+            overrideAmountInr = amountInr,
+            uniqueAmountFormatted = uniqueAmountFormatted,
+            overrideDurationDays = durationDays
+        )
     }
 
     fun refreshImeStatus() {
@@ -200,53 +248,31 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             defaultIme == expectedFullId ||
             (defaultIme.startsWith(context.packageName) && defaultIme.contains("RgbKeyboardService"))
 
-        val previous = _imeStatus.value
         val updated = ImeStatus(
             isEnabled = isEnabled,
             isSelected = isSelected
         )
         _imeStatus.value = updated
 
-        val setupCompleted = updated.isEnabled && updated.isSelected
-
+        // 100% SILENT onboarding walkthrough (zero voice): launches once on first visit
         if (!hasInitializedImeStatus) {
             hasInitializedImeStatus = true
-            // Stage 1: Play Bengali TTS voice ONLY during the 2 initial setup steps
-            if (setupCompleted) {
-                voiceGuideController.stopSpeaking()
-                maybeLaunchSilentFeatureTour()
-            } else {
-                voiceGuideController.triggerFirstLaunchWelcomeIfNeeded(isEnabled, isSelected)
-            }
-        } else {
-            when {
-                setupCompleted -> {
-                    // Stage 1 complete: immediately stop all TTS voice and launch Stage 2 silent tour if pending
-                    voiceGuideController.stopSpeaking()
-                    maybeLaunchSilentFeatureTour()
-                }
-                !previous.isEnabled && updated.isEnabled && !updated.isSelected -> {
-                    // Stage 1 Step 2: narrate Step 2 instruction
-                    voiceGuideController.speak(BanglaGuideScript.STEP_2, forceUnmute = false)
-                }
-            }
+            maybeLaunchSilentFeatureTour()
         }
     }
 
     private fun maybeLaunchSilentFeatureTour() {
         if (!hasCompletedFeatureTour && !_showFeatureTour.value && !_showFinalVipBanner.value) {
-            voiceGuideController.stopSpeaking()
             _showFeatureTour.value = true
         }
     }
 
     /**
-     * Stage 3: Called when the final arrow step is tapped OR top-right "Skip ✕" is tapped.
-     * Saves `has_completed_feature_tour = true`, shows the glowing center Lifetime VIP banner,
-     * and automatically fades it out completely after 3 seconds (`delay(3000)`).
+     * Called when the final arrow step is tapped OR top-right "Skip ✕" is tapped.
+     * Saves `has_completed_feature_tour = true`, shows the glowing center VIP banner,
+     * and automatically fades it out completely after 3 seconds.
      */
     fun finishOrSkipFeatureTour() {
-        voiceGuideController.stopSpeaking()
         _showFeatureTour.value = false
         if (!hasCompletedFeatureTour) {
             hasCompletedFeatureTour = true
@@ -261,10 +287,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Replays Stage 2 silent bouncing-arrow interactive guide on demand from Settings.
+     * Replays the 100% silent bouncing-arrow interactive guide on demand.
      */
     fun replayFeatureTour() {
-        voiceGuideController.stopSpeaking()
         finalVipBannerJob?.cancel()
         _showFinalVipBanner.value = false
         _showFeatureTour.value = true
@@ -273,36 +298,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun setAppUiLanguage(language: AppUiLanguage) {
         _appUiLanguage.value = language
         uiLanguagePrefs.edit().putString(KEY_APP_UI_LANGUAGE, language.code).apply()
-    }
-
-    fun speakBanglaGuide(script: BanglaGuideScript) {
-        val status = _imeStatus.value
-        // Stage 1 rule: Bengali voice guide plays ONLY during initial 2-step setup
-        if (status.isEnabled && status.isSelected) {
-            voiceGuideController.stopSpeaking()
-            return
-        }
-        if (script == BanglaGuideScript.WELCOME_STEP_1 || script == BanglaGuideScript.STEP_2) {
-            voiceGuideController.speak(script, forceUnmute = true)
-        }
-    }
-
-    fun toggleVoiceGuideStopOrMute() {
-        val status = _imeStatus.value
-        if (status.isEnabled && status.isSelected) {
-            voiceGuideController.stopSpeaking()
-            return
-        }
-        val recommended = if (!status.isEnabled) {
-            BanglaGuideScript.WELCOME_STEP_1
-        } else {
-            BanglaGuideScript.STEP_2
-        }
-        voiceGuideController.toggleStopOrMute(recommended)
-    }
-
-    fun stopBanglaGuide() {
-        voiceGuideController.stopSpeaking()
     }
 
     fun triggerKeyFeedback(isModifier: Boolean) {
@@ -318,16 +313,126 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
+    private fun isBanglishVipActive(): Boolean {
+        return settings.value.activeLanguageId == LanguageCatalog.BANGLISH_ID &&
+            licenseState.value.isBanglishUnlocked
+    }
+
+    private fun resetPlaygroundBanglishBuffer() {
+        playgroundBanglishRawBuffer.clear()
+        playgroundBanglishBaseText = ""
+    }
+
+    private fun autoTransliteratePlaygroundTail(current: String): String {
+        if (!isBanglishVipActive()) return current
+        if (playgroundBanglishRawBuffer.isNotEmpty()) {
+            val rawWord = playgroundBanglishRawBuffer.toString()
+            val romanized = BengaliTransliterator.transliterateWordWithContext(
+                bengaliWord = rawWord,
+                textBeforeWord = playgroundBanglishBaseText
+            )
+            val finalized = if (romanized.isNotEmpty()) "$playgroundBanglishBaseText$romanized" else current
+            resetPlaygroundBanglishBuffer()
+            return finalized
+        }
+        val trailingBn = BengaliTransliterator.extractTrailingBengaliWord(current)
+        if (trailingBn.isEmpty()) return current
+        val prefix = current.dropLast(trailingBn.length)
+        val romanized = BengaliTransliterator.transliterateWordWithContext(trailingBn, prefix)
+        return if (romanized.isEmpty()) current else "$prefix$romanized"
+    }
+
     // Playground typing handlers (mirrors RgbKeyboardService behavior for live studio testing)
     fun onPlaygroundCommit(text: String) {
-        _playgroundText.value += text
+        val current = _playgroundText.value
+        if (isBanglishVipActive()) {
+            when {
+                BengaliTransliterator.isBengaliWordText(text) -> {
+                    if (playgroundBanglishRawBuffer.isEmpty()) {
+                        playgroundBanglishBaseText = current
+                    }
+                    playgroundBanglishRawBuffer.append(text)
+                    val liveRomanized = BengaliTransliterator.transliterateWordWithContext(
+                        bengaliWord = playgroundBanglishRawBuffer.toString(),
+                        textBeforeWord = playgroundBanglishBaseText
+                    )
+                    if (liveRomanized.isNotEmpty()) {
+                        _playgroundText.value = playgroundBanglishBaseText + liveRomanized
+                    }
+                }
+                BengaliTransliterator.isBengaliDigitText(text) -> {
+                    val flushed = autoTransliteratePlaygroundTail(current)
+                    _playgroundText.value = flushed + BengaliTransliterator.convertBengaliDigits(text)
+                }
+                BengaliTransliterator.isAutoTransliterateTriggerPunctuation(text) -> {
+                    val normalizedPunct = BengaliTransliterator.normalizeBanglishPunctuation(text)
+                    val converted = autoTransliteratePlaygroundTail(current)
+                    if (settings.value.smartSuggestionsEnabled && converted.isNotBlank()) {
+                        SmartWordPredictor.learnFromCompletedInput(getApplication(), converted, LanguageCatalog.BANGLISH_ID)
+                    }
+                    _playgroundText.value = converted + normalizedPunct
+                }
+                else -> {
+                    val flushed = autoTransliteratePlaygroundTail(current)
+                    val cleanText = if (BengaliTransliterator.containsBengaliScript(text)) {
+                        BengaliTransliterator.transliterate(
+                            text,
+                            capitalizeSentences = BengaliTransliterator.isSentenceStartContext(flushed)
+                        )
+                    } else {
+                        text
+                    }
+                    _playgroundText.value = flushed + cleanText
+                }
+            }
+        } else {
+            resetPlaygroundBanglishBuffer()
+            _playgroundText.value = current + text
+        }
         lastSpaceTapMs = 0L
         if (_playgroundShift.value == ShiftState.ONCE) {
             _playgroundShift.value = ShiftState.OFF
         }
     }
 
+    fun onPlaygroundApplySuggestion(suggestion: String, replaceTokenLength: Int) {
+        val current = _playgroundText.value
+        val updated = if (playgroundBanglishRawBuffer.isNotEmpty()) {
+            val base = playgroundBanglishBaseText
+            resetPlaygroundBanglishBuffer()
+            "$base$suggestion "
+        } else {
+            val trimmed = if (replaceTokenLength > 0 && current.length >= replaceTokenLength) {
+                current.dropLast(replaceTokenLength)
+            } else {
+                current
+            }
+            "$trimmed$suggestion "
+        }
+        _playgroundText.value = updated
+        if (settings.value.smartSuggestionsEnabled && updated.isNotBlank()) {
+            SmartWordPredictor.learnFromCompletedInput(getApplication(), updated.trimEnd(), settings.value.activeLanguageId)
+        }
+        lastSpaceTapMs = 0L
+    }
+
     fun onPlaygroundBackspace() {
+        if (isBanglishVipActive() && playgroundBanglishRawBuffer.isNotEmpty()) {
+            playgroundBanglishRawBuffer.deleteCharAt(playgroundBanglishRawBuffer.length - 1)
+            if (playgroundBanglishRawBuffer.isNotEmpty()) {
+                val liveRomanized = BengaliTransliterator.transliterateWordWithContext(
+                    bengaliWord = playgroundBanglishRawBuffer.toString(),
+                    textBeforeWord = playgroundBanglishBaseText
+                )
+                _playgroundText.value = playgroundBanglishBaseText + liveRomanized
+            } else {
+                _playgroundText.value = playgroundBanglishBaseText
+                resetPlaygroundBanglishBuffer()
+            }
+            lastSpaceTapMs = 0L
+            return
+        }
+        resetPlaygroundBanglishBuffer()
         val current = _playgroundText.value
         if (current.isNotEmpty()) {
             // Handle surrogate pairs (emojis) cleanly
@@ -341,41 +446,71 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         lastSpaceTapMs = 0L
     }
 
+    fun onPlaygroundDeleteWord() {
+        if (isBanglishVipActive() && playgroundBanglishRawBuffer.isNotEmpty()) {
+            _playgroundText.value = playgroundBanglishBaseText
+            resetPlaygroundBanglishBuffer()
+            lastSpaceTapMs = 0L
+            return
+        }
+        resetPlaygroundBanglishBuffer()
+        val current = _playgroundText.value
+        if (current.isEmpty()) return
+        var idx = current.length
+        while (idx > 0 && current[idx - 1].isWhitespace()) {
+            idx--
+        }
+        while (idx > 0 && !current[idx - 1].isWhitespace()) {
+            idx--
+        }
+        val updated = current.substring(0, idx)
+        _playgroundText.value = updated
+        if (updated.isEmpty() && settings.value.autoCapitalize && _playgroundShift.value != ShiftState.CAPS_LOCK) {
+            _playgroundShift.value = ShiftState.ONCE
+        }
+        lastSpaceTapMs = 0L
+    }
+
     fun onPlaygroundSpace() {
         val now = System.currentTimeMillis()
         val current = _playgroundText.value
         val activeId = settings.value.activeLanguageId
-        val isEnglish = activeId == LanguageCatalog.ENGLISH_ID
+        val isLatinBuiltIn = activeId == LanguageCatalog.ENGLISH_ID
         if (settings.value.doubleSpacePeriod &&
             (now - lastSpaceTapMs) in 40L..420L &&
             current.length >= 2 &&
             current.last() == ' ' &&
             !current[current.length - 2].isWhitespace()
         ) {
-            val endPunct = languagePackManager.loadLayoutFromDisk(activeId)?.sentenceEndPunct ?: "."
+            val endPunct = if (activeId == LanguageCatalog.BANGLISH_ID) {
+                "."
+            } else {
+                languagePackManager.loadLayoutFromDisk(activeId)?.sentenceEndPunct ?: "."
+            }
             _playgroundText.value = current.dropLast(1) + "$endPunct "
             lastSpaceTapMs = 0L
-            if (isEnglish && settings.value.autoCapitalize && _playgroundShift.value == ShiftState.OFF) {
+            if (isLatinBuiltIn && settings.value.autoCapitalize && _playgroundShift.value == ShiftState.OFF) {
                 _playgroundShift.value = ShiftState.ONCE
             }
             return
         }
-        if (settings.value.smartSuggestionsEnabled && current.isNotBlank()) {
-            SmartWordPredictor.learnFromCompletedInput(getApplication(), current, activeId)
+        val converted = autoTransliteratePlaygroundTail(current)
+        if (settings.value.smartSuggestionsEnabled && converted.isNotBlank()) {
+            SmartWordPredictor.learnFromCompletedInput(getApplication(), converted, activeId)
         }
-        _playgroundText.value = "$current "
+        _playgroundText.value = "$converted "
         lastSpaceTapMs = now
-        if (isEnglish &&
+        if (isLatinBuiltIn &&
             settings.value.autoCapitalize &&
             _playgroundShift.value == ShiftState.OFF &&
-            (current.endsWith(".") || current.endsWith("!") || current.endsWith("?"))
+            (converted.endsWith(".") || converted.endsWith("!") || converted.endsWith("?"))
         ) {
             _playgroundShift.value = ShiftState.ONCE
         }
     }
 
     fun onPlaygroundEnter() {
-        val current = _playgroundText.value
+        val current = autoTransliteratePlaygroundTail(_playgroundText.value)
         if (settings.value.smartSuggestionsEnabled && current.isNotBlank()) {
             SmartWordPredictor.learnFromCompletedInput(getApplication(), current, settings.value.activeLanguageId)
         }
@@ -400,6 +535,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearPlaygroundText() {
+        resetPlaygroundBanglishBuffer()
         _playgroundText.value = ""
         if (settings.value.autoCapitalize && _playgroundShift.value != ShiftState.CAPS_LOCK) {
             _playgroundShift.value = ShiftState.ONCE
@@ -431,10 +567,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         selectLanguageById(id)
     }
 
-    fun selectLanguageById(langId: String) {
-        if (langId != LanguageCatalog.ENGLISH_ID && !languagePackManager.isDownloaded(langId)) {
+    fun selectLanguageById(langId: String): Boolean {
+        val isBanglishAllowed = trialLicenseManager.refreshState().isBanglishUnlocked
+        if (langId == LanguageCatalog.BANGLISH_ID && !isBanglishAllowed) {
+            enforceBanglishVipLockIfExpired(licenseState.value)
+            return false
+        }
+        if (!LanguageCatalog.isBuiltInId(langId) && !languagePackManager.isDownloaded(langId)) {
             downloadAndEnableLanguage(langId, activateImmediately = true)
-            return
+            return true
         }
         _playgroundShift.value = if (langId != LanguageCatalog.ENGLISH_ID) {
             ShiftState.OFF
@@ -444,12 +585,25 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             ShiftState.OFF
         }
         viewModelScope.launch { repository.updateActiveLanguage(langId) }
+        return true
     }
 
-    fun toggleLanguage() {
+    fun toggleLanguage(onVipLocked: () -> Unit = {}) {
+        val isBanglishAllowed = trialLicenseManager.refreshState().isBanglishUnlocked
         viewModelScope.launch {
             val downloaded = languagePackManager.getDownloadedLanguageIds()
-            val chosen = repository.cycleActiveLanguage(downloaded)
+            val fullCycle = settings.value.enabledLanguageIds
+                .filter { LanguageCatalog.isBuiltInId(it) || it in downloaded }
+                .ifEmpty { listOf(LanguageCatalog.ENGLISH_ID) }
+            val currentIdx = fullCycle.indexOf(settings.value.activeLanguageId)
+            val candidateNext = fullCycle[(currentIdx + 1) % fullCycle.size]
+
+            val chosen = if (candidateNext == LanguageCatalog.BANGLISH_ID && !isBanglishAllowed) {
+                onVipLocked()
+                repository.cycleActiveLanguage(downloaded, includeVipLanguages = false)
+            } else {
+                repository.cycleActiveLanguage(downloaded, includeVipLanguages = isBanglishAllowed)
+            }
             _playgroundShift.value = if (chosen == LanguageCatalog.ENGLISH_ID &&
                 settings.value.autoCapitalize &&
                 _playgroundText.value.isEmpty()
@@ -462,7 +616,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun downloadAndEnableLanguage(langId: String, activateImmediately: Boolean = true) {
-        if (langId == LanguageCatalog.ENGLISH_ID) return
+        if (LanguageCatalog.isBuiltInId(langId)) return
         if (langId in _downloadingIds.value) return
         viewModelScope.launch {
             _downloadingIds.update { it + langId }
@@ -470,7 +624,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             _downloadingIds.update { it - langId }
             if (result.isSuccess) {
                 repository.setLanguageEnabled(langId, true)
-                if (activateImmediately) {
+                val canActivateNow = activateImmediately &&
+                    (langId != LanguageCatalog.BANGLISH_ID || trialLicenseManager.refreshState().isBanglishUnlocked)
+                if (canActivateNow) {
                     repository.updateActiveLanguage(langId)
                 }
             }
@@ -478,7 +634,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setLanguageEnabled(langId: String, enabled: Boolean) {
-        if (langId == LanguageCatalog.ENGLISH_ID) return
+        if (LanguageCatalog.isBuiltInId(langId)) return
         viewModelScope.launch {
             if (enabled && !languagePackManager.isDownloaded(langId)) {
                 downloadAndEnableLanguage(langId, activateImmediately = false)
@@ -489,7 +645,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteLanguagePack(langId: String) {
-        if (langId == LanguageCatalog.ENGLISH_ID) return
+        if (LanguageCatalog.isBuiltInId(langId)) return
         viewModelScope.launch {
             languagePackManager.deleteLanguagePack(langId)
             repository.setLanguageEnabled(langId, false)
@@ -581,6 +737,31 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         customBackgroundManager.selectPreset(presetId)
     }
 
+    /** Section 1: 1-Tap Photo + AI Animation Combo — applies BOTH HD background AND matching AI RGB animation together. */
+    fun applyComboTheme(combo: ComboThemePreset) {
+        customBackgroundManager.selectPreset(combo.bannerPresetId)
+        viewModelScope.launch {
+            repository.updateEffect(combo.effect)
+            repository.updatePalette(combo.palette)
+        }
+    }
+
+    /** Section 2: Pure AI Lighting Animation Only — clears background photo/banner and applies pure RGB animation. */
+    fun applyAnimationOnly(effect: RgbEffect) {
+        customBackgroundManager.clearCustomPhoto()
+        viewModelScope.launch {
+            repository.updateEffect(effect)
+        }
+    }
+
+    /** Section 3: Pure Static HD Photo Banner Only (No Animation) — applies static banner with RgbEffect.NORMAL_DEFAULT. */
+    fun applyStaticBannerOnly(presetId: String) {
+        customBackgroundManager.selectPreset(presetId)
+        viewModelScope.launch {
+            repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+        }
+    }
+
     fun saveCustomPhoto(uri: Uri) {
         viewModelScope.launch {
             customBackgroundManager.savePhotoFromUri(uri)
@@ -603,7 +784,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         super.onCleared()
         finalVipBannerJob?.cancel()
         feedbackEngine.release()
-        voiceGuideController.release()
     }
 
     companion object {

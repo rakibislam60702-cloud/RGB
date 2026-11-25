@@ -70,31 +70,33 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.CustomPhotoTheme
 import com.example.data.LicenseUiState
-import com.example.engine.VoiceGuideState
 import com.example.model.AppUiLanguage
 import com.example.model.AppUiStrings
 import com.example.model.LanguagePackUiState
 import com.example.model.LocalAppStrings
 import com.example.model.appStringsFor
 import com.example.ui.components.FeatureTourCoordinates
+import com.example.ui.components.FeatureTourTarget
 import com.example.ui.components.FinalLifetimeVipAutoBanner
 import com.example.ui.components.LifetimeUnlockScreen
 import com.example.ui.components.SilentFeatureTourOverlay
+import com.example.ui.components.UnlockPaywallFocus
 import com.example.ui.screens.EffectsScreen
 import com.example.ui.screens.HardwareScreen
 import com.example.ui.screens.LanguagesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StudioScreen
-import com.example.ui.theme.NotoSansBengaliFamily
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color as ComposeColor
+import com.example.ui.theme.FlagshipCyanMagentaBrush
+import com.example.ui.theme.GlassCardSelected
+import com.example.ui.theme.GlassNavSurface
 import com.example.ui.theme.NeonCyan
-import com.example.ui.theme.NeonCyanContainer
-import com.example.ui.theme.NeonMagenta
-import com.example.ui.theme.ObsidianCanvas
-import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.NotoSansBengaliFamily
+import androidx.compose.ui.graphics.Color as ComposeColor
 import com.example.ui.theme.ProRgbKeyboardTheme
-import com.example.ui.theme.TextMuted
+import com.example.ui.theme.midnightNavyIndigoWallpaper
 import com.example.viewmodel.StudioViewModel
 
 private enum class StudioTab(
@@ -238,16 +240,22 @@ fun ProRgbKeyboardApp(
     val customPhotoTheme by viewModel.customPhotoTheme.collectAsStateWithLifecycle()
     val imeStatus by viewModel.imeStatus.collectAsStateWithLifecycle()
     val licenseState by viewModel.licenseState.collectAsStateWithLifecycle()
-    val voiceGuideState by viewModel.voiceGuideState.collectAsStateWithLifecycle()
     val languagePacks by viewModel.languagePacks.collectAsStateWithLifecycle()
     val playgroundText by viewModel.playgroundText.collectAsStateWithLifecycle()
     val clipboardClips by viewModel.clipboardClips.collectAsStateWithLifecycle()
     val showFeatureTour by viewModel.showFeatureTour.collectAsStateWithLifecycle()
     val showFinalVipBanner by viewModel.showFinalVipBanner.collectAsStateWithLifecycle()
     val featureTourCoordinates = remember { FeatureTourCoordinates() }
+    var activeTourTarget by remember { mutableStateOf<FeatureTourTarget?>(null) }
 
     var currentTab by rememberSaveable { mutableStateOf(StudioTab.STUDIO) }
     var showVipUnlockModal by rememberSaveable { mutableStateOf(false) }
+    var unlockModalFocus by rememberSaveable { mutableStateOf(UnlockPaywallFocus.VIP_FEATURES) }
+
+    val openVipModal: (UnlockPaywallFocus) -> Unit = { focus ->
+        unlockModalFocus = focus
+        showVipUnlockModal = true
+    }
 
     LaunchedEffect(showFeatureTour) {
         if (showFeatureTour) {
@@ -258,14 +266,14 @@ fun ProRgbKeyboardApp(
     LaunchedEffect(openUnlockTrigger) {
         if (openUnlockTrigger > 0) {
             viewModel.refreshLicenseState()
-            if (!licenseState.isLifetimeUnlocked) {
-                showVipUnlockModal = true
+            if (!licenseState.isAllUnlocked) {
+                openVipModal(UnlockPaywallFocus.VIP_FEATURES)
             }
         }
     }
 
-    LaunchedEffect(licenseState.isLifetimeUnlocked) {
-        if (licenseState.isLifetimeUnlocked) {
+    LaunchedEffect(licenseState.isAllUnlocked) {
+        if (licenseState.isAllUnlocked) {
             showVipUnlockModal = false
         }
     }
@@ -323,23 +331,14 @@ fun ProRgbKeyboardApp(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ObsidianCanvas)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            NeonMagenta.copy(alpha = 0.08f),
-                            ComposeColor.Transparent,
-                            NeonCyan.copy(alpha = 0.06f)
-                        )
-                    )
-                )
+                .midnightNavyIndigoWallpaper()
         ) {
             val useNavRail = maxWidth >= 600.dp
 
             if (useNavRail) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     NavigationRail(
-                        containerColor = ObsidianSurface,
+                        containerColor = GlassNavSurface,
                         modifier = Modifier
                             .fillMaxHeight()
                             .statusBarsPadding()
@@ -365,11 +364,11 @@ fun ProRgbKeyboardApp(
                                     )
                                 },
                                 colors = NavigationRailItemDefaults.colors(
-                                    selectedIconColor = NeonCyan,
-                                    selectedTextColor = NeonCyan,
-                                    indicatorColor = NeonCyanContainer,
-                                    unselectedIconColor = TextMuted,
-                                    unselectedTextColor = TextMuted
+                                    selectedIconColor = ComposeColor.White,
+                                    selectedTextColor = ComposeColor.White,
+                                    indicatorColor = GlassCardSelected,
+                                    unselectedIconColor = ComposeColor.White.copy(alpha = 0.72f),
+                                    unselectedTextColor = ComposeColor.White.copy(alpha = 0.72f)
                                 ),
                                 modifier = Modifier.testTag(tab.testTag)
                             )
@@ -389,17 +388,18 @@ fun ProRgbKeyboardApp(
                             customPhotoTheme = customPhotoTheme,
                             imeStatus = imeStatus,
                             licenseState = licenseState,
-                            voiceGuideState = voiceGuideState,
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
                             viewModel = viewModel,
                             onOpenImeSettings = openImeSettings,
                             onShowImePicker = showImePicker,
-                            onOpenUnlockScreen = { showVipUnlockModal = true },
+                            onOpenUnlockScreen = { openVipModal(UnlockPaywallFocus.VIP_FEATURES) },
+                            onOpenBanglishVip = { openVipModal(UnlockPaywallFocus.BANGLISH) },
                             onOpenHardwareSettings = { currentTab = StudioTab.HARDWARE },
                             onOpenLanguagesTab = { currentTab = StudioTab.LANGUAGES },
                             isFeatureTourActive = showFeatureTour,
+                            activeTourTarget = activeTourTarget,
                             featureTourCoordinates = featureTourCoordinates
                         )
                     }
@@ -411,8 +411,16 @@ fun ProRgbKeyboardApp(
                     contentWindowInsets = WindowInsets.safeDrawing,
                     bottomBar = {
                         NavigationBar(
-                            containerColor = ObsidianSurface,
-                            tonalElevation = 0.dp
+                            containerColor = GlassNavSurface,
+                            tonalElevation = 0.dp,
+                            modifier = Modifier.drawBehind {
+                                drawLine(
+                                    brush = FlagshipCyanMagentaBrush,
+                                    start = Offset(0f, 0f),
+                                    end = Offset(size.width, 0f),
+                                    strokeWidth = 1.2.dp.toPx()
+                                )
+                            }
                         ) {
                             StudioTab.entries.forEach { tab ->
                                 val selected = currentTab == tab
@@ -435,11 +443,11 @@ fun ProRgbKeyboardApp(
                                         )
                                     },
                                     colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = NeonCyan,
-                                        selectedTextColor = NeonCyan,
-                                        indicatorColor = NeonCyanContainer,
-                                        unselectedIconColor = TextMuted,
-                                        unselectedTextColor = TextMuted
+                                        selectedIconColor = ComposeColor.White,
+                                        selectedTextColor = ComposeColor.White,
+                                        indicatorColor = GlassCardSelected,
+                                        unselectedIconColor = ComposeColor.White.copy(alpha = 0.72f),
+                                        unselectedTextColor = ComposeColor.White.copy(alpha = 0.72f)
                                     ),
                                     modifier = Modifier.testTag(tab.testTag)
                                 )
@@ -459,17 +467,18 @@ fun ProRgbKeyboardApp(
                             customPhotoTheme = customPhotoTheme,
                             imeStatus = imeStatus,
                             licenseState = licenseState,
-                            voiceGuideState = voiceGuideState,
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
                             viewModel = viewModel,
                             onOpenImeSettings = openImeSettings,
                             onShowImePicker = showImePicker,
-                            onOpenUnlockScreen = { showVipUnlockModal = true },
+                            onOpenUnlockScreen = { openVipModal(UnlockPaywallFocus.VIP_FEATURES) },
+                            onOpenBanglishVip = { openVipModal(UnlockPaywallFocus.BANGLISH) },
                             onOpenHardwareSettings = { currentTab = StudioTab.HARDWARE },
                             onOpenLanguagesTab = { currentTab = StudioTab.LANGUAGES },
                             isFeatureTourActive = showFeatureTour,
+                            activeTourTarget = activeTourTarget,
                             featureTourCoordinates = featureTourCoordinates
                         )
                     }
@@ -480,18 +489,26 @@ fun ProRgbKeyboardApp(
             if (showFeatureTour && !showVipUnlockModal) {
                 SilentFeatureTourOverlay(
                     coordinates = featureTourCoordinates,
+                    imeStatus = imeStatus,
+                    onActiveTargetChanged = { activeTourTarget = it },
                     onFinishOrSkip = viewModel::finishOrSkipFeatureTour
                 )
             }
 
             // Stage 3: Auto-Disappearing Final Lifetime VIP Banner (fades out completely after 3 seconds, non-blocking)
-            FinalLifetimeVipAutoBanner(visible = showFinalVipBanner)
+            FinalLifetimeVipAutoBanner(
+                visible = showFinalVipBanner,
+                freeTrialDays = licenseState.adminConfig.freeTrialDays
+            )
 
-            // Dismissible Bengali ₹20 Lifetime VIP Unlock Modal (never locks out free standard typing or live demo preview)
-            if (showVipUnlockModal && !licenseState.isLifetimeUnlocked) {
+            // Dismissible 2-Card Dynamic Remote Pricing VIP Unlock Modal (Card 1 RGB/VIP + Card 2 Indian Romanized Bengali)
+            if (showVipUnlockModal && !licenseState.isAllUnlocked) {
                 LifetimeUnlockScreen(
                     licenseState = licenseState,
-                    upiQrPayload = viewModel.buildUpiQrPayload(),
+                    initialFocus = unlockModalFocus,
+                    generateDiscountedAmount = viewModel::generateDiscountedUniqueAmount,
+                    registerPendingPayment = viewModel::registerPendingPayment,
+                    buildUpiQrPayload = viewModel::buildUpiQrPayload,
                     createUpiPaymentIntent = viewModel::createOfficialUpiIntent,
                     onVerifyUpiResult = viewModel::verifyUpiPaymentResult,
                     onDismiss = { showVipUnlockModal = false }
@@ -509,7 +526,6 @@ private fun TabContent(
     customPhotoTheme: CustomPhotoTheme,
     imeStatus: com.example.model.ImeStatus,
     licenseState: LicenseUiState,
-    voiceGuideState: VoiceGuideState,
     languagePacks: List<LanguagePackUiState>,
     playgroundText: String,
     clipboardClips: List<String>,
@@ -517,9 +533,11 @@ private fun TabContent(
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
     onOpenUnlockScreen: () -> Unit,
+    onOpenBanglishVip: () -> Unit,
     onOpenHardwareSettings: () -> Unit,
     onOpenLanguagesTab: () -> Unit,
     isFeatureTourActive: Boolean,
+    activeTourTarget: FeatureTourTarget?,
     featureTourCoordinates: FeatureTourCoordinates
 ) {
     Crossfade(targetState = currentTab, label = "tab_crossfade") { tab ->
@@ -529,22 +547,31 @@ private fun TabContent(
                 customPhotoTheme = customPhotoTheme,
                 imeStatus = imeStatus,
                 licenseState = licenseState,
-                voiceGuideState = voiceGuideState,
                 languagePacks = languagePacks,
                 playgroundText = playgroundText,
                 clipboardClips = clipboardClips,
                 onOpenImeSettings = onOpenImeSettings,
                 onShowImePicker = onShowImePicker,
                 onOpenUnlockScreen = onOpenUnlockScreen,
-                onSpeakBanglaGuide = viewModel::speakBanglaGuide,
-                onToggleVoiceGuideMute = viewModel::toggleVoiceGuideStopOrMute,
-                onSelectLanguageById = viewModel::selectLanguageById,
-                onToggleLanguage = viewModel::toggleLanguage,
+                onSelectLanguageById = { langId ->
+                    if (!viewModel.selectLanguageById(langId)) {
+                        if (langId == com.example.model.LanguageCatalog.BANGLISH_ID) {
+                            onOpenBanglishVip()
+                        } else {
+                            onOpenUnlockScreen()
+                        }
+                    }
+                },
+                onToggleLanguage = {
+                    viewModel.toggleLanguage(onVipLocked = onOpenBanglishVip)
+                },
                 onSelectEffect = viewModel::setEffect,
                 onSelectPalette = viewModel::setPalette,
                 onCycleEffect = viewModel::cycleEffect,
                 onPlaygroundCommit = viewModel::onPlaygroundCommit,
+                onPlaygroundApplySuggestion = viewModel::onPlaygroundApplySuggestion,
                 onPlaygroundBackspace = viewModel::onPlaygroundBackspace,
+                onPlaygroundDeleteWord = viewModel::onPlaygroundDeleteWord,
                 onPlaygroundSpace = viewModel::onPlaygroundSpace,
                 onPlaygroundEnter = viewModel::onPlaygroundEnter,
                 onClearPlayground = viewModel::clearPlaygroundText,
@@ -556,16 +583,24 @@ private fun TabContent(
                 onOpenHardwareSettings = onOpenHardwareSettings,
                 onOpenLanguagesTab = onOpenLanguagesTab,
                 isFeatureTourActive = isFeatureTourActive,
+                activeTourTarget = activeTourTarget,
                 featureTourCoordinates = featureTourCoordinates
             )
 
             StudioTab.LANGUAGES -> LanguagesScreen(
                 languagePacks = languagePacks,
+                licenseState = licenseState,
                 onDownloadAndEnable = { langId ->
                     viewModel.downloadAndEnableLanguage(langId, activateImmediately = true)
                 },
                 onToggleEnabled = viewModel::setLanguageEnabled,
-                onSelectLanguage = viewModel::selectLanguageById,
+                onSelectLanguage = { langId ->
+                    if (!viewModel.selectLanguageById(langId)) {
+                        onOpenBanglishVip()
+                    }
+                },
+                onOpenUnlockScreen = onOpenUnlockScreen,
+                onOpenBanglishVip = onOpenBanglishVip,
                 onDeletePack = viewModel::deleteLanguagePack
             )
 
@@ -574,6 +609,9 @@ private fun TabContent(
                 customPhotoTheme = customPhotoTheme,
                 licenseState = licenseState,
                 onApplyVipToKeyboard = onOpenUnlockScreen,
+                onApplyComboTheme = viewModel::applyComboTheme,
+                onApplyAnimationOnly = viewModel::applyAnimationOnly,
+                onApplyStaticBannerOnly = viewModel::applyStaticBannerOnly,
                 onSelectBannerPreset = viewModel::selectBannerPreset,
                 onPickCustomPhoto = viewModel::saveCustomPhoto,
                 onPhotoDimChange = viewModel::setCustomPhotoDim,
@@ -591,12 +629,18 @@ private fun TabContent(
             StudioTab.HARDWARE -> HardwareScreen(
                 settings = settings,
                 imeStatus = imeStatus,
+                licenseState = licenseState,
                 languagePacks = languagePacks,
                 onSelectSwitchSound = viewModel::setSwitchSound,
                 onAuditionSwitch = viewModel::auditionSwitch,
                 onHapticEnabledChange = viewModel::setHapticEnabled,
                 onHapticStrengthChange = viewModel::setHapticStrength,
-                onSelectLanguageById = viewModel::selectLanguageById,
+                onSelectLanguageById = { langId ->
+                    if (!viewModel.selectLanguageById(langId)) {
+                        onOpenUnlockScreen()
+                    }
+                },
+                onOpenUnlockScreen = onOpenUnlockScreen,
                 onOpenLanguagesTab = onOpenLanguagesTab,
                 onHeightPresetChange = viewModel::setHeightPreset,
                 onShowToolbarChange = viewModel::setShowToolbar,

@@ -199,6 +199,16 @@ object RgbLightingEngine {
                 }
             }
 
+            RgbEffect.AI_PLASMA_VORTEX -> {
+                val dx = nx - 0.5f
+                val dy = (ny - 0.5f) * 1.4f
+                val dist = hypot(dx, dy)
+                val swirl = kotlin.math.atan2(dy.toDouble(), dx.toDouble()).toFloat() / (2f * PI.toFloat())
+                val wave = ((sin((dist * 10f - t * 3.4f).toDouble()) + 1.0) * 0.5).toFloat()
+                val c = samplePalette(settings.palette, swirl + dist * 0.85f - t * 0.42f)
+                c.copy(alpha = (0.38f + 0.62f * wave).coerceIn(0.3f, 1f))
+            }
+
             RgbEffect.CYBER_BREATHING -> {
                 val wave = ((sin(t * 2.1f) + 1f) * 0.5f).coerceIn(0f, 1f)
                 val eased = 0.28f + 0.72f * (wave * wave * (3f - 2f * wave))
@@ -225,6 +235,21 @@ object RgbLightingEngine {
                 color.copy(alpha = intensity.coerceIn(0.14f, 1f))
             }
 
+            RgbEffect.FIREFLY_SPARKS -> {
+                val seed = abs(keyHash * 1597334677L % 1000L).toFloat() / 1000f
+                val drift = ((sin(t * (1.2f + seed * 1.9f) + seed * 6.28f) + 1f) * 0.5f)
+                val ember = drift * drift * drift * drift
+                val warmGold = lerp(Color(0xFFFF9E00), Color(0xFF00F5D4), (seed * 0.65f + nx * 0.35f) % 1f)
+                val tinted = lerp(samplePalette(settings.palette, seed + t * 0.08f), warmGold, 0.45f)
+                tinted.copy(alpha = (0.14f + ember * 0.86f).coerceIn(0.14f, 1f))
+            }
+
+            RgbEffect.AURORA_FLOW -> {
+                val ribbon = ((sin((nx * 5.2f + t * 1.4f + sin(ny * 4.5f - t * 0.9f)).toDouble()) + 1.0) * 0.5).toFloat()
+                val c = samplePalette(settings.palette, nx * 0.55f + ribbon * 0.4f - t * 0.16f)
+                c.copy(alpha = (0.34f + 0.66f * ribbon).coerceIn(0.3f, 1f))
+            }
+
             RgbEffect.STARLIGHT -> {
                 val seed = abs(keyHash * 2654435761L % 1000L).toFloat() / 1000f
                 val freq = 1.6f + seed * 2.4f
@@ -233,6 +258,35 @@ object RgbLightingEngine {
                 val sparkle = pulse * pulse * pulse
                 val color = samplePalette(settings.palette, seed + t * 0.12f)
                 color.copy(alpha = (0.18f + sparkle * 0.82f).coerceIn(0.18f, 1f))
+            }
+
+            RgbEffect.LIGHTNING_ARC -> {
+                val boltPhase = (t * 2.6f) % 1.8f
+                val boltX = ((floor(t * 2.6f / 1.8f).toInt() * 37) % 100) / 100f
+                val jag = (sin(ny * 14f + t * 9f) * 0.08f)
+                val distX = abs(nx - (boltX + jag))
+                val flash = if (boltPhase < 0.38f && distX < 0.18f) {
+                    ((1f - distX / 0.18f) * (1f - boltPhase / 0.38f)).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                val stormBase = samplePalette(settings.palette, nx * 0.35f + t * 0.1f).copy(alpha = 0.24f)
+                if (flash > 0.05f) {
+                    lerp(Color(0xFF00E5FF), Color.White, flash * 0.7f).copy(alpha = (0.45f + flash * 0.55f).coerceIn(0f, 1f))
+                } else {
+                    stormBase
+                }
+            }
+
+            RgbEffect.NEON_HEARTBEAT -> {
+                val beatCycle = (t * 1.35f) % 1f
+                val lub = exp(-((beatCycle - 0.18f) * (beatCycle - 0.18f)) / 0.0045f)
+                val dub = exp(-((beatCycle - 0.36f) * (beatCycle - 0.36f)) / 0.0065f) * 0.75f
+                val distCenter = hypot((nx - 0.5f) * 1.1f, (ny - 0.5f) * 1.2f)
+                val pulse = ((lub + dub) * (1.15f - distCenter).coerceIn(0.25f, 1f)).coerceIn(0f, 1f)
+                val heartColor = lerp(Color(0xFFFF2A85), Color(0xFFFF79B0), pulse)
+                val blended = lerp(samplePalette(settings.palette, distCenter + t * 0.12f), heartColor, 0.65f)
+                blended.copy(alpha = (0.28f + 0.72f * pulse).coerceIn(0.26f, 1f))
             }
 
             RgbEffect.STATIC_NEON -> {

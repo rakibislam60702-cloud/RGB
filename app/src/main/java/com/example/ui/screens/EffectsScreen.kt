@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,14 +21,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Wallpaper
@@ -73,6 +70,8 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.BannerPresetCatalog
 import com.example.data.BannerThemePreset
+import com.example.data.ComboThemeCatalog
+import com.example.data.ComboThemePreset
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.LicenseUiState
@@ -82,6 +81,16 @@ import com.example.model.KeyboardSettings
 import com.example.model.KeycapStyle
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
+import com.example.ui.theme.FlagshipCyanMagentaBrush
+import com.example.ui.theme.FlagshipGlassRimGoldSubtle
+import com.example.ui.theme.FlagshipGlassRimSubtle
+import com.example.ui.theme.FlagshipGoldAmberBrush
+import com.example.ui.theme.FlagshipGoldCyanBrush
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassBorderStrong
+import com.example.ui.theme.GlassCardInner
+import com.example.ui.theme.GlassCardSelected
+import com.example.ui.theme.GlassCardSurface
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.KeyCapSurface
 import com.example.ui.theme.KeyChassisDark
@@ -91,13 +100,9 @@ import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.NeonError
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NotoSansBengaliFamily
-import com.example.ui.theme.ObsidianBorder
-import com.example.ui.theme.ObsidianCanvas
-import com.example.ui.theme.ObsidianSurface
-import com.example.ui.theme.ObsidianSurfaceVariant
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.RoyalBlueDeep
+import com.example.ui.theme.RoyalGold
+import com.example.ui.theme.luminousGlassCard
 import kotlinx.coroutines.isActive
 
 @Composable
@@ -106,6 +111,9 @@ fun EffectsScreen(
     customPhotoTheme: CustomPhotoTheme,
     licenseState: LicenseUiState,
     onApplyVipToKeyboard: () -> Unit,
+    onApplyComboTheme: (ComboThemePreset) -> Unit,
+    onApplyAnimationOnly: (RgbEffect) -> Unit,
+    onApplyStaticBannerOnly: (String) -> Unit,
     onSelectBannerPreset: (String) -> Unit,
     onPickCustomPhoto: (Uri) -> Unit,
     onPhotoDimChange: (Float) -> Unit,
@@ -150,38 +158,44 @@ fun EffectsScreen(
                 .fillMaxWidth()
                 .widthIn(max = 680.dp)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Header
+            // Header (Pure White Typography)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = stringResource(R.string.effects_header),
                     style = MaterialTheme.typography.headlineMedium,
-                    color = TextPrimary
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
                 )
                 Text(
                     text = stringResource(R.string.effects_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
+                    color = Color.White.copy(alpha = 0.90f)
                 )
             }
 
-            // Live Mini Deck Visualizer showing current combined settings in real time
-            LiveMiniDeckPreview(settings = settings, timeSec = timeSec)
+            // Live Mini Keyboard Preview (shows active HD Photo/Banner + Live AI Animation together!)
+            LiveMiniDeckPreview(
+                settings = settings,
+                customPhotoTheme = customPhotoTheme,
+                timeSec = timeSec
+            )
 
-            // Free Live Demo Preview Notice + Save / Apply to Real Keyboard CTA (shown after 7-day trial expires)
-            if (licenseState.isFreeStandardMode) {
+            // VIP Expired Lock Notice + Dynamic VIP Unlock CTA (respects remote rgbThemes override)
+            val themesLocked = !licenseState.isRgbThemesUnlocked
+            if (themesLocked) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(ObsidianSurfaceVariant)
-                        .border(
-                            width = 1.4.dp,
-                            brush = Brush.horizontalGradient(listOf(NeonMagenta, NeonAmber, NeonCyan)),
-                            shape = RoundedCornerShape(16.dp)
+                        .luminousGlassCard(
+                            shape = RoundedCornerShape(20.dp),
+                            borderBrush = FlagshipGoldCyanBrush,
+                            borderWidth = 1.4.dp,
+                            glowColor = RoyalGold,
+                            glowElevation = 14.dp
                         )
-                        .padding(14.dp)
+                        .padding(15.dp)
                         .testTag("effects_live_demo_banner"),
                     verticalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
@@ -197,18 +211,18 @@ fun EffectsScreen(
                         fontFamily = NotoSansBengaliFamily,
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = NeonCyan
+                        color = Color.White
                     )
                     Text(
                         text = stringResource(R.string.bn_demo_preview_effects_desc),
                         fontFamily = NotoSansBengaliFamily,
                         fontSize = 12.5.sp,
                         lineHeight = 19.sp,
-                        color = TextSecondary
+                        color = Color.White.copy(alpha = 0.92f)
                     )
                     Button(
                         onClick = onApplyVipToKeyboard,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = NeonMagenta,
                             contentColor = Color.White
@@ -222,40 +236,42 @@ fun EffectsScreen(
                             text = stringResource(R.string.bn_btn_apply_to_real_keyboard),
                             fontFamily = NotoSansBengaliFamily,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                     }
                 }
             }
 
-            // Built-in Banner Theme Presets + Custom Gallery Photo Card
-            SectionTitle(title = stringResource(R.string.section_custom_photo))
-            CustomPhotoThemeCard(
-                photoTheme = customPhotoTheme,
-                isFreeStandardMode = licenseState.isFreeStandardMode,
-                onApplyVipToKeyboard = onApplyVipToKeyboard,
-                onSelectPreset = onSelectBannerPreset,
-                onPickClick = { galleryPickerLauncher.launch("image/*") },
-                onDimChange = onPhotoDimChange,
-                onRemoveClick = onRemoveCustomPhoto
+            // =========================================================================
+            // SECTION 1 — 🔥 1-Tap Photo + AI Animation Combos (10 All-in-One Ready Themes)
+            // =========================================================================
+            GallerySectionHeader(
+                title = stringResource(R.string.section_theme_combos),
+                subtitle = stringResource(R.string.section_theme_combos_sub)
             )
-
-            // Lighting Modes Grid (2 columns — Normal / Classic Black first, then Touch Spark & VIP effects)
-            SectionTitle(title = stringResource(R.string.section_lighting_mode))
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                RgbEffect.entries.chunked(2).forEach { pair ->
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ComboThemeCatalog.allCombos.chunked(2).forEach { pair ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        pair.forEach { effect ->
-                            EffectPreviewCard(
-                                effect = effect,
-                                settings = settings,
+                        pair.forEach { combo ->
+                            val isSelected = customPhotoTheme.presetId == combo.bannerPresetId &&
+                                settings.effect == combo.effect
+                            ComboThemeCard(
+                                combo = combo,
+                                selected = isSelected,
+                                isLockedVip = themesLocked,
                                 timeSec = timeSec,
-                                selected = settings.effect == effect,
-                                isLockedVip = licenseState.isFreeStandardMode && effect.isVipEffect,
-                                onClick = { onSelectEffect(effect) },
+                                onClick = {
+                                    if (themesLocked) {
+                                        onApplyComboTheme(combo)
+                                        onApplyVipToKeyboard()
+                                    } else {
+                                        onApplyComboTheme(combo)
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -265,6 +281,72 @@ fun EffectsScreen(
                     }
                 }
             }
+
+            // =========================================================================
+            // SECTION 2 — ✨ AI Lighting Animations Only (12 Pure RGB Modes + Classic Black)
+            // =========================================================================
+            GallerySectionHeader(
+                title = stringResource(R.string.section_animations_only),
+                subtitle = stringResource(R.string.section_animations_only_sub)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                RgbEffect.entries.chunked(2).forEach { pair ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(11.dp)
+                    ) {
+                        pair.forEach { effect ->
+                            val isSelected = settings.effect == effect && !customPhotoTheme.hasPhoto
+                            EffectPreviewCard(
+                                effect = effect,
+                                settings = settings,
+                                timeSec = timeSec,
+                                selected = isSelected,
+                                isLockedVip = themesLocked && effect.isVipEffect,
+                                onClick = {
+                                    onApplyAnimationOnly(effect)
+                                    if (themesLocked && effect.isVipEffect) {
+                                        onApplyVipToKeyboard()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (pair.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            // =========================================================================
+            // SECTION 3 — 🖼️ HD Photo Banners Only (No Animation) + Custom Gallery Photo
+            // =========================================================================
+            GallerySectionHeader(
+                title = stringResource(R.string.section_static_banners),
+                subtitle = stringResource(R.string.section_static_banners_sub)
+            )
+            StaticPhotoBannersSection(
+                photoTheme = customPhotoTheme,
+                isStaticBannerMode = settings.effect == RgbEffect.NORMAL_DEFAULT,
+                isFreeStandardMode = themesLocked,
+                onApplyVipToKeyboard = onApplyVipToKeyboard,
+                onSelectStaticBanner = { presetId ->
+                    onApplyStaticBannerOnly(presetId)
+                    if (themesLocked) {
+                        onApplyVipToKeyboard()
+                    }
+                },
+                onPickClick = {
+                    if (themesLocked) {
+                        onApplyVipToKeyboard()
+                    } else {
+                        galleryPickerLauncher.launch("image/*")
+                    }
+                },
+                onDimChange = onPhotoDimChange,
+                onRemoveClick = onRemoveCustomPhoto
+            )
 
             // Color Palettes Grid (2 columns)
             SectionTitle(title = stringResource(R.string.section_color_palette))
@@ -310,14 +392,18 @@ fun EffectsScreen(
                 }
             }
 
-            // Optical Tuning Sliders & Switches
+            // Optical Tuning Sliders & Switches (Luminous Flagship Glass Card)
             SectionTitle(title = stringResource(R.string.section_tuning))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(ObsidianSurface)
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
+                    .luminousGlassCard(
+                        shape = RoundedCornerShape(20.dp),
+                        borderBrush = FlagshipGlassRimSubtle,
+                        borderWidth = 1.2.dp,
+                        glowColor = NeonCyan,
+                        glowElevation = 10.dp
+                    )
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
@@ -363,17 +449,214 @@ fun EffectsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(18.dp))
         }
     }
 }
 
 @Composable
-private fun CustomPhotoThemeCard(
+private fun GallerySectionHeader(
+    title: String,
+    subtitle: String
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color.White
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.86f)
+        )
+    }
+}
+
+@Composable
+private fun ComboThemeCard(
+    combo: ComboThemePreset,
+    selected: Boolean,
+    isLockedVip: Boolean,
+    timeSec: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val preset = remember(combo.bannerPresetId) { BannerPresetCatalog.findById(combo.bannerPresetId) }
+    val proceduralPreview = remember(combo.bannerPresetId) {
+        if (preset != null && preset.drawableRes == null) {
+            CustomBackgroundManager.getInstance(context)
+                .renderProceduralPresetBitmap(preset.id, w = 360, h = 180)
+                .asImageBitmap()
+        } else {
+            null
+        }
+    }
+    val pulseAlpha = remember(timeSec) {
+        0.55f + 0.45f * ((kotlin.math.sin((timeSec * 3.2f).toDouble()) + 1.0) * 0.5).toFloat()
+    }
+
+    Column(
+        modifier = modifier
+            .luminousGlassCard(
+                shape = RoundedCornerShape(18.dp),
+                borderBrush = when {
+                    selected -> FlagshipGoldCyanBrush
+                    isLockedVip -> FlagshipGoldAmberBrush
+                    else -> FlagshipGlassRimSubtle
+                },
+                borderWidth = if (selected) 1.8.dp else 1.1.dp,
+                glowColor = if (selected) RoyalGold else NeonCyan,
+                glowElevation = if (selected) 14.dp else 7.dp,
+                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+            )
+            .clickable(onClick = onClick)
+            .padding(9.dp)
+            .testTag("combo_theme_${combo.id}"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(82.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .border(
+                    width = 1.2.dp,
+                    brush = Brush.horizontalGradient(
+                        combo.previewColors.map { Color(it).copy(alpha = pulseAlpha) }
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+        ) {
+            if (preset?.drawableRes != null) {
+                Image(
+                    painter = painterResource(id = preset.drawableRes),
+                    contentDescription = combo.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (proceduralPreview != null) {
+                Image(
+                    bitmap = proceduralPreview,
+                    contentDescription = combo.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.linearGradient(combo.previewColors.map { Color(it) }))
+                )
+            }
+
+            // Dark readability scrim
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.Black.copy(alpha = 0.12f),
+                            0.6f to Color.Black.copy(alpha = 0.25f),
+                            1.0f to Color.Black.copy(alpha = 0.72f)
+                        )
+                    )
+            )
+
+            // Mini live animated RGB bar at bottom of thumbnail
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            combo.previewColors.map { Color(it).copy(alpha = pulseAlpha) }
+                        )
+                    )
+            )
+
+            // Combo Animation Badge
+            Text(
+                text = combo.badge,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.Black.copy(alpha = 0.58f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+
+            if (isLockedVip) {
+                Text(
+                    text = "🔒 VIP",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(5.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0xD9330B28))
+                        .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                )
+            } else if (selected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(5.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.65f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = NeonEmerald,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = combo.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = combo.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.82f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun StaticPhotoBannersSection(
     photoTheme: CustomPhotoTheme,
+    isStaticBannerMode: Boolean,
     isFreeStandardMode: Boolean,
     onApplyVipToKeyboard: () -> Unit,
-    onSelectPreset: (String) -> Unit,
+    onSelectStaticBanner: (String) -> Unit,
     onPickClick: () -> Unit,
     onDimChange: (Float) -> Unit,
     onRemoveClick: () -> Unit
@@ -393,81 +676,68 @@ private fun CustomPhotoThemeCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(ObsidianSurface)
-            .border(
-                width = if (previewBitmap != null) 1.4.dp else 1.dp,
-                color = if (previewBitmap != null) NeonCyan.copy(alpha = 0.7f) else ObsidianBorder,
-                shape = RoundedCornerShape(18.dp)
+            .luminousGlassCard(
+                shape = RoundedCornerShape(20.dp),
+                borderBrush = FlagshipGlassRimGoldSubtle,
+                borderWidth = 1.25.dp,
+                glowColor = NeonCyan,
+                glowElevation = 12.dp
             )
-            .padding(16.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Custom Gallery Photo CTA + Remove Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(ObsidianSurfaceVariant)
-                    .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(NeonCyan.copy(alpha = 0.28f), NeonMagenta.copy(alpha = 0.24f))
+                        )
+                    )
+                    .border(1.2.dp, FlagshipCyanMagentaBrush, RoundedCornerShape(13.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Filled.Wallpaper,
                     contentDescription = null,
-                    tint = NeonCyan,
-                    modifier = Modifier.size(22.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(21.dp)
                 )
             }
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.custom_photo_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (isFreeStandardMode) {
-                        Text(
-                            text = "🔒 VIP",
-                            fontFamily = JetBrainsMonoFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NeonMagenta,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Color(0xFF330C27))
-                                .border(1.dp, NeonMagenta.copy(alpha = 0.65f), RoundedCornerShape(999.dp))
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
-                    }
-                }
+                Text(
+                    text = stringResource(R.string.custom_photo_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
                 Text(
                     text = stringResource(R.string.custom_photo_subtitle),
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
+                    color = Color.White.copy(alpha = 0.85f),
+                    maxLines = 2
                 )
             }
         }
 
-        // Live preview banner for either built-in preset or custom gallery photo
+        // Active Photo Preview Banner
         if (previewBitmap != null) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(116.dp)
+                    .height(106.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(14.dp))
+                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
             ) {
                 Image(
                     bitmap = previewBitmap,
@@ -480,33 +750,31 @@ private fun CustomPhotoThemeCard(
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = photoTheme.dimAlpha))
                 )
-                // Active badge in top-left corner
                 Text(
-                    text = activePreset?.title ?: "Gallery Photo",
+                    text = activePreset?.title ?: "Custom Gallery Photo",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = NeonCyan,
+                    color = Color.White,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(8.dp)
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xB30B0F1A))
+                        .background(Color.Black.copy(alpha = 0.62f))
                         .padding(horizontal = 9.dp, vertical = 3.dp)
                 )
-                // Simulated translucent keycap overlay showing RGB glow contrast
                 Row(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("Q" to NeonCyan, "W" to NeonMagenta, "E" to Color(0xFF76FF03), "R" to Color(0xFFFF6D00)).forEach { (ch, glow) ->
+                    listOf("Q", "W", "E", "R").forEach { ch ->
                         Box(
                             modifier = Modifier
-                                .size(width = 42.dp, height = 38.dp)
+                                .size(width = 42.dp, height = 36.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0x99121622))
-                                .border(1.2.dp, glow.copy(alpha = 0.85f), RoundedCornerShape(8.dp)),
+                                .border(1.dp, Color.White.copy(alpha = 0.55f), RoundedCornerShape(8.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -521,71 +789,26 @@ private fun CustomPhotoThemeCard(
             }
         }
 
-        // Built-in Ready-to-Use Banner / Background Presets (Horizontal Scrollable Row)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = stringResource(R.string.section_banner_presets),
-                style = MaterialTheme.typography.labelMedium,
-                color = NeonCyan
-            )
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(end = 4.dp)
-            ) {
-                // Stealth Dark (no background) tile
-                item(key = "preset_none") {
-                    val isSelected = !photoTheme.hasPhoto
-                    Box(
-                        modifier = Modifier
-                            .size(width = 104.dp, height = 68.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF10131C))
-                            .border(
-                                width = if (isSelected) 2.dp else 1.dp,
-                                color = if (isSelected) NeonCyan else ObsidianBorder,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable(onClick = onRemoveClick)
-                            .testTag("banner_preset_none")
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(horizontal = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.preset_stealth_none),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isSelected) NeonCyan else TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = null,
-                                tint = NeonEmerald,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(5.dp)
-                                    .size(16.dp)
-                            )
-                        }
+        // 10 Pure Static HD Photo Banners Grid (2 columns — tapping applies banner + No Animation)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            BannerPresetCatalog.staticBannerPresets.chunked(2).forEach { pair ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    pair.forEach { preset ->
+                        val isSelected = photoTheme.presetId == preset.id && isStaticBannerMode
+                        StaticBannerTile(
+                            preset = preset,
+                            selected = isSelected,
+                            isLockedVip = isFreeStandardMode,
+                            onClick = { onSelectStaticBanner(preset.id) },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
-                }
-
-                // Built-in Vice City & Neon Banner Presets
-                items(BannerPresetCatalog.allPresets, key = { it.id }) { preset ->
-                    BannerPresetTile(
-                        preset = preset,
-                        selected = photoTheme.presetId == preset.id,
-                        isLockedVip = isFreeStandardMode,
-                        onClick = { onSelectPreset(preset.id) }
-                    )
+                    if (pair.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -598,10 +821,10 @@ private fun CustomPhotoThemeCard(
         ) {
             Button(
                 onClick = onPickClick,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = NeonCyan,
-                    contentColor = Color(0xFF001B22)
+                    containerColor = Color.White,
+                    contentColor = RoyalBlueDeep
                 ),
                 modifier = Modifier
                     .weight(1f)
@@ -611,6 +834,7 @@ private fun CustomPhotoThemeCard(
                 Icon(
                     imageVector = Icons.Filled.AddPhotoAlternate,
                     contentDescription = null,
+                    tint = RoyalBlueDeep,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
@@ -620,6 +844,8 @@ private fun CustomPhotoThemeCard(
                         else R.string.action_choose_gallery_photo
                     ),
                     style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = RoyalBlueDeep,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -628,7 +854,7 @@ private fun CustomPhotoThemeCard(
             if (previewBitmap != null) {
                 OutlinedButton(
                     onClick = onRemoveClick,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .heightIn(min = 48.dp)
                         .testTag("btn_remove_custom_photo")
@@ -636,20 +862,19 @@ private fun CustomPhotoThemeCard(
                     Icon(
                         imageVector = Icons.Filled.DeleteOutline,
                         contentDescription = stringResource(R.string.action_remove_photo),
-                        tint = NeonError,
+                        tint = Color.White,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = stringResource(R.string.action_remove_photo),
                         style = MaterialTheme.typography.labelLarge,
-                        color = NeonError
+                        color = Color.White
                     )
                 }
             }
         }
 
-        // Background Dim / Opacity slider works for BOTH built-in presets and custom gallery photos
         if (previewBitmap != null) {
             TuningSliderRow(
                 label = stringResource(R.string.label_photo_dim),
@@ -659,7 +884,6 @@ private fun CustomPhotoThemeCard(
                 onValueChange = onDimChange,
                 testTag = "slider_custom_photo_dim"
             )
-
             if (isFreeStandardMode) {
                 Button(
                     onClick = onApplyVipToKeyboard,
@@ -676,7 +900,8 @@ private fun CustomPhotoThemeCard(
                     Text(
                         text = stringResource(R.string.bn_btn_apply_to_real_keyboard),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
             }
@@ -685,24 +910,32 @@ private fun CustomPhotoThemeCard(
 }
 
 @Composable
-private fun BannerPresetTile(
+private fun StaticBannerTile(
     preset: BannerThemePreset,
     selected: Boolean,
     isLockedVip: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val gradientColors = remember(preset.id) {
-        preset.previewColors.map { Color(it) }
+    val context = LocalContext.current
+    val proceduralBitmap = remember(preset.id) {
+        if (preset.drawableRes == null) {
+            CustomBackgroundManager.getInstance(context)
+                .renderProceduralPresetBitmap(preset.id, w = 360, h = 180)
+                .asImageBitmap()
+        } else {
+            null
+        }
     }
 
     Box(
-        modifier = Modifier
-            .size(width = 114.dp, height = 68.dp)
-            .clip(RoundedCornerShape(12.dp))
+        modifier = modifier
+            .height(82.dp)
+            .clip(RoundedCornerShape(14.dp))
             .border(
                 width = if (selected) 2.dp else 1.dp,
-                color = if (selected) NeonCyan else ObsidianBorder,
-                shape = RoundedCornerShape(12.dp)
+                color = if (selected) Color.White else GlassBorder,
+                shape = RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onClick)
             .testTag("banner_preset_${preset.id}")
@@ -714,23 +947,29 @@ private fun BannerPresetTile(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+        } else if (proceduralBitmap != null) {
+            Image(
+                bitmap = proceduralBitmap,
+                contentDescription = preset.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
         } else {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Brush.linearGradient(gradientColors))
+                    .background(Brush.linearGradient(preset.previewColors.map { Color(it) }))
             )
         }
 
-        // Bottom readable label scrim
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0.0f to Color.Transparent,
-                        0.45f to Color.Transparent,
-                        1.0f to Color(0xD9070A12)
+                        0.0f to Color.Black.copy(alpha = 0.08f),
+                        0.55f to Color.Black.copy(alpha = 0.25f),
+                        1.0f to Color.Black.copy(alpha = 0.78f)
                     )
                 )
         )
@@ -746,8 +985,22 @@ private fun BannerPresetTile(
                     .align(Alignment.TopStart)
                     .padding(5.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(Color(0xCC2A0B24))
-                    .border(0.8.dp, NeonMagenta.copy(alpha = 0.75f), RoundedCornerShape(999.dp))
+                    .background(Color(0xD9330B28))
+                    .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+            )
+        } else {
+            Text(
+                text = "HD STATIC",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.Black.copy(alpha = 0.52f))
                     .padding(horizontal = 5.dp, vertical = 1.5.dp)
             )
         }
@@ -759,7 +1012,7 @@ private fun BannerPresetTile(
                     .padding(5.dp)
                     .size(18.dp)
                     .clip(CircleShape)
-                    .background(Color(0xCC06141B)),
+                    .background(Color.Black.copy(alpha = 0.65f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -771,25 +1024,46 @@ private fun BannerPresetTile(
             }
         }
 
-        Text(
-            text = preset.title,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (selected) NeonCyan else Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = 7.dp, vertical = 5.dp)
-        )
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = preset.title,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (preset.subtitle.isNotBlank()) {
+                Text(
+                    text = preset.subtitle,
+                    fontSize = 9.5.sp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun LiveMiniDeckPreview(
     settings: KeyboardSettings,
+    customPhotoTheme: CustomPhotoTheme,
     timeSec: Float
 ) {
+    val context = LocalContext.current
+    val bgBitmap = remember(customPhotoTheme.cacheKey) {
+        if (customPhotoTheme.hasPhoto) {
+            CustomBackgroundManager.getInstance(context).decodeCachedBitmap(customPhotoTheme)?.asImageBitmap()
+        } else {
+            null
+        }
+    }
     val barColors = RgbLightingEngine.computeBarColors(timeSec, settings)
     val demoRipples = remember(timeSec, settings.effect) {
         if (settings.effect == RgbEffect.REACTIVE_RIPPLE) {
@@ -801,122 +1075,99 @@ private fun LiveMiniDeckPreview(
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(KeyChassisDark)
-            .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
+            .border(1.2.dp, GlassBorder, RoundedCornerShape(18.dp))
     ) {
-        if (settings.chassisAura) {
+        if (bgBitmap != null) {
+            Image(
+                bitmap = bgBitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize()
+            )
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.5.dp)
-                    .background(Brush.horizontalGradient(barColors))
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = customPhotoTheme.dimAlpha))
             )
         }
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(92.dp)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-        ) {
-            val cols = 10
-            val rows = 3
-            val gap = 5.dp.toPx()
-            val keyW = (size.width - gap * (cols - 1)) / cols
-            val keyH = (size.height - gap * (rows - 1)) / rows
-            val radius = (settings.keyCornerRadiusDp * 0.7f).dp.toPx()
-            val cr = CornerRadius(radius, radius)
 
-            for (r in 0 until rows) {
-                for (c in 0 until cols) {
-                    val x = c * (keyW + gap)
-                    val y = r * (keyH + gap)
-                    val nx = (c + 0.5f) / cols
-                    val ny = (r + 0.5f) / rows
-                    val idx = r * cols + c
-                    val activeSparkIdx = ((timeSec * 2.4f).toInt() * 7) % (rows * cols)
-                    val sparkAge = (timeSec * 2.4f) % 1f
-                    val isSparked = settings.effect == RgbEffect.TOUCH_SPARK && idx == activeSparkIdx
-                    val sparkStrength = if (isSparked) (1f - sparkAge * 0.75f).coerceIn(0f, 1f) else 0f
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (settings.chassisAura) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.5.dp)
+                        .background(Brush.horizontalGradient(barColors))
+                )
+            }
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(92.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                val cols = 10
+                val rows = 3
+                val gap = 5.dp.toPx()
+                val keyW = (size.width - gap * (cols - 1)) / cols
+                val keyH = (size.height - gap * (rows - 1)) / rows
+                val radius = (settings.keyCornerRadiusDp * 0.7f).dp.toPx()
+                val cr = CornerRadius(radius, radius)
 
-                    val color = RgbLightingEngine.computeKeyColor(
-                        nx = nx,
-                        ny = ny,
-                        keyHash = r * 31 + c * 17,
-                        timeSec = timeSec,
-                        settings = settings,
-                        ripples = demoRipples,
-                        isPressed = false,
-                        keyLabel = ('a' + (idx % 26)).toString(),
-                        touchGlowStrength = sparkStrength
-                    )
+                for (r in 0 until rows) {
+                    for (c in 0 until cols) {
+                        val x = c * (keyW + gap)
+                        val y = r * (keyH + gap)
+                        val nx = (c + 0.5f) / cols
+                        val ny = (r + 0.5f) / rows
+                        val idx = r * cols + c
+                        val activeSparkIdx = ((timeSec * 2.4f).toInt() * 7) % (rows * cols)
+                        val sparkAge = (timeSec * 2.4f) % 1f
+                        val isSparked = settings.effect == RgbEffect.TOUCH_SPARK && idx == activeSparkIdx
+                        val sparkStrength = if (isSparked) (1f - sparkAge * 0.75f).coerceIn(0f, 1f) else 0f
 
-                    if (settings.effect == RgbEffect.NORMAL_DEFAULT) {
-                        drawRoundRect(
-                            color = Color(0xFF15161D),
-                            topLeft = Offset(x, y),
-                            size = Size(keyW, keyH),
-                            cornerRadius = cr
+                        val color = RgbLightingEngine.computeKeyColor(
+                            nx = nx,
+                            ny = ny,
+                            keyHash = r * 31 + c * 17,
+                            timeSec = timeSec,
+                            settings = settings,
+                            ripples = demoRipples,
+                            isPressed = false,
+                            keyLabel = ('a' + (idx % 26)).toString(),
+                            touchGlowStrength = sparkStrength
                         )
-                        drawRoundRect(
-                            color = Color(0xFF252834),
-                            topLeft = Offset(x, y),
-                            size = Size(keyW, keyH),
-                            cornerRadius = cr,
-                            style = Stroke(width = 0.8.dp.toPx())
-                        )
-                    } else if (settings.effect == RgbEffect.TOUCH_SPARK) {
-                        drawRoundRect(
-                            color = Color(0xFF131620),
-                            topLeft = Offset(x, y),
-                            size = Size(keyW, keyH),
-                            cornerRadius = cr
-                        )
-                        if (sparkStrength > 0.05f) {
+
+                        val keyAlpha = if (bgBitmap != null) 0.62f else 1f
+                        if (settings.effect == RgbEffect.NORMAL_DEFAULT) {
                             drawRoundRect(
-                                color = color.copy(alpha = sparkStrength * 0.45f),
+                                color = Color(0xFF15161D).copy(alpha = keyAlpha),
                                 topLeft = Offset(x, y),
                                 size = Size(keyW, keyH),
                                 cornerRadius = cr
                             )
                             drawRoundRect(
-                                color = color,
-                                topLeft = Offset(x, y),
-                                size = Size(keyW, keyH),
-                                cornerRadius = cr,
-                                style = Stroke(width = 1.6.dp.toPx())
-                            )
-                        } else {
-                            drawRoundRect(
-                                color = Color(0xFF202434),
+                                color = Color.White.copy(alpha = 0.22f),
                                 topLeft = Offset(x, y),
                                 size = Size(keyW, keyH),
                                 cornerRadius = cr,
                                 style = Stroke(width = 0.8.dp.toPx())
                             )
-                        }
-                    } else {
-                        when (settings.keycapStyle) {
-                            KeycapStyle.PUDDING -> {
+                        } else if (settings.effect == RgbEffect.TOUCH_SPARK) {
+                            drawRoundRect(
+                                color = Color(0xFF131620).copy(alpha = keyAlpha),
+                                topLeft = Offset(x, y),
+                                size = Size(keyW, keyH),
+                                cornerRadius = cr
+                            )
+                            if (sparkStrength > 0.05f) {
                                 drawRoundRect(
-                                    color = color.copy(alpha = 0.8f),
-                                    topLeft = Offset(x, y),
-                                    size = Size(keyW, keyH),
-                                    cornerRadius = cr
-                                )
-                                drawRoundRect(
-                                    color = Color(0xFF11141E),
-                                    topLeft = Offset(x + 2f, y + 2f),
-                                    size = Size((keyW - 4f).coerceAtLeast(2f), (keyH - 6f).coerceAtLeast(2f)),
-                                    cornerRadius = cr
-                                )
-                            }
-                            KeycapStyle.FLOATING_GLOW -> {
-                                drawRoundRect(
-                                    color = KeyCapSurface,
+                                    color = color.copy(alpha = sparkStrength * 0.45f),
                                     topLeft = Offset(x, y),
                                     size = Size(keyW, keyH),
                                     cornerRadius = cr
@@ -926,44 +1177,84 @@ private fun LiveMiniDeckPreview(
                                     topLeft = Offset(x, y),
                                     size = Size(keyW, keyH),
                                     cornerRadius = cr,
-                                    style = Stroke(width = 1.4.dp.toPx())
+                                    style = Stroke(width = 1.6.dp.toPx())
                                 )
-                            }
-                            KeycapStyle.NEON_WIREFRAME -> {
+                            } else {
                                 drawRoundRect(
-                                    color = color,
+                                    color = Color(0xFF202434).copy(alpha = keyAlpha),
                                     topLeft = Offset(x, y),
                                     size = Size(keyW, keyH),
                                     cornerRadius = cr,
-                                    style = Stroke(width = 1.5.dp.toPx())
+                                    style = Stroke(width = 0.8.dp.toPx())
                                 )
                             }
-                            KeycapStyle.SOLID_MECH -> {
-                                drawRoundRect(
-                                    color = Color(0xFF1C2133),
-                                    topLeft = Offset(x, y),
-                                    size = Size(keyW, keyH),
-                                    cornerRadius = cr
-                                )
-                                drawRoundRect(
-                                    color = color,
-                                    topLeft = Offset(x + keyW * 0.25f, y + keyH - 4.dp.toPx()),
-                                    size = Size(keyW * 0.5f, 2.dp.toPx()),
-                                    cornerRadius = CornerRadius(2f, 2f)
-                                )
+                        } else {
+                            when (settings.keycapStyle) {
+                                KeycapStyle.PUDDING -> {
+                                    drawRoundRect(
+                                        color = color.copy(alpha = 0.8f),
+                                        topLeft = Offset(x, y),
+                                        size = Size(keyW, keyH),
+                                        cornerRadius = cr
+                                    )
+                                    drawRoundRect(
+                                        color = Color(0xFF11141E).copy(alpha = keyAlpha),
+                                        topLeft = Offset(x + 2f, y + 2f),
+                                        size = Size((keyW - 4f).coerceAtLeast(2f), (keyH - 6f).coerceAtLeast(2f)),
+                                        cornerRadius = cr
+                                    )
+                                }
+                                KeycapStyle.FLOATING_GLOW -> {
+                                    drawRoundRect(
+                                        color = KeyCapSurface.copy(alpha = keyAlpha),
+                                        topLeft = Offset(x, y),
+                                        size = Size(keyW, keyH),
+                                        cornerRadius = cr
+                                    )
+                                    drawRoundRect(
+                                        color = color,
+                                        topLeft = Offset(x, y),
+                                        size = Size(keyW, keyH),
+                                        cornerRadius = cr,
+                                        style = Stroke(width = 1.4.dp.toPx())
+                                    )
+                                }
+                                KeycapStyle.NEON_WIREFRAME -> {
+                                    drawRoundRect(
+                                        color = color,
+                                        topLeft = Offset(x, y),
+                                        size = Size(keyW, keyH),
+                                        cornerRadius = cr,
+                                        style = Stroke(width = 1.5.dp.toPx())
+                                    )
+                                }
+                                KeycapStyle.SOLID_MECH -> {
+                                    drawRoundRect(
+                                        color = Color(0xFF1C2133).copy(alpha = keyAlpha),
+                                        topLeft = Offset(x, y),
+                                        size = Size(keyW, keyH),
+                                        cornerRadius = cr
+                                    )
+                                    drawRoundRect(
+                                        color = color,
+                                        topLeft = Offset(x + keyW * 0.25f, y + keyH - 4.dp.toPx()),
+                                        size = Size(keyW * 0.5f, 2.dp.toPx()),
+                                        cornerRadius = CornerRadius(2f, 2f)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        if (settings.chassisAura) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .background(Brush.horizontalGradient(barColors.reversed()))
-            )
+            if (settings.chassisAura) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(Brush.horizontalGradient(barColors.reversed()))
+                )
+            }
         }
     }
 }
@@ -992,15 +1283,20 @@ private fun EffectPreviewCard(
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) ObsidianSurfaceVariant else ObsidianSurface)
-            .border(
-                width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) NeonCyan else ObsidianBorder,
-                shape = RoundedCornerShape(16.dp)
+            .luminousGlassCard(
+                shape = RoundedCornerShape(16.dp),
+                borderBrush = when {
+                    selected -> FlagshipCyanMagentaBrush
+                    isLockedVip -> FlagshipGoldAmberBrush
+                    else -> FlagshipGlassRimSubtle
+                },
+                borderWidth = if (selected) 1.6.dp else 1.1.dp,
+                glowColor = if (selected) NeonCyan else NeonMagenta,
+                glowElevation = if (selected) 12.dp else 6.dp,
+                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
             )
             .clickable(onClick = onClick)
-            .padding(12.dp)
+            .padding(11.dp)
             .testTag("effect_card_${effect.name.lowercase()}"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -1008,9 +1304,9 @@ private fun EffectPreviewCard(
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(ObsidianCanvas)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(KeyChassisDark)
             ) {
                 val cols = 7
                 val rows = 2
@@ -1061,8 +1357,8 @@ private fun EffectPreviewCard(
                         .align(Alignment.TopEnd)
                         .padding(3.dp)
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xD92B0B24))
-                        .border(0.8.dp, NeonMagenta.copy(alpha = 0.8f), RoundedCornerShape(999.dp))
+                        .background(Color(0xD9330B28))
+                        .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 )
             } else if (!effect.isVipEffect) {
@@ -1071,30 +1367,44 @@ private fun EffectPreviewCard(
                     fontFamily = JetBrainsMonoFamily,
                     fontSize = 8.sp,
                     fontWeight = FontWeight.Bold,
-                    color = NeonEmerald,
+                    color = Color.White,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(3.dp)
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color(0xD9052B1E))
-                        .border(0.8.dp, NeonEmerald.copy(alpha = 0.7f), RoundedCornerShape(999.dp))
+                        .border(0.8.dp, NeonEmerald, RoundedCornerShape(999.dp))
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 )
             }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = effect.displayName,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (selected) NeonCyan else TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (selected) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+                Text(
+                    text = effect.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Text(
                 text = effect.description,
                 style = MaterialTheme.typography.bodySmall,
-                color = TextMuted,
+                color = Color.White.copy(alpha = 0.85f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1112,10 +1422,10 @@ private fun PaletteCard(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) ObsidianSurfaceVariant else ObsidianSurface)
+            .background(if (selected) GlassCardSelected else GlassCardSurface)
             .border(
-                width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) palette.colors.first() else ObsidianBorder,
+                width = if (selected) 1.6.dp else 1.dp,
+                color = if (selected) Color.White else GlassBorder,
                 shape = RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onClick)
@@ -1133,7 +1443,8 @@ private fun PaletteCard(
         Text(
             text = palette.displayName,
             style = MaterialTheme.typography.titleSmall,
-            color = if (selected) TextPrimary else TextSecondary,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -1151,10 +1462,10 @@ private fun KeycapStyleCard(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) ObsidianSurfaceVariant else ObsidianSurface)
+            .background(if (selected) GlassCardSelected else GlassCardSurface)
             .border(
-                width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) NeonMagenta else ObsidianBorder,
+                width = if (selected) 1.6.dp else 1.dp,
+                color = if (selected) Color.White else GlassBorder,
                 shape = RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onClick)
@@ -1162,10 +1473,8 @@ private fun KeycapStyleCard(
             .testTag("keycap_style_${style.name.lowercase()}"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Mini single-keycap preview graphic
         Box(
-            modifier = Modifier
-                .size(width = 48.dp, height = 34.dp),
+            modifier = Modifier.size(width = 48.dp, height = 34.dp),
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1185,7 +1494,7 @@ private fun KeycapStyleCard(
                         drawRoundRect(color = accentColor, cornerRadius = cr, style = Stroke(1.5.dp.toPx()))
                     }
                     KeycapStyle.NEON_WIREFRAME -> {
-                        drawRoundRect(color = ObsidianCanvas, cornerRadius = cr)
+                        drawRoundRect(color = KeyChassisDark, cornerRadius = cr)
                         drawRoundRect(color = accentColor, cornerRadius = cr, style = Stroke(1.8.dp.toPx()))
                     }
                     KeycapStyle.SOLID_MECH -> {
@@ -1203,7 +1512,7 @@ private fun KeycapStyleCard(
                 text = "R",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
-                color = accentColor
+                color = Color.White
             )
         }
 
@@ -1211,12 +1520,13 @@ private fun KeycapStyleCard(
             Text(
                 text = style.displayName,
                 style = MaterialTheme.typography.titleSmall,
-                color = if (selected) TextPrimary else TextSecondary
+                fontWeight = FontWeight.Bold,
+                color = Color.White
             )
             Text(
                 text = style.description,
                 style = MaterialTheme.typography.bodySmall,
-                color = TextMuted,
+                color = Color.White.copy(alpha = 0.85f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1229,7 +1539,8 @@ internal fun SectionTitle(title: String) {
     Text(
         text = title.uppercase(),
         style = MaterialTheme.typography.labelMedium,
-        color = NeonCyan
+        fontWeight = FontWeight.Bold,
+        color = Color.White
     )
 }
 
@@ -1251,12 +1562,13 @@ internal fun TuningSliderRow(
             Text(
                 text = label,
                 style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary
+                color = Color.White
             )
             Text(
                 text = valueLabel,
                 style = MaterialTheme.typography.labelMedium,
-                color = NeonCyan
+                fontWeight = FontWeight.Bold,
+                color = Color.White
             )
         }
         Slider(
@@ -1264,9 +1576,9 @@ internal fun TuningSliderRow(
             onValueChange = onValueChange,
             valueRange = valueRange,
             colors = SliderDefaults.colors(
-                thumbColor = NeonCyan,
-                activeTrackColor = NeonCyan,
-                inactiveTrackColor = ObsidianBorder
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color.White.copy(alpha = 0.28f)
             ),
             modifier = Modifier.testTag(testTag)
         )
@@ -1298,22 +1610,23 @@ internal fun ToggleSettingRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary
+                color = Color.White
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = TextMuted
+                color = Color.White.copy(alpha = 0.85f)
             )
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color(0xFF001B22),
-                checkedTrackColor = NeonCyan,
-                uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = ObsidianSurfaceVariant
+                checkedThumbColor = RoyalBlueDeep,
+                checkedTrackColor = Color.White,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = GlassCardInner,
+                uncheckedBorderColor = GlassBorderStrong
             ),
             modifier = Modifier.testTag(testTag)
         )

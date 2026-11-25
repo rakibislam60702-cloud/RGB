@@ -32,7 +32,9 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * 6 distinct neon RGB sticker styles selectable inline inside AI Keyboard.
+ * RGB Sticker styles selectable inline inside AI Keyboard.
+ * #1 Default option: [TEXT_ONLY_TRANSPARENT] renders ONLY glowing multi-color RGB neon text
+ * on a 100% transparent background (NO border box, NO frame, NO dark background).
  */
 enum class RgbStickerStyle(
     val id: String,
@@ -45,8 +47,36 @@ enum class RgbStickerStyle(
     val haloColor: Int,
     val accentPrimary: Int,
     val accentSecondary: Int,
-    val accentSymbol: String
+    val accentSymbol: String,
+    val isTransparentTextOnly: Boolean = false
 ) {
+    TEXT_ONLY_TRANSPARENT(
+        id = "text_only_transparent",
+        displayName = "Text Only (Transparent)",
+        subtitle = "শুধুমাত্র রঙিন লেখা • No Box",
+        badgeIcon = "✨",
+        borderColors = intArrayOf(
+            Color.parseColor("#FF2A85"),
+            Color.parseColor("#FFD60A"),
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#B565FF")
+        ),
+        textColors = intArrayOf(
+            Color.parseColor("#FF2A85"),
+            Color.parseColor("#FFD60A"),
+            Color.parseColor("#00F5D4"),
+            Color.parseColor("#B565FF")
+        ),
+        cardBgColors = intArrayOf(
+            Color.parseColor("#FF181428"),
+            Color.parseColor("#FF101929")
+        ),
+        haloColor = Color.parseColor("#DD00F5D4"),
+        accentPrimary = Color.parseColor("#00F5D4"),
+        accentSecondary = Color.parseColor("#FF2A85"),
+        accentSymbol = "✨",
+        isTransparentTextOnly = true
+    ),
     VICE_CITY_SUNSET(
         id = "vice_city_sunset",
         displayName = "Vice City Sunset",
@@ -208,10 +238,10 @@ enum class RgbStickerStyle(
 }
 
 /**
- * Generates high-resolution multi-style RGB neon glass text stickers as PNGs
- * inside `cacheDir/stickers/` and commits them directly to WhatsApp, Messenger,
- * Telegram, Instagram, etc. via `InputConnectionCompat.commitContent()` (with an
- * `ACTION_SEND` fallback when an editor does not declare `image/png` support).
+ * Generates high-resolution box-free transparent or framed RGB neon text stickers as
+ * lossless WebP / PNG inside `cacheDir/stickers/` and commits them directly to WhatsApp,
+ * Messenger, Telegram, Instagram, etc. via `InputConnectionCompat.commitContent()`
+ * (with an `ACTION_SEND` fallback when an editor does not declare sticker MIME support).
  */
 object RgbStickerGenerator {
 
@@ -225,13 +255,15 @@ object RgbStickerGenerator {
         val uri: Uri,
         val bitmap: Bitmap,
         val phrase: String,
-        val style: RgbStickerStyle
+        val style: RgbStickerStyle,
+        val mimeType: String = "image/png"
     )
 
     fun generateSticker(
         context: Context,
         rawPhrase: String,
-        style: RgbStickerStyle = RgbStickerStyle.VICE_CITY_SUNSET
+        style: RgbStickerStyle = RgbStickerStyle.TEXT_ONLY_TRANSPARENT,
+        editorInfo: EditorInfo? = null
     ): StickerArtifact? {
         val phrase = rawPhrase.trim().take(64)
         if (phrase.isEmpty()) return null
@@ -242,10 +274,25 @@ object RgbStickerGenerator {
         }
         pruneOldStickers(stickersDir)
 
-        val outFile = File(stickersDir, "rgb_sticker_${style.id}_${System.currentTimeMillis()}.png")
+        // Prefer transparent WebP when the active chat app explicitly declares image/webp sticker support
+        val preferWebp = shouldUseWebp(editorInfo)
+        val ext = if (preferWebp) "webp" else "png"
+        val mimeType = if (preferWebp) "image/webp" else "image/png"
+        val outFile = File(stickersDir, "rgb_sticker_${style.id}_${System.currentTimeMillis()}.$ext")
+
         val saved = runCatching {
             FileOutputStream(outFile).use { fos ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                if (preferWebp) {
+                    val fmt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Bitmap.CompressFormat.WEBP_LOSSLESS
+                    } else {
+                        @Suppress("DEPRECATION")
+                        Bitmap.CompressFormat.WEBP
+                    }
+                    bitmap.compress(fmt, 100, fos)
+                } else {
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                }
                 fos.flush()
             }
             true
@@ -269,14 +316,23 @@ object RgbStickerGenerator {
             uri = contentUri,
             bitmap = bitmap,
             phrase = phrase,
-            style = style
+            style = style,
+            mimeType = mimeType
         )
     }
 
+    private fun shouldUseWebp(editorInfo: EditorInfo?): Boolean {
+        if (editorInfo == null) return false
+        val mimeTypes = EditorInfoCompat.getContentMimeTypes(editorInfo)
+        return mimeTypes.any { mime ->
+            ClipDescription.compareMimeTypes(mime, "image/webp")
+        }
+    }
+
     /**
-     * Commits the generated PNG sticker directly to the active chat app via
+     * Commits the generated WebP/PNG sticker directly to the active chat app via
      * `InputConnectionCompat.commitContent()`. Returns `true` if committed directly,
-     * or launches a system share sheet fallback when the target field does not accept PNGs.
+     * or launches a system share sheet fallback when the target field does not accept image content.
      */
     fun sendStickerToActiveApp(
         context: Context,
@@ -290,12 +346,14 @@ object RgbStickerGenerator {
             emptyArray()
         }
 
-        val supportsPng = mimeTypes.any { mime ->
-            ClipDescription.compareMimeTypes(mime, "image/png") ||
+        val supportsArtifactMime = mimeTypes.any { mime ->
+            ClipDescription.compareMimeTypes(mime, artifact.mimeType) ||
+                ClipDescription.compareMimeTypes(mime, "image/webp") ||
+                ClipDescription.compareMimeTypes(mime, "image/png") ||
                 ClipDescription.compareMimeTypes(mime, "image/*")
         }
 
-        if (supportsPng && inputConnection != null && editorInfo != null) {
+        if (supportsArtifactMime && inputConnection != null && editorInfo != null) {
             val targetPackage = editorInfo.packageName
             if (!targetPackage.isNullOrBlank()) {
                 runCatching {
@@ -307,7 +365,7 @@ object RgbStickerGenerator {
                 }
             }
 
-            val description = ClipDescription(artifact.phrase, arrayOf("image/png"))
+            val description = ClipDescription(artifact.phrase, arrayOf(artifact.mimeType))
             val inputContentInfo = InputContentInfoCompat(artifact.uri, description, null)
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
                 InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION
@@ -336,7 +394,7 @@ object RgbStickerGenerator {
 
     fun shareStickerFallback(context: Context, artifact: StickerArtifact) {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "image/png"
+            type = artifact.mimeType
             putExtra(Intent.EXTRA_STREAM, artifact.uri)
             putExtra(Intent.EXTRA_TEXT, artifact.phrase)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -354,12 +412,19 @@ object RgbStickerGenerator {
         style: RgbStickerStyle
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(STICKER_WIDTH, STICKER_HEIGHT, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(Color.TRANSPARENT)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.TRANSPARENT)
 
         val typeface = runCatching {
             ResourcesCompat.getFont(context, R.font.noto_sans_bengali)
         }.getOrNull() ?: Typeface.DEFAULT_BOLD
+
+        // #1 Default Box-Free Transparent RGB Text Sticker (শুধুমাত্র রঙিন লেখা):
+        // 100% transparent background (Color.TRANSPARENT) — ZERO box, ZERO frame, ZERO dark backdrop!
+        if (style.isTransparentTextOnly) {
+            renderBoxFreeTransparentRgbText(canvas, phrase, typeface, style)
+            return bitmap
+        }
 
         val horizontalCardMargin = 42f
         val innerTextPaddingX = 36f
@@ -370,7 +435,7 @@ object RgbStickerGenerator {
             color = Color.WHITE
         }
 
-        val chosenSize = pickOptimalTextSize(phrase, textPaint, maxTextWidth)
+        val chosenSize = pickOptimalTextSize(phrase, textPaint, maxTextWidth, isTransparent = false)
         textPaint.textSize = chosenSize
         val textLayout = buildCenteredLayout(phrase, textPaint, maxTextWidth)
 
@@ -532,8 +597,80 @@ object RgbStickerGenerator {
         return bitmap
     }
 
+    /**
+     * Renders ONLY crisp, glowing multi-color RGB neon text on a 100% transparent canvas.
+     * No border box, no frame, no dark rectangle — floats cleanly over any chat wallpaper!
+     */
+    private fun renderBoxFreeTransparentRgbText(
+        canvas: Canvas,
+        phrase: String,
+        typeface: Typeface,
+        style: RgbStickerStyle
+    ) {
+        val horizontalMargin = 28
+        val maxTextWidth = (STICKER_WIDTH - horizontalMargin * 2).coerceAtLeast(220)
+
+        val basePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.typeface = Typeface.create(typeface, Typeface.BOLD)
+            color = Color.WHITE
+        }
+
+        val chosenSize = pickOptimalTextSize(phrase, basePaint, maxTextWidth, isTransparent = true)
+        basePaint.textSize = chosenSize
+        val measureLayout = buildCenteredLayout(phrase, basePaint, maxTextWidth)
+
+        val originX = (STICKER_WIDTH - maxTextWidth) / 2f
+        val originY = (STICKER_HEIGHT - measureLayout.height) / 2f
+
+        val rgbShader = LinearGradient(
+            0f,
+            0f,
+            maxTextWidth.toFloat(),
+            measureLayout.height.toFloat().coerceAtLeast(chosenSize),
+            style.textColors,
+            null,
+            Shader.TileMode.CLAMP
+        )
+
+        canvas.save()
+        canvas.translate(originX, originY)
+
+        // Layer 1: Wide multi-color RGB outer neon glow floating freely in transparent space
+        val outerGlowPaint = TextPaint(basePaint).apply {
+            this.style = Paint.Style.FILL_AND_STROKE
+            strokeWidth = (chosenSize * 0.14f).coerceIn(5f, 12f)
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+            shader = rgbShader
+            alpha = 215
+            maskFilter = BlurMaskFilter(18f, BlurMaskFilter.Blur.NORMAL)
+        }
+        buildCenteredLayout(phrase, outerGlowPaint, maxTextWidth).draw(canvas)
+
+        // Layer 2: Tight crisp dark edge stroke directly on letter contours for legibility on light & dark chat themes
+        val contourPaint = TextPaint(basePaint).apply {
+            this.style = Paint.Style.STROKE
+            strokeWidth = (chosenSize * 0.10f).coerceIn(4f, 8.5f)
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+            shader = null
+            color = Color.parseColor("#E6090B14")
+        }
+        buildCenteredLayout(phrase, contourPaint, maxTextWidth).draw(canvas)
+
+        // Layer 3: Razor-sharp vibrant multi-color RGB neon gradient fill
+        val fillPaint = TextPaint(basePaint).apply {
+            this.style = Paint.Style.FILL
+            shader = rgbShader
+        }
+        buildCenteredLayout(phrase, fillPaint, maxTextWidth).draw(canvas)
+
+        canvas.restore()
+    }
+
     private fun drawStyleBackdropArt(canvas: Canvas, rect: RectF, style: RgbStickerStyle) {
         when (style) {
+            RgbStickerStyle.TEXT_ONLY_TRANSPARENT -> Unit
             RgbStickerStyle.GALAXY_NEON -> {
                 val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     this.style = Paint.Style.FILL
@@ -612,16 +749,26 @@ object RgbStickerGenerator {
         }
     }
 
-    private fun pickOptimalTextSize(phrase: String, paint: TextPaint, maxWidth: Int): Float {
-        val candidates = floatArrayOf(68f, 60f, 52f, 46f, 40f, 34f, 29f)
+    private fun pickOptimalTextSize(
+        phrase: String,
+        paint: TextPaint,
+        maxWidth: Int,
+        isTransparent: Boolean
+    ): Float {
+        val candidates = if (isTransparent) {
+            floatArrayOf(92f, 80f, 70f, 62f, 54f, 46f, 38f, 32f)
+        } else {
+            floatArrayOf(68f, 60f, 52f, 46f, 40f, 34f, 29f)
+        }
+        val maxHeight = if (isTransparent) 380 else 270
         for (size in candidates) {
             paint.textSize = size
             val layout = buildCenteredLayout(phrase, paint, maxWidth)
-            if (layout.lineCount <= 3 && layout.height <= 270) {
+            if (layout.lineCount <= 3 && layout.height <= maxHeight) {
                 return size
             }
         }
-        return 26f
+        return if (isTransparent) 28f else 26f
     }
 
     private fun buildCenteredLayout(text: String, paint: TextPaint, width: Int): StaticLayout {

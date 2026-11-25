@@ -67,14 +67,20 @@ import com.example.model.KeyboardSettings
 import com.example.model.LocalAppStrings
 import com.example.model.SwitchSoundProfile
 import com.example.ui.theme.BrandObsidianPill
+import com.example.ui.theme.FlagshipCyanMagentaBrush
+import com.example.ui.theme.FlagshipGlassRimSubtle
+import com.example.ui.theme.FlagshipGoldCyanBrush
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassBorderStrong
+import com.example.ui.theme.GlassCardInner
+import com.example.ui.theme.GlassCardSelected
+import com.example.ui.theme.GlassCardSurface
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.LuxuryCyanStroke
 import com.example.ui.theme.LuxuryPinkStroke
 import com.example.ui.theme.NeonAmber
-import com.example.ui.theme.NeonAmberContainer
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonEmerald
-import com.example.ui.theme.NeonEmeraldContainer
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NotoSansBengaliFamily
 import com.example.ui.theme.ObsidianBorder
@@ -82,11 +88,14 @@ import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceVariant
 import com.example.ui.theme.OrbitronFamily
+import com.example.ui.theme.RoyalBlueDeep
+import com.example.ui.theme.RoyalGold
 import com.example.ui.theme.RoyalGoldAccent
 import com.example.ui.theme.RoyalGoldPillBg
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.luminousGlassCard
 import kotlinx.coroutines.delay
 
 @Composable
@@ -169,14 +178,10 @@ fun SettingsScreen(
                                 .weight(1f)
                                 .heightIn(min = 48.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(if (selected) BrandObsidianPill else ObsidianCanvas)
+                                .background(if (selected) GlassCardSelected else GlassCardInner)
                                 .border(
-                                    width = if (selected) 1.2.dp else 1.dp,
-                                    brush = if (selected) {
-                                        Brush.horizontalGradient(listOf(LuxuryPinkStroke, LuxuryCyanStroke))
-                                    } else {
-                                        Brush.horizontalGradient(listOf(ObsidianBorder, ObsidianBorder))
-                                    },
+                                    width = if (selected) 1.5.dp else 1.dp,
+                                    color = if (selected) Color.White else GlassBorder,
                                     shape = RoundedCornerShape(16.dp)
                                 )
                                 .clickable { onSelectAppUiLanguage(lang) }
@@ -189,7 +194,7 @@ fun SettingsScreen(
                                 fontFamily = pillFont,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (selected) Color.White else TextSecondary,
+                                color = Color.White,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -201,7 +206,7 @@ fun SettingsScreen(
             // 2. Keypress Sound (Soft Modern / Silent) & Key Vibration
             SettingsCard(
                 icon = if (settings.switchSound == SwitchSoundProfile.SILENT) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                iconTint = NeonMagenta,
+                iconTint = Color.White,
                 title = strings.settingsSectionSoundHaptics,
                 bodyFont = bodyFont
             ) {
@@ -210,7 +215,7 @@ fun SettingsScreen(
                     fontFamily = bodyFont,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary
+                    color = Color.White
                 )
 
                 val isSilent = settings.switchSound == SwitchSoundProfile.SILENT
@@ -222,7 +227,7 @@ fun SettingsScreen(
                         label = strings.settingsSoundSoftModern,
                         icon = Icons.Filled.VolumeUp,
                         selected = !isSilent,
-                        accent = NeonCyan,
+                        accent = Color.White,
                         onClick = { onSelectSwitchSound(SwitchSoundProfile.SAMSUNG_SOFT) },
                         modifier = Modifier
                             .weight(1f)
@@ -232,7 +237,7 @@ fun SettingsScreen(
                         label = strings.settingsSoundSilent,
                         icon = Icons.Filled.VolumeOff,
                         selected = isSilent,
-                        accent = NeonMagenta,
+                        accent = Color.White,
                         onClick = { onSelectSwitchSound(SwitchSoundProfile.SILENT) },
                         modifier = Modifier
                             .weight(1f)
@@ -246,8 +251,8 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(ObsidianCanvas)
-                        .border(1.dp, ObsidianBorder, RoundedCornerShape(14.dp))
+                        .background(GlassCardInner)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
                         .clickable { onHapticEnabledChange(!settings.hapticEnabled) }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -256,7 +261,7 @@ fun SettingsScreen(
                     Icon(
                         imageVector = Icons.Filled.Vibration,
                         contentDescription = null,
-                        tint = if (settings.hapticEnabled) NeonCyan else TextMuted,
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )
                     Column(modifier = Modifier.weight(1f)) {
@@ -265,23 +270,24 @@ fun SettingsScreen(
                             fontFamily = bodyFont,
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
+                            color = Color.White
                         )
                         Text(
                             text = strings.settingsKeyVibrationDesc,
                             fontFamily = bodyFont,
                             fontSize = 11.5.sp,
-                            color = TextSecondary
+                            color = Color.White.copy(alpha = 0.85f)
                         )
                     }
                     Switch(
                         checked = settings.hapticEnabled,
                         onCheckedChange = onHapticEnabledChange,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color(0xFF001B22),
-                            checkedTrackColor = NeonCyan,
-                            uncheckedThumbColor = TextMuted,
-                            uncheckedTrackColor = ObsidianSurfaceVariant
+                            checkedThumbColor = RoyalBlueDeep,
+                            checkedTrackColor = Color.White,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = GlassCardSurface,
+                            uncheckedBorderColor = GlassBorderStrong
                         ),
                         modifier = Modifier.testTag("settings_toggle_haptic")
                     )
@@ -291,7 +297,7 @@ fun SettingsScreen(
             // 3. Smart Auto-Suggestions & Auto-Learn
             SettingsCard(
                 icon = Icons.Filled.AutoAwesome,
-                iconTint = NeonAmber,
+                iconTint = Color.White,
                 title = strings.settingsSectionSmartTyping,
                 bodyFont = bodyFont
             ) {
@@ -299,8 +305,8 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(ObsidianCanvas)
-                        .border(1.dp, ObsidianBorder, RoundedCornerShape(14.dp))
+                        .background(GlassCardInner)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
                         .clickable { onSmartSuggestionsChange(!settings.smartSuggestionsEnabled) }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -312,23 +318,24 @@ fun SettingsScreen(
                             fontFamily = bodyFont,
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
+                            color = Color.White
                         )
                         Text(
                             text = strings.settingsSmartSuggestionsDesc,
                             fontFamily = bodyFont,
                             fontSize = 11.5.sp,
-                            color = TextSecondary
+                            color = Color.White.copy(alpha = 0.85f)
                         )
                     }
                     Switch(
                         checked = settings.smartSuggestionsEnabled,
                         onCheckedChange = onSmartSuggestionsChange,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color(0xFF001B22),
-                            checkedTrackColor = NeonCyan,
-                            uncheckedThumbColor = TextMuted,
-                            uncheckedTrackColor = ObsidianSurfaceVariant
+                            checkedThumbColor = RoyalBlueDeep,
+                            checkedTrackColor = Color.White,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = GlassCardSurface,
+                            uncheckedBorderColor = GlassBorderStrong
                         ),
                         modifier = Modifier.testTag("settings_toggle_smart_suggestions")
                     )
@@ -338,7 +345,7 @@ fun SettingsScreen(
             // 4. Replay Interactive Feature Guide
             SettingsCard(
                 icon = Icons.Filled.HelpOutline,
-                iconTint = NeonCyan,
+                iconTint = Color.White,
                 title = strings.settingsSectionGuide,
                 bodyFont = bodyFont
             ) {
@@ -346,19 +353,15 @@ fun SettingsScreen(
                     text = strings.settingsReplayGuideDesc,
                     fontFamily = bodyFont,
                     fontSize = 12.sp,
-                    color = TextSecondary
+                    color = Color.White.copy(alpha = 0.88f)
                 )
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 50.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(BrandObsidianPill)
-                        .border(
-                            1.15.dp,
-                            Brush.horizontalGradient(listOf(LuxuryPinkStroke, LuxuryCyanStroke)),
-                            RoundedCornerShape(16.dp)
-                        )
+                        .background(GlassCardSelected)
+                        .border(1.dp, Color.White, RoundedCornerShape(16.dp))
                         .clickable(onClick = onReplayFeatureGuide)
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                         .testTag("settings_btn_replay_feature_guide"),
@@ -376,28 +379,25 @@ fun SettingsScreen(
                 }
             }
 
-            // 5. VIP License Status & Device ID
+            // 5. VIP License Status & True Hardware Device ID (RK-XXXXXXXX)
+            val isVipOrAllFree = licenseState.isAllUnlocked || licenseState.isPaidOrAdminVip
             SettingsCard(
-                icon = if (licenseState.isLifetimeUnlocked) Icons.Filled.Verified else Icons.Filled.Timer,
-                iconTint = if (licenseState.isLifetimeUnlocked) NeonEmerald else RoyalGoldAccent,
+                icon = if (isVipOrAllFree) Icons.Filled.Verified else Icons.Filled.Timer,
+                iconTint = Color.White,
                 title = strings.settingsSectionVip,
                 bodyFont = bodyFont
             ) {
-                val statusColor = when {
-                    licenseState.isLifetimeUnlocked -> NeonEmerald
-                    licenseState.isFreeStandardMode -> Color(0xFFFF7AA8)
+                val statusBg = when {
+                    isVipOrAllFree -> Color(0x550E4F38)
+                    licenseState.isFreeStandardMode -> Color(0x6640122A)
+                    else -> Color(0x661E1A12)
+                }
+                val statusBorder = when {
+                    isVipOrAllFree -> NeonEmerald
+                    licenseState.isFreeStandardMode -> Color.White.copy(alpha = 0.7f)
                     else -> RoyalGoldAccent
                 }
-                val statusBg = when {
-                    licenseState.isLifetimeUnlocked -> Color(0xFF0E221C)
-                    licenseState.isFreeStandardMode -> Color(0xFF231320)
-                    else -> RoyalGoldPillBg
-                }
-                val statusLabel = when {
-                    licenseState.isLifetimeUnlocked -> strings.settingsVipStatusLifetime
-                    licenseState.isFreeStandardMode -> strings.settingsVipStatusFree
-                    else -> "VIP Trial • ${licenseState.formattedCompactEnglish}"
-                }
+                val statusLabel = licenseState.formattedVipPillText
 
                 // Status badge pill
                 Row(
@@ -405,38 +405,17 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(statusBg)
-                        .border(1.dp, statusColor.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                        .border(1.dp, statusBorder, RoundedCornerShape(14.dp))
                         .padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (licenseState.isLifetimeUnlocked) {
-                        Icon(
-                            imageVector = Icons.Filled.Verified,
-                            contentDescription = null,
-                            tint = statusColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    } else if (!licenseState.isFreeStandardMode) {
-                        Text(text = "👑", fontSize = 15.sp)
-                    } else {
-                        Icon(
-                            imageVector = Icons.Filled.Timer,
-                            contentDescription = null,
-                            tint = statusColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
                     Text(
                         text = statusLabel,
-                        fontFamily = if (!licenseState.isLifetimeUnlocked && !licenseState.isFreeStandardMode) {
-                            FontFamily.Default
-                        } else {
-                            bodyFont
-                        },
+                        fontFamily = FontFamily.Default,
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = statusColor
+                        color = Color.White
                     )
                 }
 
@@ -445,8 +424,8 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(ObsidianCanvas)
-                        .border(1.dp, ObsidianBorder, RoundedCornerShape(12.dp))
+                        .background(GlassCardInner)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -456,15 +435,15 @@ fun SettingsScreen(
                             text = strings.settingsDeviceIdLabel,
                             fontFamily = bodyFont,
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = Color.White.copy(alpha = 0.85f)
                         )
                         Text(
                             text = licenseState.deviceId,
                             fontFamily = JetBrainsMonoFamily,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.6.sp,
-                            color = NeonCyan
+                            letterSpacing = 1.4.sp,
+                            color = Color.White
                         )
                     }
 
@@ -472,10 +451,10 @@ fun SettingsScreen(
                         modifier = Modifier
                             .heightIn(min = 40.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (copiedDeviceId) NeonEmerald.copy(alpha = 0.18f) else ObsidianSurfaceVariant)
+                            .background(if (copiedDeviceId) Color(0x550E4F38) else GlassCardSurface)
                             .border(
                                 1.dp,
-                                if (copiedDeviceId) NeonEmerald else NeonCyan.copy(alpha = 0.55f),
+                                if (copiedDeviceId) NeonEmerald else Color.White,
                                 RoundedCornerShape(10.dp)
                             )
                             .clickable {
@@ -493,7 +472,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = if (copiedDeviceId) Icons.Filled.Check else Icons.Filled.ContentCopy,
                             contentDescription = strings.settingsCopyIdBtn,
-                            tint = if (copiedDeviceId) NeonEmerald else NeonCyan,
+                            tint = Color.White,
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
@@ -501,7 +480,7 @@ fun SettingsScreen(
                             fontFamily = bodyFont,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (copiedDeviceId) NeonEmerald else NeonCyan
+                            color = Color.White
                         )
                     }
                 }
@@ -510,10 +489,10 @@ fun SettingsScreen(
                     text = strings.settingsAutoRestoreNote,
                     fontFamily = bodyFont,
                     fontSize = 11.5.sp,
-                    color = TextSecondary
+                    color = Color.White.copy(alpha = 0.88f)
                 )
 
-                if (!licenseState.isLifetimeUnlocked) {
+                if (!licenseState.isAllUnlocked) {
                     Button(
                         onClick = onOpenUnlockScreen,
                         shape = RoundedCornerShape(14.dp),
@@ -555,40 +534,52 @@ private fun SettingsCard(
     bodyFont: FontFamily,
     content: @Composable () -> Unit
 ) {
+    val badgeAccent = if (iconTint == Color.White) NeonCyan else iconTint
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(ObsidianSurface)
-            .border(1.dp, ObsidianBorder, RoundedCornerShape(16.dp))
+            .luminousGlassCard(
+                shape = RoundedCornerShape(20.dp),
+                borderBrush = FlagshipGlassRimSubtle,
+                borderWidth = 1.2.dp,
+                glowColor = badgeAccent,
+                glowElevation = 10.dp
+            )
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(iconTint.copy(alpha = 0.14f))
-                    .border(1.dp, iconTint.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                badgeAccent.copy(alpha = 0.28f),
+                                ObsidianCanvas
+                            )
+                        )
+                    )
+                    .border(1.1.dp, FlagshipCyanMagentaBrush, RoundedCornerShape(11.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(18.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(19.dp)
                 )
             }
             Text(
                 text = title,
                 fontFamily = bodyFont,
-                fontSize = 14.5.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = Color.White
             )
         }
         content()
@@ -604,15 +595,16 @@ private fun SoundOptionPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val pillShape = RoundedCornerShape(14.dp)
     Row(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) accent.copy(alpha = 0.16f) else ObsidianCanvas)
+            .clip(pillShape)
+            .background(if (selected) GlassCardSelected else GlassCardInner)
             .border(
-                width = if (selected) 1.4.dp else 1.dp,
-                color = if (selected) accent else ObsidianBorder,
-                shape = RoundedCornerShape(14.dp)
+                width = if (selected) 1.5.dp else 1.dp,
+                brush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                shape = pillShape
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -622,7 +614,7 @@ private fun SoundOptionPill(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (selected) accent else TextMuted,
+            tint = if (selected) NeonCyan else Color.White,
             modifier = Modifier.size(16.dp)
         )
         Spacer(modifier = Modifier.width(6.dp))
@@ -630,7 +622,7 @@ private fun SoundOptionPill(
             text = label,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
-            color = if (selected) accent else TextSecondary,
+            color = Color.White,
             maxLines = 1,
             softWrap = false
         )

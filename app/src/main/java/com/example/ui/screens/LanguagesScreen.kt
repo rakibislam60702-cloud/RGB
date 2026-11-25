@@ -50,28 +50,43 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Brush
 import com.example.R
+import com.example.data.LicenseUiState
 import com.example.model.LanguageCatalog
 import com.example.model.LanguagePackUiState
+import com.example.ui.components.BanglishCountdownTimerBar
+import com.example.ui.theme.FlagshipCyanMagentaBrush
+import com.example.ui.theme.FlagshipEmeraldCyanBrush
+import com.example.ui.theme.FlagshipGlassRimSubtle
+import com.example.ui.theme.FlagshipGoldAmberBrush
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.NeonEmeraldContainer
+import com.example.ui.theme.NeonMagenta
+import com.example.ui.theme.NotoSansBengaliFamily
 import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianCanvas
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceVariant
+import com.example.ui.theme.RoyalGold
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.luminousGlassCard
 import java.util.Locale
 
 @Composable
 fun LanguagesScreen(
     languagePacks: List<LanguagePackUiState>,
+    licenseState: LicenseUiState,
     onDownloadAndEnable: (String) -> Unit,
     onToggleEnabled: (String, Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
+    onOpenUnlockScreen: () -> Unit,
+    onOpenBanglishVip: () -> Unit = onOpenUnlockScreen,
     onDeletePack: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -111,9 +126,13 @@ fun LanguagesScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(ObsidianSurface)
-                    .border(1.dp, NeonCyan.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                    .luminousGlassCard(
+                        shape = RoundedCornerShape(20.dp),
+                        borderBrush = FlagshipCyanMagentaBrush,
+                        borderWidth = 1.3.dp,
+                        glowColor = NeonCyan,
+                        glowElevation = 12.dp
+                    )
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -129,13 +148,14 @@ fun LanguagesScreen(
                         Icon(
                             imageVector = Icons.Filled.Language,
                             contentDescription = null,
-                            tint = NeonCyan,
+                            tint = Color.White,
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = stringResource(R.string.section_active_languages),
                             style = MaterialTheme.typography.titleSmall,
-                            color = TextPrimary
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                     }
 
@@ -151,7 +171,7 @@ fun LanguagesScreen(
                         Icon(
                             imageVector = Icons.Filled.Storage,
                             contentDescription = null,
-                            tint = NeonEmerald,
+                            tint = Color.White,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
@@ -163,7 +183,7 @@ fun LanguagesScreen(
                             },
                             fontFamily = JetBrainsMonoFamily,
                             style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
+                            color = Color.White
                         )
                     }
                 }
@@ -173,19 +193,27 @@ fun LanguagesScreen(
                     contentPadding = PaddingValues(end = 4.dp)
                 ) {
                     items(enabledPacks, key = { it.catalog.id }) { pack ->
+                        val isVipLocked = pack.catalog.isVipOnly && !licenseState.isBanglishUnlocked
+                        val isSelected = pack.isActive && !isVipLocked
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(
-                                    if (pack.isActive) NeonCyan.copy(alpha = 0.18f)
+                                    if (isSelected) NeonCyan.copy(alpha = 0.18f)
                                     else ObsidianSurfaceVariant
                                 )
                                 .border(
-                                    width = if (pack.isActive) 1.3.dp else 1.dp,
-                                    color = if (pack.isActive) NeonCyan else ObsidianBorder,
+                                    width = if (isSelected) 1.3.dp else 1.dp,
+                                    color = when {
+                                        isSelected -> NeonCyan
+                                        isVipLocked -> NeonAmber.copy(alpha = 0.72f)
+                                        else -> ObsidianBorder
+                                    },
                                     shape = RoundedCornerShape(12.dp)
                                 )
-                                .clickable { onSelectLanguage(pack.catalog.id) }
+                                .clickable {
+                                    if (isVipLocked) onOpenUnlockScreen() else onSelectLanguage(pack.catalog.id)
+                                }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .testTag("globe_cycle_chip_${pack.catalog.id}"),
                             verticalAlignment = Alignment.CenterVertically,
@@ -195,15 +223,30 @@ fun LanguagesScreen(
                                 modifier = Modifier
                                     .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(if (pack.isActive) NeonCyan else NeonEmerald)
+                                    .background(
+                                        when {
+                                            isSelected -> NeonCyan
+                                            isVipLocked -> NeonAmber
+                                            else -> NeonEmerald
+                                        }
+                                    )
                             )
                             Text(
                                 text = pack.catalog.nativeName,
                                 fontFamily = FontFamily.Default,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (pack.isActive) TextPrimary else TextSecondary
+                                color = if (isSelected) TextPrimary else TextSecondary
                             )
+                            if (isVipLocked) {
+                                Text(
+                                    text = "🔒 VIP",
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonAmber
+                                )
+                            }
                         }
                     }
                 }
@@ -215,13 +258,21 @@ fun LanguagesScreen(
                 )
             }
 
-            // Built-in English Card
-            languagePacks.firstOrNull { it.catalog.isBuiltIn }?.let { englishPack ->
+            // Built-in Cards (English + Indian Banglish BN-EN)
+            val banglishPriceMeta = licenseState.adminConfig.formattedBanglishPriceBn()
+            languagePacks.filter { it.catalog.isBuiltIn }.forEach { builtInPack ->
+                val isVipLocked = builtInPack.catalog.isVipOnly && !licenseState.isBanglishUnlocked
                 LanguagePackCard(
-                    state = englishPack,
+                    state = builtInPack,
+                    licenseState = licenseState,
+                    isVipLocked = isVipLocked,
+                    vipPriceLabel = banglishPriceMeta,
                     onDownloadAndEnable = {},
                     onToggleEnabled = {},
-                    onSelectLanguage = { onSelectLanguage(englishPack.catalog.id) },
+                    onSelectLanguage = {
+                        if (isVipLocked) onOpenBanglishVip() else onSelectLanguage(builtInPack.catalog.id)
+                    },
+                    onOpenBanglishVip = onOpenBanglishVip,
                     onDeletePack = {}
                 )
             }
@@ -231,11 +282,18 @@ fun LanguagesScreen(
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 languagePacks.filter { !it.catalog.isBuiltIn }.forEach { pack ->
+                    val isVipLocked = pack.catalog.isVipOnly && !licenseState.isBanglishUnlocked
                     LanguagePackCard(
                         state = pack,
+                        licenseState = licenseState,
+                        isVipLocked = isVipLocked,
+                        vipPriceLabel = banglishPriceMeta,
                         onDownloadAndEnable = { onDownloadAndEnable(pack.catalog.id) },
                         onToggleEnabled = { enabled -> onToggleEnabled(pack.catalog.id, enabled) },
-                        onSelectLanguage = { onSelectLanguage(pack.catalog.id) },
+                        onSelectLanguage = {
+                            if (isVipLocked) onOpenBanglishVip() else onSelectLanguage(pack.catalog.id)
+                        },
+                        onOpenBanglishVip = onOpenBanglishVip,
                         onDeletePack = { onDeletePack(pack.catalog.id) }
                     )
                 }
@@ -249,27 +307,40 @@ fun LanguagesScreen(
 @Composable
 private fun LanguagePackCard(
     state: LanguagePackUiState,
+    licenseState: LicenseUiState,
+    isVipLocked: Boolean = false,
+    vipPriceLabel: String = "₹20/মাস",
     onDownloadAndEnable: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
     onSelectLanguage: () -> Unit,
+    onOpenBanglishVip: () -> Unit = {},
     onDeletePack: () -> Unit
 ) {
     val item = state.catalog
-    val borderColor = when {
+    val isBanglishCard = item.id == LanguageCatalog.BANGLISH_ID || item.isVipOnly
+    val borderBrush = when {
+        isVipLocked -> FlagshipGoldAmberBrush
+        state.isActive -> FlagshipCyanMagentaBrush
+        state.isDownloaded && state.isEnabled -> FlagshipEmeraldCyanBrush
+        else -> FlagshipGlassRimSubtle
+    }
+    val glowColor = when {
+        isVipLocked -> RoyalGold
         state.isActive -> NeonCyan
-        state.isDownloaded && state.isEnabled -> NeonEmerald.copy(alpha = 0.5f)
-        else -> ObsidianBorder
+        state.isDownloaded && state.isEnabled -> NeonEmerald
+        else -> NeonMagenta
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (state.isActive) ObsidianSurfaceVariant else ObsidianSurface)
-            .border(
-                width = if (state.isActive) 1.5.dp else 1.dp,
-                color = borderColor,
-                shape = RoundedCornerShape(18.dp)
+            .luminousGlassCard(
+                shape = RoundedCornerShape(20.dp),
+                borderBrush = borderBrush,
+                borderWidth = if (state.isActive || isVipLocked) 1.5.dp else 1.1.dp,
+                glowColor = glowColor,
+                glowElevation = if (state.isActive) 14.dp else 8.dp,
+                surfaceColor = if (state.isActive) ObsidianSurfaceVariant else ObsidianSurface
             )
             .padding(16.dp)
             .testTag("language_pack_card_${item.id}"),
@@ -280,17 +351,22 @@ private fun LanguagePackCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Native Script Badge
+            // Luminous Native Script Badge
             Box(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(13.dp))
                     .background(
-                        if (state.isDownloaded) NeonCyan.copy(alpha = 0.14f) else ObsidianCanvas
+                        Brush.linearGradient(
+                            listOf(
+                                glowColor.copy(alpha = 0.28f),
+                                ObsidianCanvas
+                            )
+                        )
                     )
                     .border(
-                        width = 1.dp,
-                        color = if (state.isDownloaded) NeonCyan.copy(alpha = 0.55f) else ObsidianBorder,
+                        width = 1.2.dp,
+                        brush = borderBrush,
                         shape = RoundedCornerShape(13.dp)
                     ),
                 contentAlignment = Alignment.Center
@@ -300,7 +376,7 @@ private fun LanguagePackCard(
                     fontFamily = if (item.id == LanguageCatalog.ENGLISH_ID) JetBrainsMonoFamily else FontFamily.Default,
                     fontSize = if (item.shortBadge.length > 3) 12.sp else 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (state.isDownloaded) NeonCyan else TextSecondary,
+                    color = Color.White,
                     maxLines = 1
                 )
             }
@@ -314,8 +390,8 @@ private fun LanguagePackCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = if (item.isBuiltIn) item.englishName else "${item.englishName} (${item.nativeName})",
-                        fontFamily = FontFamily.Default,
+                        text = if (item.id == LanguageCatalog.ENGLISH_ID) item.englishName else "${item.englishName} (${item.nativeName})",
+                        fontFamily = if (item.id == "bn" || item.id == LanguageCatalog.BANGLISH_ID) NotoSansBengaliFamily else FontFamily.Default,
                         style = MaterialTheme.typography.titleMedium,
                         color = TextPrimary,
                         maxLines = 1,
@@ -333,12 +409,16 @@ private fun LanguagePackCard(
 
             if (item.isBuiltIn) {
                 StatusPill(
-                    label = if (state.isActive) {
-                        stringResource(R.string.badge_active_layout)
-                    } else {
-                        stringResource(R.string.badge_built_in)
+                    label = when {
+                        isVipLocked -> "🔒 VIP"
+                        state.isActive -> stringResource(R.string.badge_active_layout)
+                        else -> stringResource(R.string.badge_built_in)
                     },
-                    accent = if (state.isActive) NeonCyan else TextSecondary,
+                    accent = when {
+                        isVipLocked -> NeonAmber
+                        state.isActive -> NeonCyan
+                        else -> TextSecondary
+                    },
                     onClick = onSelectLanguage,
                     testTag = "btn_activate_${item.id}"
                 )
@@ -396,6 +476,60 @@ private fun LanguagePackCard(
             }
         }
 
+        // Dedicated clickable 👑 VIP button + live countdown timer bar for Banglish (BN-EN) card
+        if (isBanglishCard) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🇮🇳 Romanized Bengali VIP Plan",
+                    fontFamily = NotoSansBengaliFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = RoyalGold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    RoyalGold.copy(alpha = 0.28f),
+                                    NeonAmber.copy(alpha = 0.24f)
+                                )
+                            )
+                        )
+                        .border(1.2.dp, FlagshipGoldAmberBrush, RoundedCornerShape(999.dp))
+                        .clickable(onClick = onOpenBanglishVip)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("btn_banglish_vip"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "👑 VIP",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            BanglishCountdownTimerBar(
+                countdownLabelBn = licenseState.formattedBanglishCountdownBn,
+                countdownLabelEn = licenseState.formattedBanglishCountdownEn,
+                progress = licenseState.banglishCountdownProgress,
+                isActive = licenseState.isBanglishUnlocked
+            )
+        }
+
         // Script Keycap Preview Bar + File Size / Action Footer
         Row(
             modifier = Modifier
@@ -420,7 +554,9 @@ private fun LanguagePackCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 val metaText = when {
-                    item.isBuiltIn -> "${item.locale} · Built-in base layout"
+                    isVipLocked -> "${item.locale} · 🔒 VIP Feature ($vipPriceLabel)"
+                    item.isBuiltIn && item.isVipOnly -> "${item.locale} · 👑 VIP Active"
+                    item.isBuiltIn -> "${item.locale} · Built-in free layout"
                     state.isDownloaded -> {
                         val kb = String.format(Locale.US, "%.1f KB", state.fileSizeBytes.coerceAtLeast(100L) / 1024f)
                         "filesDir/layouts/${item.id}.json · $kb"
@@ -431,7 +567,11 @@ private fun LanguagePackCard(
                     text = metaText,
                     fontFamily = JetBrainsMonoFamily,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (state.isDownloaded && !item.isBuiltIn) NeonEmerald else TextMuted,
+                    color = when {
+                        isVipLocked -> NeonAmber
+                        state.isDownloaded && !item.isBuiltIn -> NeonEmerald
+                        else -> TextMuted
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -462,7 +602,7 @@ private fun LanguagePackCard(
                         Icon(
                             imageVector = Icons.Filled.DeleteOutline,
                             contentDescription = stringResource(R.string.cd_delete_language),
-                            tint = TextMuted,
+                            tint = Color.White,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -483,9 +623,17 @@ private fun StatusPill(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(
-                if (accent == NeonEmerald) NeonEmeraldContainer else accent.copy(alpha = 0.16f)
+                when (accent) {
+                    NeonEmerald -> Color(0x550E4F38)
+                    NeonAmber -> NeonAmber.copy(alpha = 0.22f)
+                    else -> Color.White.copy(alpha = 0.18f)
+                }
             )
-            .border(1.dp, accent.copy(alpha = 0.65f), RoundedCornerShape(10.dp))
+            .border(
+                1.dp,
+                if (accent == NeonAmber) NeonAmber else Color.White.copy(alpha = 0.72f),
+                RoundedCornerShape(10.dp)
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 7.dp)
             .testTag(testTag),
@@ -496,14 +644,15 @@ private fun StatusPill(
             Icon(
                 imageVector = Icons.Filled.CheckCircle,
                 contentDescription = null,
-                tint = NeonEmerald,
+                tint = Color.White,
                 modifier = Modifier.size(14.dp)
             )
         }
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = accent
+            fontWeight = FontWeight.Bold,
+            color = Color.White
         )
     }
 }

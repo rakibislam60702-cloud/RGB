@@ -17,12 +17,12 @@ enum class RgbEffect(
     ),
     TOUCH_SPARK(
         displayName = "Touch Spark",
-        shortLabel = "Spark",
+        shortLabel = "Touch Spark",
         description = "Stealth matte keys at rest; each key rises in its own vibrant neon color on touch"
     ),
     RAINBOW_WAVE(
         displayName = "Spectrum Wave",
-        shortLabel = "Wave",
+        shortLabel = "Spectrum Wave",
         description = "Smooth diagonal neon flow sweeping across every keycap"
     ),
     REACTIVE_RIPPLE(
@@ -30,24 +30,49 @@ enum class RgbEffect(
         shortLabel = "Ripple",
         description = "Every keypress launches a radial neon shockwave outward"
     ),
+    AI_PLASMA_VORTEX(
+        displayName = "AI Plasma Vortex",
+        shortLabel = "Plasma Vortex",
+        description = "Swirling holographic plasma currents pulsing across the keyboard deck"
+    ),
     CYBER_BREATHING(
         displayName = "Cyber Breathing",
-        shortLabel = "Breath",
-        description = "Harmonic dual-tone glow pulsing across the entire deck"
+        shortLabel = "Cyber Breath",
+        description = "Harmonic dual-tone neon glow pulsing smoothly across every key"
     ),
     MATRIX_RAIN(
         displayName = "Matrix Cascade",
         shortLabel = "Matrix",
-        description = "Digital light streams cascading vertically down key columns"
+        description = "Digital emerald light streams cascading vertically down key columns"
+    ),
+    FIREFLY_SPARKS(
+        displayName = "Firefly Sparks",
+        shortLabel = "Firefly",
+        description = "Warm enchanted firefly glimmers drifting organically across the keys"
+    ),
+    AURORA_FLOW(
+        displayName = "Aurora Flow",
+        shortLabel = "Aurora",
+        description = "Northern lights silk ribbons undulating smoothly across the deck"
     ),
     STARLIGHT(
         displayName = "Starlight Embers",
-        shortLabel = "Stars",
-        description = "Sparkling per-key constellations shimmering organically"
+        shortLabel = "Starlight",
+        description = "Sparkling per-key cosmic constellations shimmering organically"
+    ),
+    LIGHTNING_ARC(
+        displayName = "Thunder Lightning",
+        shortLabel = "Lightning",
+        description = "High-voltage electric cyan bolts cracking across the key matrix"
+    ),
+    NEON_HEARTBEAT(
+        displayName = "Love Heart Glow",
+        shortLabel = "Heart Glow",
+        description = "Romantic rose-magenta dual heartbeat waves radiating from center"
     ),
     STATIC_NEON(
         displayName = "Static Prism",
-        shortLabel = "Static",
+        shortLabel = "Static Prism",
         description = "Crisp locked multi-zone studio lighting with zero motion"
     );
 
@@ -243,7 +268,7 @@ enum class KeyboardLanguage(
 data class KeyboardSettings(
     val language: KeyboardLanguage = KeyboardLanguage.ENGLISH,
     val activeLanguageId: String = LanguageCatalog.ENGLISH_ID,
-    val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID, "bn", "hi"),
+    val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID, LanguageCatalog.BANGLISH_ID, "bn", "hi"),
     val effect: RgbEffect = RgbEffect.TOUCH_SPARK,
     val palette: RgbPalette = RgbPalette.VICE_CITY_NEON,
     val keycapStyle: KeycapStyle = KeycapStyle.PUDDING,

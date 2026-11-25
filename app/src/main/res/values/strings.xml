@@ -40,8 +40,14 @@
     <string name="quick_palettes_label">COLOR SPECTRUM</string>
 
     <!-- Effects Tab -->
-    <string name="effects_header">Lighting Studio</string>
-    <string name="effects_subtitle">Customize real-time shaders, palettes, and keycap optics.</string>
+    <string name="effects_header">Themes &amp; AI Lighting</string>
+    <string name="effects_subtitle">1-tap Photo + AI Animation combos, pure RGB effects, and HD static banners.</string>
+    <string name="section_theme_combos">🔥 1-Tap Photo + AI Animation Combos</string>
+    <string name="section_theme_combos_sub">All-in-One ready themes — applies HD art &amp; matching RGB animation in 1 tap</string>
+    <string name="section_animations_only">✨ AI Lighting Animations Only</string>
+    <string name="section_animations_only_sub">Pure live RGB lighting animations with zero background photo</string>
+    <string name="section_static_banners">🖼️ HD Photo Banners Only (No Animation)</string>
+    <string name="section_static_banners_sub">Pure static HD artwork banners or pick your own custom gallery photo</string>
     <string name="section_lighting_mode">Lighting Animation</string>
     <string name="section_color_palette">RGB Color Palette</string>
     <string name="section_keycap_style">Keycap Architecture</string>
@@ -131,6 +137,7 @@
     <string name="voice_listening_bn">🎙️ শোনা যাচ্ছে... (বলুন)</string>
     <string name="voice_listening_en">🎙️ শোনা যাচ্ছে... (বলুন)</string>
     <string name="voice_listening_hi">🎙️ শোনা যাচ্ছে... (বলুন)</string>
+    <string name="voice_locked_continuous_bn">🔒 ভয়েস লক চালু • বন্ধ করতে মাইকে ট্যাপ করুন</string>
     <string name="voice_tap_to_speak">Tap mic to speak directly</string>
     <string name="voice_permission_needed">Microphone permission required for voice typing</string>
     <string name="voice_error_retry">Could not hear clearly — tap mic to retry</string>
@@ -138,6 +145,9 @@
     <!-- Instant RGB Neon Text Stickers & Smart Suggestions -->
     <string name="chip_rgb_sticker">✨ RGB Sticker</string>
     <string name="chip_rgb_sticker_vip_locked">🔒 VIP • RGB Sticker</string>
+    <string name="chip_bangla_to_banglish">বাংলা → বাংলিশ</string>
+    <string name="chip_bangla_to_banglish_preview">বাংলা → বাংলিশ: %1$s</string>
+    <string name="chip_bangla_to_banglish_paste">বাংলা → বাংলিশ (Paste)</string>
     <string name="sticker_selector_title">✨ RGB Sticker Style</string>
     <string name="sticker_selector_tap_hint">যেকোনো স্টাইলে ট্যাপ করলেই স্টিকার সেন্ড হবে</string>
     <string name="sticker_preview_title">✨ RGB Neon Text Sticker</string>
@@ -148,6 +158,7 @@
     <string name="toolbar_ai_hub">✨ AI</string>
     <string name="toolbar_ai_hub_locked">🔒 AI</string>
     <string name="toolbar_stylish_fonts">Aa</string>
+    <string name="toolbar_stylish_fonts_locked">🔒 Aa</string>
     <string name="cd_ai_hub">AI Shayari and Smart Reply Hub</string>
     <string name="cd_stylish_fonts">Stylish Unicode Fonts</string>
     <string name="stylish_fonts_title">Aa Stylish Fonts</string>
@@ -159,6 +170,12 @@
     <!-- 3-Stage Onboarding: Silent Feature Tour & 3-Second Auto-Disappearing Final VIP Banner -->
     <string name="tour_skip_button">Skip ✕</string>
     <string name="tour_tap_pointed_area_hint">এগোতে চিহ্নিত জায়গায় ট্যাপ করুন</string>
+    <string name="tour_step_enable_title">১. AI Keyboard চালু করুন</string>
+    <string name="tour_step_enable_desc">এখানে ট্যাপ করে Android সেটিংস থেকে AI Keyboard অন করুন।</string>
+    <string name="tour_step_select_title">২. AI Keyboard সিলেক্ট করুন</string>
+    <string name="tour_step_select_desc">তালিকা থেকে AI Keyboard বেছে নিলেই সব অ্যাপে কাজ করবে।</string>
+    <string name="tour_step_languages_title">🌐 আরও ভাষা যোগ করুন</string>
+    <string name="tour_step_languages_desc">ডিফল্ট English (EN) চালু আছে — এখান থেকে বাংলিশ, বাংলা বা हिन्दी যোগ করুন।</string>
     <string name="tour_step_1_title">✨ AI শায়ারি ও স্মার্ট রিপ্লাই</string>
     <string name="tour_step_1_desc">১৬০+ বাংলা ও ইংরেজি শায়ারি এবং নিজের বিষয় লিখে অটো শায়ারি তৈরি করুন।</string>
     <string name="tour_step_2_title">✨ RGB Neon Sticker</string>
@@ -169,7 +186,7 @@
     <string name="tour_step_4_desc">🎙️ চেপে সরাসরি মুখে বলুন আর স্পেসবারের পাশে 🌐 চেপে বাংলা, EN ও हिन्दी বদলান।</string>
     <string name="tour_step_5_title">Touch Spark RGB কিবোর্ড</string>
     <string name="tour_step_5_desc">প্রতিটি বাটনে চাপলেই জ্বলবে দারুণ Touch Spark নিয়ন আলো!</string>
-    <string name="tour_final_vip_banner_text">👑 চাইলে Lifetime VIP নিতে পারেন (প্রথম ৭ দিন সম্পূর্ণ ফ্রি!)</string>
+    <string name="tour_final_vip_banner_text">👑 চাইলে VIP নিতে পারেন (প্রথম %1$s দিন সম্পূর্ণ ফ্রি!)</string>
 
     <!-- Minimalist Bangla Setup Cards & Interactive Bangla Voice Guide -->
     <string name="bn_setup_step_1_title">১. AI Keyboard চালু করুন</string>
@@ -209,17 +226,17 @@
     <string name="bn_free_standard_badge">🔒 VIP · ₹20</string>
     <string name="bn_lifetime_unlocked_badge">LIFETIME VIP ✓</string>
     <string name="bn_unlock_now_chip">₹20 VIP</string>
-    <string name="bn_upi_qr_title">অথবা যেকোনো UPI অ্যাপ দিয়ে QR স্ক্যান করুন (₹20)</string>
-    <string name="bn_upi_qr_caption">₹20 · Instant UPI Lifetime VIP</string>
+    <string name="bn_upi_qr_title">অথবা যেকোনো UPI অ্যাপ দিয়ে QR স্ক্যান করুন (₹%1$d)</string>
+    <string name="bn_upi_qr_caption">₹%1$d · %2$s · Instant UPI VIP</string>
     <string name="bn_upi_chooser_title">PhonePe বা Google Pay বেছে নিন</string>
     <string name="bn_demo_preview_tag">🔒 VIP প্রিভিউ মোড · টেস্ট করুন ফ্রি</string>
     <string name="bn_demo_preview_effects_desc">লক করা (🔒 VIP) সব RGB লাইট, Vice City ব্যানার ও কাস্টম ফটো এখানে ফ্রি টেস্ট করুন — আসল কিবোর্ডে সেট করতে Save / Apply চাপুন।</string>
     <string name="bn_btn_apply_to_keyboard">Save / Apply to Keyboard</string>
-    <string name="bn_btn_apply_to_real_keyboard">🔒 Save / Apply to Keyboard (₹20 Lifetime VIP)</string>
-    <string name="bn_unlock_screen_title">Rakib official · Lifetime VIP</string>
-    <string name="bn_unlock_expired_message">আপনার ৭ দিনের ফ্রি VIP ট্রায়াল শেষ হয়েছে! আপনার কিবোর্ড এখন Classic Black (No RGB) ফ্রি মোডে চলছে। সব RGB লাইট, ✨ AI শায়ারি হাব, Vice City থিম ও কাস্টম ফটো আনলক করতে এককালীন মাত্র ₹20 পেমেন্ট করুন।</string>
-    <string name="bn_unlock_active_trial_message">এককালীন মাত্র ₹20 পেমেন্টে Touch Spark RGB লাইট, ✨ AI শায়ারি হাব, Vice City থিম ও কাস্টম ফটো চিরজীবনের জন্য আনলক করুন।</string>
-    <string name="bn_btn_upi_pay">PhonePe / GPay দিয়ে ₹20 পেমেন্ট করুন</string>
+    <string name="bn_btn_apply_to_real_keyboard">🔒 Save / Apply to Keyboard (VIP)</string>
+    <string name="bn_unlock_screen_title">Rakib official · VIP</string>
+    <string name="bn_unlock_expired_message">আপনার %1$s দিনের ফ্রি VIP ট্রায়াল শেষ হয়েছে! আপনার কিবোর্ড এখন Classic Black (No RGB) ফ্রি মোডে চলছে। সব RGB লাইট, ✨ AI শায়ারি হাব, বাংলিশ, কল বার ও থিম আনলক করতে মাত্র %2$s পেমেন্ট করুন।</string>
+    <string name="bn_unlock_active_trial_message">মাত্র %1$s পেমেন্টে Touch Spark RGB লাইট, ✨ AI শায়ারি হাব, বাংলিশ, কল বার ও সব থিম আনলক করুন।</string>
+    <string name="bn_btn_upi_pay">PhonePe / GPay দিয়ে ₹%1$d পেমেন্ট করুন</string>
     <string name="bn_owner_pin_helper_link">পেমেন্ট সফল হয়েছে কিন্তু আনলক হয়নি? মালিকের পিন দিয়ে খুলুন</string>
     <string name="bn_device_id_label">আপনার ডিভাইস আইডি (Device ID)</string>
     <string name="bn_device_id_copied">ডিভাইস আইডি কপি করা হয়েছে</string>

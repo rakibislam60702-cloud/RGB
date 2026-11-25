@@ -119,7 +119,7 @@ class KeyboardPreferencesRepository private constructor(
     }
 
     suspend fun setLanguageEnabled(langId: String, enabled: Boolean) {
-        if (langId == LanguageCatalog.ENGLISH_ID) return
+        if (LanguageCatalog.isBuiltInId(langId)) return
         context.rgbKeyboardDataStore.edit { prefs ->
             val list = parseEnabledLanguageIds(prefs[Keys.ENABLED_LANGUAGE_IDS]).toMutableList()
             if (enabled) {
@@ -135,11 +135,17 @@ class KeyboardPreferencesRepository private constructor(
         }
     }
 
-    suspend fun cycleActiveLanguage(downloadedIds: Set<String>): String {
+    suspend fun cycleActiveLanguage(
+        downloadedIds: Set<String>,
+        includeVipLanguages: Boolean = true
+    ): String {
         var chosen = LanguageCatalog.ENGLISH_ID
         context.rgbKeyboardDataStore.edit { prefs ->
             val enabled = parseEnabledLanguageIds(prefs[Keys.ENABLED_LANGUAGE_IDS])
-                .filter { it == LanguageCatalog.ENGLISH_ID || it in downloadedIds }
+                .filter {
+                    (LanguageCatalog.isBuiltInId(it) || it in downloadedIds) &&
+                        (includeVipLanguages || it != LanguageCatalog.BANGLISH_ID)
+                }
                 .ifEmpty { listOf(LanguageCatalog.ENGLISH_ID) }
             val current = prefs[Keys.ACTIVE_LANGUAGE_ID] ?: LanguageCatalog.ENGLISH_ID
             val idx = enabled.indexOf(current)
@@ -152,7 +158,7 @@ class KeyboardPreferencesRepository private constructor(
 
     private fun parseEnabledLanguageIds(raw: String?): List<String> {
         if (raw == null) {
-            return listOf(LanguageCatalog.ENGLISH_ID, "bn", "hi")
+            return listOf(LanguageCatalog.ENGLISH_ID, LanguageCatalog.BANGLISH_ID, "bn", "hi")
         }
         val parsed = raw
             .split(",")
@@ -162,6 +168,9 @@ class KeyboardPreferencesRepository private constructor(
             .toMutableList()
         if (LanguageCatalog.ENGLISH_ID !in parsed) {
             parsed.add(0, LanguageCatalog.ENGLISH_ID)
+        }
+        if (LanguageCatalog.BANGLISH_ID !in parsed) {
+            parsed.add(1, LanguageCatalog.BANGLISH_ID)
         }
         return parsed
     }

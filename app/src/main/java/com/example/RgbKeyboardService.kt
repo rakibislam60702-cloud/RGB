@@ -14,13 +14,17 @@ import android.inputmethodservice.InputMethodService
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
 import android.widget.BaseAdapter
@@ -39,6 +43,7 @@ import com.example.data.KeyboardPreferencesRepository
 import com.example.data.LanguagePackManager
 import com.example.data.LicenseUiState
 import com.example.data.TrialLicenseManager
+import com.example.engine.BengaliTransliterator
 import com.example.engine.GeneratedShayariResult
 import com.example.engine.MechanicalFeedbackEngine
 import com.example.engine.OnlineVoiceTypingController
@@ -56,8 +61,10 @@ import com.example.model.LanguageCatalog
 import com.example.rgbkeyboard.RgbKeyboardView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -148,20 +155,49 @@ class RgbKeyboardService : InputMethodService() {
     private var aiGenerationSeed: Int = 0
 
     private var lastSpaceTapTimeMs: Long = 0L
+    private var emojiBackspaceHoldStartMs: Long = 0L
+    private var micLockTriggeredDuringPress: Boolean = false
+    private var micWasListeningOnDown: Boolean = false
     private var latestVoiceState = OnlineVoiceTypingController.VoiceListeningState()
     private var hasActiveVoiceComposing: Boolean = false
+    private val banglishRawBengaliBuffer = StringBuilder()
+    private var banglishWordPrefixContext: String = ""
     private var isGeneratingSticker: Boolean = false
     private var bengaliTypeface: Typeface? = null
+
+    // Zero-lag typing caches & background jobs
+    private var lastVipSyncMs: Long = 0L
+    private var suggestionJob: Job? = null
+    private var lastRenderedSuggestions: List<String> = emptyList()
+    private var lastRenderedStickerPhrase: String = ""
+    private var lastRenderedVipState: Boolean? = null
+    private var lastRenderedSmartEnabled: Boolean? = null
+    private var lastRenderedBanglaChipLabel: String = ""
+    private var lastRenderedLangId: String = ""
 
     private enum class OverlayMode { NONE, CLIPBOARD, FONTS, EMOJI, STICKER_SELECTOR, AI_HUB }
 
     private val emojiBackspaceRepeatRunnable = object : Runnable {
         override fun run() {
-            if (isEmojiBackspaceRepeating) {
+            if (!isEmojiBackspaceRepeating) return
+            val heldMs = SystemClock.uptimeMillis() - emojiBackspaceHoldStartMs
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            if (heldMs >= BACKSPACE_WORD_ACCEL_MS) {
+                handleDeletePreviousWord()
+                uiHandler.postDelayed(this, BACKSPACE_WORD_INTERVAL_MS)
+            } else {
                 handleBackspace()
-                feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-                uiHandler.postDelayed(this, 65L)
+                uiHandler.postDelayed(this, BACKSPACE_CHAR_INTERVAL_MS)
             }
+        }
+    }
+
+    private val micHoldLockRunnable = Runnable {
+        if (!micWasListeningOnDown) {
+            micLockTriggeredDuringPress = true
+            btnMic?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            startVoiceTyping(lockedContinuous = true)
         }
     }
 
@@ -182,17 +218,26 @@ class RgbKeyboardService : InputMethodService() {
         }.getOrNull()
 
         voiceController = OnlineVoiceTypingController(
-            context = applicationContext,
+            context = this,
             onStateChanged = { state ->
                 latestVoiceState = state
                 uiHandler.post { renderVoiceState(state) }
             },
             onPartialText = { partial ->
                 uiHandler.post {
-                    val ic = currentInputConnection
-                    if (ic != null && partial.isNotBlank()) {
-                        hasActiveVoiceComposing = true
-                        ic.setComposingText(partial, 1)
+                    if (partial.isNotBlank()) {
+                        clearBanglishBuffer(finishComposing = false)
+                        val cleanPartial = if (currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID &&
+                            BengaliTransliterator.containsBengaliScript(partial)
+                        ) {
+                            BengaliTransliterator.transliterate(partial, capitalizeSentences = true)
+                        } else {
+                            partial
+                        }
+                        withSafeInputConnection { ic ->
+                            hasActiveVoiceComposing = true
+                            ic.setComposingText(cleanPartial, 1)
+                        }
                         refreshSuggestions()
                     }
                 }
@@ -200,12 +245,23 @@ class RgbKeyboardService : InputMethodService() {
             onFinalText = { spokenText ->
                 uiHandler.post {
                     hasActiveVoiceComposing = false
-                    SmartWordPredictor.learnFromCompletedInput(
-                        applicationContext,
-                        spokenText,
-                        currentSettings.activeLanguageId
-                    )
-                    handleCommitText("$spokenText ")
+                    clearBanglishBuffer(finishComposing = false)
+                    val langId = currentSettings.activeLanguageId
+                    val cleanSpoken = if (langId == LanguageCatalog.BANGLISH_ID &&
+                        BengaliTransliterator.containsBengaliScript(spokenText)
+                    ) {
+                        BengaliTransliterator.transliterate(spokenText, capitalizeSentences = true)
+                    } else {
+                        spokenText
+                    }
+                    serviceScope.launch(Dispatchers.Default) {
+                        SmartWordPredictor.learnFromCompletedInput(
+                            applicationContext,
+                            cleanSpoken,
+                            langId
+                        )
+                    }
+                    handleCommitText("$cleanSpoken ")
                 }
             }
         )
@@ -328,6 +384,13 @@ class RgbKeyboardService : InputMethodService() {
                 }
             }
         }
+        rgbView.onDeleteWordAction = {
+            if (isAiTopicTypingMode) {
+                handleAiTopicKeyInput("DEL")
+            } else {
+                handleDeletePreviousWord()
+            }
+        }
         rgbView.onCursorMove = { steps ->
             if (!isAiTopicTypingMode) handleCursorMove(steps)
         }
@@ -357,26 +420,59 @@ class RgbKeyboardService : InputMethodService() {
             setOverlay(if (activeOverlay == OverlayMode.CLIPBOARD) OverlayMode.NONE else OverlayMode.CLIPBOARD)
         }
 
-        // 3. Stylish Fonts (Aa) -> Unicode Stylish Font Picker
+        // 3. Stylish Fonts (Aa) -> Unicode Stylish Font Picker (VIP-gated after trial; respects remote overrides)
         btnStylishFonts?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            val latestLicense = trialLicenseManager.refreshState()
+            currentLicenseState = latestLicense
+            if (!latestLicense.isStylishFontsUnlocked) {
+                activeStylishFont = StylishFontStyle.NORMAL
+                handleOpenUnlockScreen()
+                return@setOnClickListener
+            }
             isAiTopicTypingMode = false
             setOverlay(if (activeOverlay == OverlayMode.FONTS) OverlayMode.NONE else OverlayMode.FONTS)
         }
 
-        // 4. Voice Mic -> Direct Same-Language SpeechRecognizer (bn-BD / en-IN / hi-IN)
-        btnMic?.setOnClickListener {
-            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
-            isAiTopicTypingMode = false
-            handleOnlineVoiceTyping()
+        // 4. Voice Mic -> Tap (< 600ms) for single-sentence voice typing, Hold (>= 600ms) for Hands-Free Continuous Lock
+        btnMic?.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    isAiTopicTypingMode = false
+                    micLockTriggeredDuringPress = false
+                    micWasListeningOnDown = voiceController.isCurrentlyListening()
+                    uiHandler.removeCallbacks(micHoldLockRunnable)
+                    if (!micWasListeningOnDown) {
+                        uiHandler.postDelayed(micHoldLockRunnable, VOICE_LOCK_HOLD_MS)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    uiHandler.removeCallbacks(micHoldLockRunnable)
+                    v.performClick()
+                    if (micWasListeningOnDown) {
+                        feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                        stopVoiceTyping()
+                    } else if (!micLockTriggeredDuringPress) {
+                        feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                        startVoiceTyping(lockedContinuous = false)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    uiHandler.removeCallbacks(micHoldLockRunnable)
+                    true
+                }
+                else -> false
+            }
         }
 
-        // 5. Single Unified ✨ AI Hub Button (Unlocked during 7-day trial & Lifetime VIP; 🔒 VIP after 7 days)
+        // 5. Single Unified ✨ AI Hub Button (Respects remote aiHub free/device overrides)
         btnAiHub?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
             val latestLicense = trialLicenseManager.refreshState()
             currentLicenseState = latestLicense
-            if (!latestLicense.isVipActive) {
+            if (!latestLicense.isAiHubUnlocked) {
                 handleOpenUnlockScreen()
                 return@setOnClickListener
             }
@@ -420,13 +516,13 @@ class RgbKeyboardService : InputMethodService() {
         btnVoiceStop?.setOnClickListener {
             feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
             if (hasActiveVoiceComposing) {
-                currentInputConnection?.setComposingText("", 1)
-                currentInputConnection?.finishComposingText()
+                withSafeInputConnection { ic ->
+                    ic.setComposingText("", 1)
+                    ic.finishComposingText()
+                }
                 hasActiveVoiceComposing = false
             }
-            voiceController.stopListening()
-            voiceBar?.visibility = View.GONE
-            updateToolbarTints()
+            stopVoiceTyping()
             refreshSuggestions()
         }
 
@@ -454,7 +550,9 @@ class RgbKeyboardService : InputMethodService() {
                     handleBackspace()
                     feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
                     isEmojiBackspaceRepeating = true
-                    uiHandler.postDelayed(emojiBackspaceRepeatRunnable, 380L)
+                    emojiBackspaceHoldStartMs = SystemClock.uptimeMillis()
+                    uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
+                    uiHandler.postDelayed(emojiBackspaceRepeatRunnable, BACKSPACE_INITIAL_DELAY_MS)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -483,14 +581,35 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        clearBanglishBuffer(finishComposing = false)
         clipboardManager.captureCurrentPrimaryClip()
-        syncSystemSubtype()
+        // Keep DataStore activeLanguageId as single source of truth so Bangla ('bn') never reverts to English!
+        keyboardView?.setActiveLanguage(currentSettings.activeLanguageId)
+        val inputClass = (info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS
+        val isNumericField = inputClass == InputType.TYPE_CLASS_NUMBER ||
+            inputClass == InputType.TYPE_CLASS_PHONE
+        keyboardView?.setNumberPadMode(isNumericField)
         val actionId = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         keyboardView?.setSearchAction(actionId == EditorInfo.IME_ACTION_SEARCH)
         keyboardView?.updatePhotoTheme(customBackgroundManager.getCurrentTheme())
+        keyboardView?.resumeAnimations()
         currentLicenseState = trialLicenseManager.refreshState()
+        lastVipSyncMs = SystemClock.uptimeMillis()
         applyTrialLockState()
-        refreshSuggestions()
+        refreshSuggestions(immediate = true)
+    }
+
+    override fun onWindowShown() {
+        super.onWindowShown()
+        keyboardView?.resumeAnimations()
+    }
+
+    override fun onWindowHidden() {
+        super.onWindowHidden()
+        keyboardView?.pauseAnimations()
+        isEmojiBackspaceRepeating = false
+        uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
+        uiHandler.removeCallbacks(micHoldLockRunnable)
     }
 
     override fun onUpdateSelection(
@@ -509,14 +628,22 @@ class RgbKeyboardService : InputMethodService() {
             candidatesStart,
             candidatesEnd
         )
+        if (banglishRawBengaliBuffer.isNotEmpty() &&
+            candidatesStart >= 0 &&
+            (newSelStart < candidatesStart || newSelEnd > candidatesEnd)
+        ) {
+            clearBanglishBuffer(finishComposing = true)
+        }
         refreshSuggestions()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         stopStickerPulseAnimation()
+        keyboardView?.pauseAnimations()
+        clearBanglishBuffer(finishComposing = true)
         if (hasActiveVoiceComposing) {
-            currentInputConnection?.finishComposingText()
+            withSafeInputConnection { it.finishComposingText() }
             hasActiveVoiceComposing = false
         }
         if (::voiceController.isInitialized && voiceController.isCurrentlyListening()) {
@@ -525,6 +652,7 @@ class RgbKeyboardService : InputMethodService() {
         voiceBar?.visibility = View.GONE
         isEmojiBackspaceRepeating = false
         uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
+        uiHandler.removeCallbacks(micHoldLockRunnable)
     }
 
     override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype?) {
@@ -532,10 +660,15 @@ class RgbKeyboardService : InputMethodService() {
         val locale = newSubtype?.locale
         if (!locale.isNullOrBlank()) {
             val langId = LanguageCatalog.idFromLocale(locale)
-            if (langId == LanguageCatalog.ENGLISH_ID || languagePackManager.isDownloaded(langId)) {
-                if (langId != currentSettings.activeLanguageId) {
-                    serviceScope.launch { preferencesRepository.updateActiveLanguage(langId) }
-                }
+            // Only honor explicit non-English system subtype switches; never let default en_US overwrite Bangla/Banglish/Hindi
+            if (langId != LanguageCatalog.ENGLISH_ID &&
+                (LanguageCatalog.isBuiltInId(langId) || languagePackManager.isDownloaded(langId)) &&
+                langId != currentSettings.activeLanguageId
+            ) {
+                currentSettings = currentSettings.copy(activeLanguageId = langId)
+                updateKeyboardHeightForLanguage(langId)
+                keyboardView?.setActiveLanguage(langId)
+                serviceScope.launch(Dispatchers.IO) { preferencesRepository.updateActiveLanguage(langId) }
             }
         }
     }
@@ -607,16 +740,41 @@ class RgbKeyboardService : InputMethodService() {
     private fun applyTrialLockState() {
         trialLockPanel?.visibility = View.GONE
         topBar?.visibility = if (currentSettings.showToolbar) View.VISIBLE else View.GONE
-        if (!currentLicenseState.isVipActive && (activeOverlay == OverlayMode.AI_HUB || activeOverlay == OverlayMode.STICKER_SELECTOR)) {
+        if (!currentLicenseState.isStylishFontsUnlocked) {
+            activeStylishFont = StylishFontStyle.NORMAL
+            if (activeOverlay == OverlayMode.FONTS) {
+                activeOverlay = OverlayMode.NONE
+                stylishFontPanel?.visibility = View.GONE
+                keyboardView?.visibility = View.VISIBLE
+            }
+        }
+        // Strictly lock Banglish (BN-EN) when expired & not overridden: auto-revert to free English typing
+        if (!currentLicenseState.isBanglishUnlocked &&
+            currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID
+        ) {
+            currentSettings = currentSettings.copy(activeLanguageId = LanguageCatalog.ENGLISH_ID)
+            updateKeyboardHeightForLanguage(LanguageCatalog.ENGLISH_ID)
+            keyboardView?.setActiveLanguage(LanguageCatalog.ENGLISH_ID)
+            serviceScope.launch(Dispatchers.IO) {
+                preferencesRepository.updateActiveLanguage(LanguageCatalog.ENGLISH_ID)
+            }
+        }
+        if (!currentLicenseState.isAiHubUnlocked &&
+            (activeOverlay == OverlayMode.AI_HUB || isAiTopicTypingMode)
+        ) {
             isAiTopicTypingMode = false
             activeOverlay = OverlayMode.NONE
             aiHubPanel?.visibility = View.GONE
-            stickerPanel?.visibility = View.GONE
             aiTopicTypingBar?.visibility = View.GONE
             keyboardView?.visibility = View.VISIBLE
         }
+        if (!currentLicenseState.isRgbStickerUnlocked && activeOverlay == OverlayMode.STICKER_SELECTOR) {
+            activeOverlay = OverlayMode.NONE
+            stickerPanel?.visibility = View.GONE
+            keyboardView?.visibility = View.VISIBLE
+        }
         suggestionBar?.visibility = if (activeOverlay == OverlayMode.NONE && !isAiTopicTypingMode) View.VISIBLE else View.GONE
-        keyboardView?.setVipVisualsEnabled(currentLicenseState.isVipActive)
+        keyboardView?.setVipVisualsEnabled(currentLicenseState.isRgbThemesUnlocked)
         updateToolbarTints()
         refreshSuggestions()
     }
@@ -636,7 +794,9 @@ class RgbKeyboardService : InputMethodService() {
         keyboardView?.visibility = if (mode == OverlayMode.NONE) View.VISIBLE else View.GONE
         suggestionBar?.visibility = if (mode == OverlayMode.NONE && !isAiTopicTypingMode) View.VISIBLE else View.GONE
         if (mode == OverlayMode.EMOJI) {
-            btnEmojiClose?.text = if (currentSettings.activeLanguageId == "bn") "কখগ" else "ABC"
+            btnEmojiClose?.text = if (currentSettings.activeLanguageId == "bn" ||
+                currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID
+            ) "কখগ" else "ABC"
         }
         if (mode == OverlayMode.AI_HUB) {
             renderAiHubPanel()
@@ -677,8 +837,20 @@ class RgbKeyboardService : InputMethodService() {
         } else {
             null
         }
-        val fontsHighlighted = activeOverlay == OverlayMode.FONTS || activeStylishFont != StylishFontStyle.NORMAL
-        btnStylishFonts?.setTextColor(if (fontsHighlighted) activeCyan else Color.parseColor("#E2E8F0"))
+        val isFontsVip = currentLicenseState.isStylishFontsUnlocked
+        val fontsHighlighted = isFontsVip && (activeOverlay == OverlayMode.FONTS || activeStylishFont != StylishFontStyle.NORMAL)
+        btnStylishFonts?.text = if (isFontsVip) {
+            getString(R.string.toolbar_stylish_fonts)
+        } else {
+            getString(R.string.toolbar_stylish_fonts_locked)
+        }
+        btnStylishFonts?.setTextColor(
+            when {
+                !isFontsVip -> Color.parseColor("#FFCF70")
+                fontsHighlighted -> activeCyan
+                else -> Color.parseColor("#E2E8F0")
+            }
+        )
         btnStylishFonts?.background = if (fontsHighlighted) {
             GradientDrawable().apply {
                 setColor(Color.parseColor("#132838"))
@@ -688,17 +860,21 @@ class RgbKeyboardService : InputMethodService() {
         } else {
             null
         }
-        btnMic?.setColorFilter(if (latestVoiceState.isListening) activeVoice else defaultTint, PorterDuff.Mode.SRC_IN)
-
-        val isVip = currentLicenseState.isVipActive
+        val micTint = when {
+            latestVoiceState.isListening && latestVoiceState.isLockedContinuous -> Color.parseColor("#FFB800")
+            latestVoiceState.isListening -> activeVoice
+            else -> defaultTint
+        }
+        btnMic?.setColorFilter(micTint, PorterDuff.Mode.SRC_IN)
+        val isAiVip = currentLicenseState.isAiHubUnlocked
         val aiActive = activeOverlay == OverlayMode.AI_HUB || isAiTopicTypingMode
         btnAiHub?.apply {
-            text = if (isVip) getString(R.string.toolbar_ai_hub) else getString(R.string.toolbar_ai_hub_locked)
-            setTextColor(if (isVip) Color.WHITE else Color.parseColor("#FFCF70"))
+            text = if (isAiVip) getString(R.string.toolbar_ai_hub) else getString(R.string.toolbar_ai_hub_locked)
+            setTextColor(if (isAiVip) Color.WHITE else Color.parseColor("#FFCF70"))
             background = GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 when {
-                    !isVip -> intArrayOf(Color.parseColor("#2E1528"), Color.parseColor("#2A1D12"))
+                    !isAiVip -> intArrayOf(Color.parseColor("#2E1528"), Color.parseColor("#2A1D12"))
                     aiActive -> intArrayOf(Color.parseColor("#FF2A85"), Color.parseColor("#00B4D8"))
                     else -> intArrayOf(Color.parseColor("#D81B60"), Color.parseColor("#FF8F00"))
                 }
@@ -707,7 +883,7 @@ class RgbKeyboardService : InputMethodService() {
                 setStroke(
                     (1.2f * density).toInt(),
                     when {
-                        !isVip -> Color.parseColor("#FF9E00")
+                        !isAiVip -> Color.parseColor("#FF9E00")
                         aiActive -> activeCyan
                         else -> Color.parseColor("#FF79B0")
                     }
@@ -803,19 +979,8 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
-    private fun handleOnlineVoiceTyping() {
+    private fun startVoiceTyping(lockedContinuous: Boolean) {
         syncVipVisualsQuietly()
-        if (voiceController.isCurrentlyListening()) {
-            if (hasActiveVoiceComposing) {
-                currentInputConnection?.finishComposingText()
-                hasActiveVoiceComposing = false
-            }
-            voiceController.stopListening()
-            voiceBar?.visibility = View.GONE
-            updateToolbarTints()
-            return
-        }
-
         if (!voiceController.hasAudioPermission()) {
             voiceBar?.visibility = View.VISIBLE
             tvVoiceStatus?.text = getString(R.string.voice_permission_needed)
@@ -826,7 +991,17 @@ class RgbKeyboardService : InputMethodService() {
 
         val activeLocale = OnlineVoiceTypingController.localeForLanguageId(currentSettings.activeLanguageId)
         voiceBar?.visibility = View.VISIBLE
-        voiceController.startListening(activeLocale)
+        voiceController.startListening(activeLocale, lockedContinuous = lockedContinuous)
+    }
+
+    private fun stopVoiceTyping() {
+        if (hasActiveVoiceComposing) {
+            withSafeInputConnection { it.finishComposingText() }
+            hasActiveVoiceComposing = false
+        }
+        voiceController.stopListening()
+        voiceBar?.visibility = View.GONE
+        updateToolbarTints()
     }
 
     private fun renderVoiceState(state: OnlineVoiceTypingController.VoiceListeningState) {
@@ -835,6 +1010,15 @@ class RgbKeyboardService : InputMethodService() {
         tvVoiceStatus?.typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
 
         when {
+            state.isListening && state.isLockedContinuous -> {
+                voiceBar?.visibility = View.VISIBLE
+                tvVoiceStatus?.setTextColor(Color.parseColor("#FFD166"))
+                tvVoiceStatus?.text = if (state.partialTranscript.isNotBlank()) {
+                    "🔒 ${state.partialTranscript}"
+                } else {
+                    getString(R.string.voice_locked_continuous_bn)
+                }
+            }
             state.isListening -> {
                 voiceBar?.visibility = View.VISIBLE
                 tvVoiceStatus?.setTextColor(Color.parseColor("#00F5D4"))
@@ -846,7 +1030,7 @@ class RgbKeyboardService : InputMethodService() {
             }
             !state.errorMessage.isNullOrBlank() -> {
                 if (hasActiveVoiceComposing) {
-                    currentInputConnection?.finishComposingText()
+                    withSafeInputConnection { it.finishComposingText() }
                     hasActiveVoiceComposing = false
                 }
                 voiceBar?.visibility = View.VISIBLE
@@ -855,7 +1039,7 @@ class RgbKeyboardService : InputMethodService() {
             }
             else -> {
                 if (hasActiveVoiceComposing) {
-                    currentInputConnection?.finishComposingText()
+                    withSafeInputConnection { it.finishComposingText() }
                     hasActiveVoiceComposing = false
                 }
                 voiceBar?.visibility = View.GONE
@@ -863,31 +1047,183 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
+    /**
+     * Launches a tiny transparent PermissionRequestActivity ONLY when RECORD_AUDIO is missing.
+     * NEVER launches MainActivity when voice typing is triggered from the keyboard.
+     */
     private fun launchAudioPermissionRequest() {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            putExtra(MainActivity.EXTRA_REQUEST_AUDIO_PERMISSION, true)
+        val intent = Intent(this, PermissionRequestActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         }
         runCatching { startActivity(intent) }
     }
 
-    private fun refreshSuggestions() {
-        val container = suggestionContainer ?: return
-        val before = runCatching {
-            currentInputConnection?.getTextBeforeCursor(80, 0)?.toString().orEmpty()
+    private fun refreshSuggestions(immediate: Boolean = false) {
+        if (suggestionContainer == null) return
+        val beforeRaw = runCatching {
+            currentInputConnection?.getTextBeforeCursor(140, 0)?.toString().orEmpty()
         }.getOrDefault("")
+        val before = if (currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID &&
+            banglishRawBengaliBuffer.isNotEmpty()
+        ) {
+            banglishWordPrefixContext + banglishRawBengaliBuffer.toString()
+        } else {
+            beforeRaw
+        }
+        val selected = runCatching {
+            currentInputConnection?.getSelectedText(0)?.toString().orEmpty()
+        }.getOrDefault("")
+        val langId = currentSettings.activeLanguageId
+        val smartEnabled = currentSettings.smartSuggestionsEnabled
+        val isVip = currentLicenseState.isRgbStickerUnlocked
+        val topClip = if (langId == LanguageCatalog.BANGLISH_ID) {
+            clipboardManager.clips.value.firstOrNull().orEmpty()
+        } else {
+            ""
+        }
 
-        val prediction = SmartWordPredictor.predict(
-            textBeforeCursor = before,
-            languageId = currentSettings.activeLanguageId,
-            context = applicationContext
-        )
+        suggestionJob?.cancel()
+        suggestionJob = serviceScope.launch(Dispatchers.Default) {
+            if (!immediate) {
+                delay(16L)
+            }
+            val prediction = SmartWordPredictor.predict(
+                textBeforeCursor = before,
+                languageId = langId,
+                context = applicationContext
+            )
+            val selectedConverted = if (langId == LanguageCatalog.BANGLISH_ID &&
+                BengaliTransliterator.containsBengaliScript(selected)
+            ) {
+                BengaliTransliterator.transliterate(selected, capitalizeSentences = true)
+            } else {
+                ""
+            }
+            val clipConverted = if (langId == LanguageCatalog.BANGLISH_ID &&
+                selectedConverted.isEmpty() &&
+                prediction.banglaConvertPreview.isEmpty() &&
+                BengaliTransliterator.containsBengaliScript(topClip)
+            ) {
+                BengaliTransliterator.transliterate(topClip, capitalizeSentences = true)
+            } else {
+                ""
+            }
+            withContext(Dispatchers.Main) {
+                renderSuggestionChips(
+                    prediction = prediction,
+                    langId = langId,
+                    smartEnabled = smartEnabled,
+                    isVip = isVip,
+                    selectedBanglaConverted = selectedConverted,
+                    clipBanglaConverted = clipConverted
+                )
+            }
+        }
+    }
+
+    private fun renderSuggestionChips(
+        prediction: SmartWordPredictor.PredictionResult,
+        langId: String,
+        smartEnabled: Boolean,
+        isVip: Boolean,
+        selectedBanglaConverted: String,
+        clipBanglaConverted: String
+    ) {
+        val container = suggestionContainer ?: return
+        val effectiveSuggestions = if (smartEnabled) prediction.suggestions else emptyList()
+        val isBanglishMode = langId == LanguageCatalog.BANGLISH_ID
+
+        val activeConvertPreview = when {
+            selectedBanglaConverted.isNotEmpty() -> selectedBanglaConverted
+            prediction.banglaConvertPreview.isNotEmpty() -> prediction.banglaConvertPreview
+            else -> ""
+        }
+        val banglaChipLabel = when {
+            !isBanglishMode -> ""
+            activeConvertPreview.isNotEmpty() -> {
+                val shortPreview = if (activeConvertPreview.length > 18) {
+                    activeConvertPreview.take(18).trimEnd() + "…"
+                } else {
+                    activeConvertPreview
+                }
+                getString(R.string.chip_bangla_to_banglish_preview, shortPreview)
+            }
+            clipBanglaConverted.isNotEmpty() -> getString(R.string.chip_bangla_to_banglish_paste)
+            else -> getString(R.string.chip_bangla_to_banglish)
+        }
+
+        if (effectiveSuggestions == lastRenderedSuggestions &&
+            prediction.stickerPhrase == lastRenderedStickerPhrase &&
+            isVip == lastRenderedVipState &&
+            smartEnabled == lastRenderedSmartEnabled &&
+            banglaChipLabel == lastRenderedBanglaChipLabel &&
+            langId == lastRenderedLangId
+        ) {
+            return
+        }
+        lastRenderedSuggestions = effectiveSuggestions
+        lastRenderedStickerPhrase = prediction.stickerPhrase
+        lastRenderedVipState = isVip
+        lastRenderedSmartEnabled = smartEnabled
+        lastRenderedBanglaChipLabel = banglaChipLabel
+        lastRenderedLangId = langId
+
         val density = resources.displayMetrics.density
         container.removeAllViews()
 
+        // 0. Strict One-Way "বাংলা → বাংলিশ" Converter Chip (active in Banglish BN-EN mode)
+        if (isBanglishMode && banglaChipLabel.isNotEmpty()) {
+            val hasPendingConvert = activeConvertPreview.isNotEmpty() || clipBanglaConverted.isNotEmpty()
+            val converterChip = TextView(this).apply {
+                text = banglaChipLabel
+                textSize = 12f
+                typeface = bengaliTypeface ?: Typeface.DEFAULT_BOLD
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(if (hasPendingConvert) Color.parseColor("#00FF88") else Color.parseColor("#7CEEFF"))
+                gravity = Gravity.CENTER
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(
+                    (11 * density).toInt(),
+                    (4 * density).toInt(),
+                    (11 * density).toInt(),
+                    (4 * density).toInt()
+                )
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    if (hasPendingConvert) {
+                        intArrayOf(Color.parseColor("#0D2F26"), Color.parseColor("#10293B"))
+                    } else {
+                        intArrayOf(Color.parseColor("#132035"), Color.parseColor("#1A1734"))
+                    }
+                ).apply {
+                    cornerRadius = 999f * density
+                    setStroke(
+                        (1.3f * density).toInt(),
+                        if (hasPendingConvert) Color.parseColor("#00FF88") else Color.parseColor("#00D4FF")
+                    )
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (28 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                    handleBanglaToBanglishChipTap(
+                        selectedConverted = selectedBanglaConverted,
+                        cursorSource = prediction.banglaConvertSource,
+                        cursorConverted = prediction.banglaConvertPreview,
+                        clipConverted = clipBanglaConverted
+                    )
+                }
+            }
+            container.addView(converterChip)
+        }
+
         // 1. Glowing "✨ RGB Sticker" chip (or "🔒 VIP • RGB Sticker" after 7-day trial expires)
         if (prediction.stickerPhrase.isNotEmpty()) {
-            val isVip = currentLicenseState.isVipActive
             val stickerChip = TextView(this).apply {
                 text = if (isVip) {
                     getString(R.string.chip_rgb_sticker)
@@ -935,12 +1271,12 @@ class RgbKeyboardService : InputMethodService() {
         }
 
         // 2. Smart Word Prediction & Next-Word Suggestion Chips (only when Smart Auto-Suggestions enabled)
-        if (currentSettings.smartSuggestionsEnabled) {
-            prediction.suggestions.forEach { suggestion ->
+        if (smartEnabled) {
+            effectiveSuggestions.forEach { suggestion ->
                 val wordChip = TextView(this).apply {
                     text = suggestion
                     textSize = 13f
-                    typeface = bengaliTypeface ?: Typeface.DEFAULT
+                    typeface = if (langId == "bn") (bengaliTypeface ?: Typeface.DEFAULT) else Typeface.DEFAULT
                     setTextColor(Color.parseColor("#F1F5FF"))
                     gravity = Gravity.CENTER
                     maxLines = 1
@@ -971,41 +1307,103 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
+    /**
+     * Strict one-way Bengali -> Romanized English converter action for "বাংলা → বাংলিশ" chip:
+     * 1. Converts selected Bengali text in-place -> Romanized English
+     * 2. Converts pasted/typed Bengali text before cursor -> Romanized English
+     * 3. Converts latest copied Bengali clipboard text -> inserts Romanized English
+     * 4. Otherwise launches direct Bengali (bn-IN) Voice-to-Banglish input!
+     */
+    private fun handleBanglaToBanglishChipTap(
+        selectedConverted: String,
+        cursorSource: String,
+        cursorConverted: String,
+        clipConverted: String
+    ) {
+        if (selectedConverted.isNotEmpty()) {
+            withSafeInputConnection { ic ->
+                ic.commitText(selectedConverted, 1)
+            }
+            refreshSuggestions(immediate = true)
+            return
+        }
+        if (cursorSource.isNotEmpty() && cursorConverted.isNotEmpty()) {
+            withSafeInputConnection { ic ->
+                ic.beginBatchEdit()
+                try {
+                    ic.deleteSurroundingText(cursorSource.length, 0)
+                    ic.commitText(cursorConverted, 1)
+                } finally {
+                    runCatching { ic.endBatchEdit() }
+                }
+            }
+            refreshSuggestions(immediate = true)
+            return
+        }
+        if (clipConverted.isNotEmpty()) {
+            handleCommitText("$clipConverted ")
+            return
+        }
+        clipboardManager.captureCurrentPrimaryClip()
+        val freshClip = clipboardManager.clips.value.firstOrNull().orEmpty()
+        if (BengaliTransliterator.containsBengaliScript(freshClip)) {
+            val converted = BengaliTransliterator.transliterate(freshClip, capitalizeSentences = true)
+            handleCommitText("$converted ")
+            return
+        }
+        startVoiceTyping(lockedContinuous = false)
+    }
+
     private fun applyWordSuggestion(word: String, replaceTokenLength: Int) {
         syncVipVisualsQuietly()
-        val ic = currentInputConnection ?: return
-        val before = runCatching {
-            ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
-        }.getOrDefault("")
-        ic.beginBatchEdit()
-        try {
-            if (replaceTokenLength > 0) {
-                ic.deleteSurroundingText(replaceTokenLength, 0)
+        var before = ""
+        val hadLiveBanglishComposing = banglishRawBengaliBuffer.isNotEmpty()
+        val livePrefix = banglishWordPrefixContext
+        withSafeInputConnection { ic ->
+            before = runCatching {
+                ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+            }.getOrDefault("")
+            ic.beginBatchEdit()
+            try {
+                if (hadLiveBanglishComposing) {
+                    banglishRawBengaliBuffer.clear()
+                    banglishWordPrefixContext = ""
+                    ic.commitText("$word ", 1)
+                } else {
+                    if (replaceTokenLength > 0) {
+                        ic.deleteSurroundingText(replaceTokenLength, 0)
+                    }
+                    ic.commitText("$word ", 1)
+                }
+            } finally {
+                runCatching { ic.endBatchEdit() }
             }
-            ic.commitText("$word ", 1)
-        } finally {
-            ic.endBatchEdit()
         }
-        val prefixWithoutToken = if (replaceTokenLength > 0 && before.length >= replaceTokenLength) {
+        val prefixWithoutToken = if (hadLiveBanglishComposing) {
+            livePrefix
+        } else if (replaceTokenLength > 0 && before.length >= replaceTokenLength) {
             before.dropLast(replaceTokenLength)
         } else {
             before
         }
         if (currentSettings.smartSuggestionsEnabled) {
-            SmartWordPredictor.learnFromCompletedInput(
-                applicationContext,
-                "$prefixWithoutToken$word",
-                currentSettings.activeLanguageId
-            )
+            val langId = currentSettings.activeLanguageId
+            serviceScope.launch(Dispatchers.Default) {
+                SmartWordPredictor.learnFromCompletedInput(
+                    applicationContext,
+                    "$prefixWithoutToken$word",
+                    langId
+                )
+            }
         }
         lastSpaceTapTimeMs = 0L
-        refreshSuggestions()
+        refreshSuggestions(immediate = true)
     }
 
     private fun handleRgbStickerChipTap(phrase: String) {
         val latestLicense = trialLicenseManager.refreshState()
         currentLicenseState = latestLicense
-        if (!latestLicense.isVipActive) {
+        if (!latestLicense.isRgbStickerUnlocked) {
             handleOpenUnlockScreen()
             return
         }
@@ -1066,7 +1464,83 @@ class RgbKeyboardService : InputMethodService() {
         stickerCardViews.clear()
         val density = resources.displayMetrics.density
 
-        RgbStickerStyle.entries.chunked(2).forEach { pair ->
+        // #1 Default Featured Option: Box-Free Transparent RGB Text Sticker (শুধুমাত্র রঙিন লেখা)
+        val transparentStyle = RgbStickerStyle.TEXT_ONLY_TRANSPARENT
+        val featuredCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val padH = (12 * density).toInt()
+            val padV = (9 * density).toInt()
+            setPadding(padH, padV, padH, padV)
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#18122B"), Color.parseColor("#0D1F2C"))
+            ).apply {
+                cornerRadius = 12f * density
+                setStroke((1.8f * density).toInt(), Color.parseColor("#00F5D4"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = (8 * density).toInt()
+            }
+            setOnClickListener {
+                feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                sendStyledRgbSticker(transparentStyle)
+            }
+        }
+        val featuredTextCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val featuredTitle = TextView(this).apply {
+            text = "${transparentStyle.badgeIcon} ${transparentStyle.displayName}"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#00F5D4"))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val featuredSub = TextView(this).apply {
+            text = transparentStyle.subtitle
+            textSize = 11f
+            typeface = bengaliTypeface ?: Typeface.DEFAULT
+            setTextColor(Color.parseColor("#E2E8F0"))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        featuredTextCol.addView(featuredTitle)
+        featuredTextCol.addView(featuredSub)
+
+        val defaultPill = TextView(this).apply {
+            text = "DEFAULT"
+            textSize = 9.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#0A0D18"))
+            gravity = Gravity.CENTER
+            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#00F5D4"), Color.parseColor("#FF2A85"))
+            ).apply {
+                cornerRadius = 999f * density
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = (8 * density).toInt()
+            }
+        }
+        featuredCard.addView(featuredTextCol)
+        featuredCard.addView(defaultPill)
+        stickerCardViews.add(featuredCard)
+        container.addView(featuredCard)
+
+        // Optional 6 Framed Neon Box Styles in a clean 2-column grid
+        val framedStyles = RgbStickerStyle.entries.filter { !it.isTransparentTextOnly }
+        framedStyles.chunked(2).forEach { pair ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -1133,7 +1607,7 @@ class RgbKeyboardService : InputMethodService() {
             addUpdateListener { anim ->
                 val value = anim.animatedValue as Float
                 stickerCardViews.forEachIndexed { index, card ->
-                    val phaseAlpha = if (index % 2 == 0) value else (1.84f - value).coerceIn(0.84f, 1.0f)
+                    val phaseAlpha = if (index % 2 == 0) value else (1.84f - value).coerceIn(0.84f, 1f)
                     card.alpha = phaseAlpha
                 }
             }
@@ -1155,11 +1629,17 @@ class RgbKeyboardService : InputMethodService() {
         }
         isGeneratingSticker = true
         setOverlay(OverlayMode.NONE)
+        val editorInfoSnapshot = currentInputEditorInfo
 
         serviceScope.launch {
             try {
                 val artifact = withContext(Dispatchers.Default) {
-                    RgbStickerGenerator.generateSticker(applicationContext, phrase, style)
+                    RgbStickerGenerator.generateSticker(
+                        context = applicationContext,
+                        rawPhrase = phrase,
+                        style = style,
+                        editorInfo = editorInfoSnapshot
+                    )
                 }
                 if (artifact != null) {
                     val committedDirectly = RgbStickerGenerator.sendStickerToActiveApp(
@@ -1169,8 +1649,7 @@ class RgbKeyboardService : InputMethodService() {
                         artifact = artifact
                     )
                     if (committedDirectly) {
-                        val ic = currentInputConnection
-                        if (ic != null) {
+                        withSafeInputConnection { ic ->
                             val before = ic.getTextBeforeCursor(phrase.length + 2, 0)?.toString().orEmpty()
                             if (before.trimEnd().endsWith(phrase)) {
                                 val charsToDelete = before.length - before.lastIndexOf(phrase)
@@ -1179,7 +1658,7 @@ class RgbKeyboardService : InputMethodService() {
                                 }
                             }
                         }
-                        refreshSuggestions()
+                        refreshSuggestions(immediate = true)
                     }
                     artifact.bitmap.recycle()
                 }
@@ -1643,7 +2122,14 @@ class RgbKeyboardService : InputMethodService() {
                 }
                 setOnClickListener {
                     feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
-                    handleCommitText(clip)
+                    val outText = if (currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID &&
+                        BengaliTransliterator.containsBengaliScript(clip)
+                    ) {
+                        BengaliTransliterator.transliterate(clip, capitalizeSentences = true)
+                    } else {
+                        clip
+                    }
+                    handleCommitText(outText)
                     setOverlay(OverlayMode.NONE)
                 }
             }
@@ -1651,11 +2137,11 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
-    private fun applySettingsToViews(settings: KeyboardSettings) {
-        topBar?.visibility = if (settings.showToolbar) View.VISIBLE else View.GONE
-        val activeDyn = languagePackManager.loadLayoutFromDisk(settings.activeLanguageId)
+    private fun updateKeyboardHeightForLanguage(langId: String) {
+        val layoutLookupId = if (langId == LanguageCatalog.BANGLISH_ID) "bn" else langId
+        val activeDyn = languagePackManager.loadLayoutFromDisk(layoutLookupId)
         val extraRowHeightDp = if ((activeDyn?.rows?.size ?: 4) >= 5) 26 else 0
-        val targetHeightDp = when (settings.heightPreset) {
+        val targetHeightDp = when (currentSettings.heightPreset) {
             KeyboardHeightPreset.COMPACT -> 212 + extraRowHeightDp
             KeyboardHeightPreset.STANDARD -> 232 + extraRowHeightDp
             KeyboardHeightPreset.TALL -> 260 + extraRowHeightDp
@@ -1675,52 +2161,312 @@ class RgbKeyboardService : InputMethodService() {
                 aiHubPanel?.layoutParams = lp
             }
         }
-        keyboardView?.updateSettings(settings)
+    }
+
+    private fun applySettingsToViews(settings: KeyboardSettings) {
+        topBar?.visibility = if (settings.showToolbar) View.VISIBLE else View.GONE
+        val effectiveSettings = if (!currentLicenseState.isBanglishUnlocked &&
+            settings.activeLanguageId == LanguageCatalog.BANGLISH_ID
+        ) {
+            settings.copy(activeLanguageId = LanguageCatalog.ENGLISH_ID)
+        } else {
+            settings
+        }
+        currentSettings = effectiveSettings
+        updateKeyboardHeightForLanguage(effectiveSettings.activeLanguageId)
+        keyboardView?.updateSettings(effectiveSettings)
         applyTrialLockState()
         updateToolbarTints()
-        refreshSuggestions()
+        refreshSuggestions(immediate = true)
     }
 
     private fun syncVipVisualsQuietly() {
-        val state = trialLicenseManager.refreshState()
-        if (state.isVipActive != currentLicenseState.isVipActive) {
-            currentLicenseState = state
-            applyTrialLockState()
-        } else {
-            currentLicenseState = state
+        val now = SystemClock.uptimeMillis()
+        if (now - lastVipSyncMs < VIP_SYNC_INTERVAL_MS) return
+        lastVipSyncMs = now
+        serviceScope.launch(Dispatchers.Default) {
+            val state = trialLicenseManager.refreshState()
+            withContext(Dispatchers.Main) {
+                val changed = state.isRgbThemesUnlocked != currentLicenseState.isRgbThemesUnlocked ||
+                    state.isBanglishUnlocked != currentLicenseState.isBanglishUnlocked ||
+                    state.isAiHubUnlocked != currentLicenseState.isAiHubUnlocked ||
+                    state.isStylishFontsUnlocked != currentLicenseState.isStylishFontsUnlocked ||
+                    state.isRgbStickerUnlocked != currentLicenseState.isRgbStickerUnlocked ||
+                    state.isCallBarUnlocked != currentLicenseState.isCallBarUnlocked
+                currentLicenseState = state
+                if (changed) {
+                    applyTrialLockState()
+                }
+            }
         }
     }
 
     private fun handleToggleLanguage() {
-        syncVipVisualsQuietly()
+        val latestLicense = trialLicenseManager.refreshState()
+        currentLicenseState = latestLicense
         val downloaded = languagePackManager.getDownloadedLanguageIds()
-        serviceScope.launch {
-            val nextLangId = preferencesRepository.cycleActiveLanguage(downloaded)
-            keyboardView?.setActiveLanguage(nextLangId)
-            refreshSuggestions()
+        val fullCycle = currentSettings.enabledLanguageIds
+            .filter { LanguageCatalog.isBuiltInId(it) || it in downloaded }
+            .ifEmpty { listOf(LanguageCatalog.ENGLISH_ID, LanguageCatalog.BANGLISH_ID, "bn", "hi") }
+        val idx = fullCycle.indexOf(currentSettings.activeLanguageId)
+        var nextLangId = fullCycle[(idx + 1) % fullCycle.size]
+
+        // Banglish (BN-EN) is VIP-exclusive after trial unless overridden: open VIP Unlock and cycle free languages
+        if (nextLangId == LanguageCatalog.BANGLISH_ID && !latestLicense.isBanglishUnlocked) {
+            handleOpenUnlockScreen()
+            val freeCycle = fullCycle.filter { it != LanguageCatalog.BANGLISH_ID }
+                .ifEmpty { listOf(LanguageCatalog.ENGLISH_ID) }
+            val freeIdx = freeCycle.indexOf(currentSettings.activeLanguageId)
+            nextLangId = if (freeIdx >= 0) {
+                freeCycle[(freeIdx + 1) % freeCycle.size]
+            } else {
+                freeCycle.first()
+            }
         }
+
+        // Switch active keyboard layout synchronously on the spot (zero lag waiting for DataStore disk I/O)
+        currentSettings = currentSettings.copy(activeLanguageId = nextLangId)
+        updateKeyboardHeightForLanguage(nextLangId)
+        keyboardView?.setActiveLanguage(nextLangId)
+        refreshSuggestions(immediate = true)
+
+        serviceScope.launch(Dispatchers.IO) {
+            preferencesRepository.updateActiveLanguage(nextLangId)
+        }
+    }
+
+    /**
+     * Safely executes any InputConnection IPC call inside a null-checked try-catch guard
+     * so dead/detached editor connections can NEVER crash or auto-close the keyboard.
+     */
+    private inline fun withSafeInputConnection(block: (InputConnection) -> Unit) {
+        val ic = currentInputConnection ?: return
+        try {
+            block(ic)
+        } catch (_: Throwable) {
+            // Gracefully ignore detached InputConnection IPC failures
+        }
+    }
+
+    private fun isBanglishVipActive(): Boolean {
+        return currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID &&
+            currentLicenseState.isBanglishUnlocked
+    }
+
+    private fun clearBanglishBuffer(finishComposing: Boolean = false) {
+        val hadBuffer = banglishRawBengaliBuffer.isNotEmpty()
+        banglishRawBengaliBuffer.clear()
+        banglishWordPrefixContext = ""
+        if (finishComposing && hadBuffer) {
+            withSafeInputConnection { it.finishComposingText() }
+        }
+    }
+
+    /**
+     * Flushes the live Bengali composing buffer (or any raw Bengali word right before the cursor)
+     * into final natural Indian Romanized English (e.g., `তুমি` -> `Tumi`, `কেমন` -> `kemon`,
+     * `আছো` -> `acho`) + optional [trailingText] (Space or normalized punctuation).
+     * Guarantees raw Bengali script is NEVER left behind in Banglish (BN-EN) mode.
+     */
+    private fun flushBanglishBuffer(
+        ic: InputConnection,
+        trailingText: String = ""
+    ): String? {
+        if (!isBanglishVipActive()) {
+            banglishRawBengaliBuffer.clear()
+            banglishWordPrefixContext = ""
+            return null
+        }
+        if (banglishRawBengaliBuffer.isNotEmpty()) {
+            val rawBengali = banglishRawBengaliBuffer.toString()
+            val prefix = banglishWordPrefixContext
+            banglishRawBengaliBuffer.clear()
+            banglishWordPrefixContext = ""
+
+            val romanized = BengaliTransliterator.transliterateWordWithContext(
+                bengaliWord = rawBengali,
+                textBeforeWord = prefix
+            )
+            if (romanized.isNotEmpty()) {
+                ic.commitText(romanized + trailingText, 1)
+                return "$prefix$romanized"
+            } else {
+                ic.commitText(trailingText, 1)
+                return null
+            }
+        }
+        return autoTransliteratePendingBanglishWord(ic, trailingText)
+    }
+
+    /**
+     * Fallback safety net: if any contiguous Bengali word sits right before the cursor
+     * (e.g., pasted or pre-existing Bengali text), atomically replaces it with Romanized English.
+     */
+    private fun autoTransliteratePendingBanglishWord(
+        ic: InputConnection,
+        trailingText: String = ""
+    ): String? {
+        if (!isBanglishVipActive()) {
+            return null
+        }
+        val before = runCatching {
+            ic.getTextBeforeCursor(80, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        val trailingBengali = BengaliTransliterator.extractTrailingBengaliWord(before)
+        if (trailingBengali.isEmpty()) return null
+
+        val prefixBeforeWord = before.dropLast(trailingBengali.length)
+        val romanized = BengaliTransliterator.transliterateWordWithContext(
+            bengaliWord = trailingBengali,
+            textBeforeWord = prefixBeforeWord
+        )
+        if (romanized.isEmpty()) return null
+
+        ic.beginBatchEdit()
+        try {
+            ic.deleteSurroundingText(trailingBengali.length, 0)
+            ic.commitText(romanized + trailingText, 1)
+        } finally {
+            runCatching { ic.endBatchEdit() }
+        }
+        return "$prefixBeforeWord$romanized"
     }
 
     private fun handleCommitText(text: String) {
         syncVipVisualsQuietly()
-        val ic = currentInputConnection ?: return
-        ic.commitText(text, 1)
+        val isBanglishVip = isBanglishVipActive()
+        var learnInput: String? = null
+
+        withSafeInputConnection { ic ->
+            if (isBanglishVip) {
+                when {
+                    BengaliTransliterator.isBengaliWordText(text) -> {
+                        if (banglishRawBengaliBuffer.isEmpty()) {
+                            banglishWordPrefixContext = runCatching {
+                                ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
+                            }.getOrDefault("")
+                        }
+                        banglishRawBengaliBuffer.append(text)
+                        val liveRomanized = BengaliTransliterator.transliterateWordWithContext(
+                            bengaliWord = banglishRawBengaliBuffer.toString(),
+                            textBeforeWord = banglishWordPrefixContext
+                        )
+                        if (liveRomanized.isNotEmpty()) {
+                            ic.setComposingText(liveRomanized, 1)
+                        }
+                    }
+                    BengaliTransliterator.isBengaliDigitText(text) -> {
+                        flushBanglishBuffer(ic, trailingText = "")
+                        ic.commitText(BengaliTransliterator.convertBengaliDigits(text), 1)
+                    }
+                    BengaliTransliterator.isAutoTransliterateTriggerPunctuation(text) -> {
+                        val normalizedPunct = BengaliTransliterator.normalizeBanglishPunctuation(text)
+                        val convertedContext = flushBanglishBuffer(ic, trailingText = normalizedPunct)
+                        if (convertedContext != null) {
+                            learnInput = convertedContext
+                        } else {
+                            ic.commitText(normalizedPunct, 1)
+                        }
+                    }
+                    else -> {
+                        flushBanglishBuffer(ic, trailingText = "")
+                        val cleanText = if (BengaliTransliterator.containsBengaliScript(text)) {
+                            val before = runCatching {
+                                ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
+                            }.getOrDefault("")
+                            BengaliTransliterator.transliterate(
+                                text,
+                                capitalizeSentences = BengaliTransliterator.isSentenceStartContext(before)
+                            )
+                        } else {
+                            text
+                        }
+                        ic.commitText(cleanText, 1)
+                    }
+                }
+            } else {
+                clearBanglishBuffer(finishComposing = false)
+                ic.commitText(text, 1)
+            }
+        }
+        learnInput?.let { textToLearn ->
+            if (currentSettings.smartSuggestionsEnabled) {
+                serviceScope.launch(Dispatchers.Default) {
+                    SmartWordPredictor.learnFromCompletedInput(
+                        applicationContext,
+                        textToLearn,
+                        LanguageCatalog.BANGLISH_ID
+                    )
+                }
+            }
+        }
         lastSpaceTapTimeMs = 0L
         refreshSuggestions()
     }
 
     private fun handleBackspace() {
         syncVipVisualsQuietly()
-        val ic = currentInputConnection ?: return
-        val selected = ic.getSelectedText(0)
-        if (!selected.isNullOrEmpty()) {
-            ic.commitText("", 1)
-        } else {
-            val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
-            if (before.length >= 2 && Character.isSurrogatePair(before[before.length - 2], before[before.length - 1])) {
-                ic.deleteSurroundingText(2, 0)
+        withSafeInputConnection { ic ->
+            if (isBanglishVipActive() && banglishRawBengaliBuffer.isNotEmpty()) {
+                banglishRawBengaliBuffer.deleteCharAt(banglishRawBengaliBuffer.length - 1)
+                if (banglishRawBengaliBuffer.isNotEmpty()) {
+                    val liveRomanized = BengaliTransliterator.transliterateWordWithContext(
+                        bengaliWord = banglishRawBengaliBuffer.toString(),
+                        textBeforeWord = banglishWordPrefixContext
+                    )
+                    ic.setComposingText(liveRomanized, 1)
+                } else {
+                    banglishWordPrefixContext = ""
+                    ic.commitText("", 1)
+                }
+                return@withSafeInputConnection
+            }
+            val selected = ic.getSelectedText(0)
+            if (!selected.isNullOrEmpty()) {
+                ic.commitText("", 1)
             } else {
-                ic.deleteSurroundingText(1, 0)
+                val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
+                if (before.length >= 2 && Character.isSurrogatePair(before[before.length - 2], before[before.length - 1])) {
+                    ic.deleteSurroundingText(2, 0)
+                } else {
+                    ic.deleteSurroundingText(1, 0)
+                }
+            }
+        }
+        lastSpaceTapTimeMs = 0L
+        refreshSuggestions()
+    }
+
+    /**
+     * Whole-word accelerated backspace triggered when holding `⌫` for >= 1.2s.
+     * Deletes trailing whitespace plus the previous word in one clean batch.
+     */
+    private fun handleDeletePreviousWord() {
+        syncVipVisualsQuietly()
+        withSafeInputConnection { ic ->
+            if (isBanglishVipActive() && banglishRawBengaliBuffer.isNotEmpty()) {
+                banglishRawBengaliBuffer.clear()
+                banglishWordPrefixContext = ""
+                ic.commitText("", 1)
+                return@withSafeInputConnection
+            }
+            val selected = ic.getSelectedText(0)
+            if (!selected.isNullOrEmpty()) {
+                ic.commitText("", 1)
+            } else {
+                val before = ic.getTextBeforeCursor(64, 0)?.toString().orEmpty()
+                if (before.isEmpty()) return@withSafeInputConnection
+                var idx = before.length
+                // Skip trailing spaces first
+                while (idx > 0 && before[idx - 1].isWhitespace()) {
+                    idx--
+                }
+                // Then consume the preceding word characters
+                while (idx > 0 && !before[idx - 1].isWhitespace()) {
+                    idx--
+                }
+                val countToDelete = (before.length - idx).coerceAtLeast(1)
+                ic.deleteSurroundingText(countToDelete, 0)
             }
         }
         lastSpaceTapTimeMs = 0L
@@ -1729,56 +2475,84 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun handleSpace() {
         syncVipVisualsQuietly()
-        val ic = currentInputConnection ?: return
-        val beforeContext = runCatching {
-            ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
-        }.getOrDefault("")
-        if (currentSettings.smartSuggestionsEnabled && beforeContext.isNotBlank() && !beforeContext.last().isWhitespace()) {
-            SmartWordPredictor.learnFromCompletedInput(
-                applicationContext,
-                beforeContext,
-                currentSettings.activeLanguageId
-            )
+        var learnInput: String? = null
+        withSafeInputConnection { ic ->
+            val now = System.currentTimeMillis()
+            if (currentSettings.doubleSpacePeriod &&
+                banglishRawBengaliBuffer.isEmpty() &&
+                (now - lastSpaceTapTimeMs) in 40L..420L
+            ) {
+                val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
+                if (before.length >= 2 && before.last() == ' ' && !before[before.length - 2].isWhitespace()) {
+                    val punct = if (currentSettings.activeLanguageId == LanguageCatalog.BANGLISH_ID) {
+                        "."
+                    } else {
+                        keyboardView?.getActiveDynamicLayout()?.sentenceEndPunct ?: "."
+                    }
+                    ic.deleteSurroundingText(1, 0)
+                    ic.commitText("$punct ", 1)
+                    lastSpaceTapTimeMs = 0L
+                    refreshSuggestions()
+                    return@withSafeInputConnection
+                }
+            }
+
+            // In Banglish (BN-EN) mode, commit live Romanized English word + Space (NEVER leaves raw Bengali behind)
+            val convertedContext = flushBanglishBuffer(ic, trailingText = " ")
+            if (convertedContext != null) {
+                if (currentSettings.smartSuggestionsEnabled) {
+                    learnInput = convertedContext
+                }
+                lastSpaceTapTimeMs = now
+                return@withSafeInputConnection
+            }
+
+            val beforeContext = runCatching {
+                ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+            }.getOrDefault("")
+            if (currentSettings.smartSuggestionsEnabled && beforeContext.isNotBlank() && !beforeContext.last().isWhitespace()) {
+                learnInput = beforeContext
+            }
+            ic.commitText(" ", 1)
+            lastSpaceTapTimeMs = now
         }
-        val now = System.currentTimeMillis()
-        if (currentSettings.doubleSpacePeriod && (now - lastSpaceTapTimeMs) in 40L..420L) {
-            val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
-            if (before.length >= 2 && before.last() == ' ' && !before[before.length - 2].isWhitespace()) {
-                val punct = keyboardView?.getActiveDynamicLayout()?.sentenceEndPunct ?: "."
-                ic.deleteSurroundingText(1, 0)
-                ic.commitText("$punct ", 1)
-                lastSpaceTapTimeMs = 0L
-                refreshSuggestions()
-                return
+        learnInput?.let { textToLearn ->
+            val langId = currentSettings.activeLanguageId
+            serviceScope.launch(Dispatchers.Default) {
+                SmartWordPredictor.learnFromCompletedInput(applicationContext, textToLearn, langId)
             }
         }
-        ic.commitText(" ", 1)
-        lastSpaceTapTimeMs = now
         refreshSuggestions()
     }
 
     private fun handleEnter() {
         syncVipVisualsQuietly()
-        val ic = currentInputConnection ?: return
-        val beforeContext = runCatching {
-            ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
-        }.getOrDefault("")
-        if (currentSettings.smartSuggestionsEnabled && beforeContext.isNotBlank()) {
-            SmartWordPredictor.learnFromCompletedInput(
-                applicationContext,
-                beforeContext,
-                currentSettings.activeLanguageId
-            )
-        }
-        val info = currentInputEditorInfo
-        val actionId = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
-        val isNoEnterAction = (info?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
+        var learnInput: String? = null
+        withSafeInputConnection { ic ->
+            // Flush & transliterate any live or pending Bengali word in Banglish (BN-EN) mode before Enter/Send
+            val convertedContext = flushBanglishBuffer(ic, trailingText = "")
+            val beforeContext = convertedContext ?: runCatching {
+                ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+            }.getOrDefault("")
+            if (currentSettings.smartSuggestionsEnabled && beforeContext.isNotBlank()) {
+                learnInput = beforeContext
+            }
+            val info = currentInputEditorInfo
+            val actionId = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
+            val isNoEnterAction = (info?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
 
-        if (!isNoEnterAction && actionId != EditorInfo.IME_ACTION_NONE && actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
-            ic.performEditorAction(actionId)
-        } else {
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+            if (!isNoEnterAction && actionId != EditorInfo.IME_ACTION_NONE && actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
+                ic.performEditorAction(actionId)
+            } else {
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+            }
+        }
+        learnInput?.let { textToLearn ->
+            val langId = currentSettings.activeLanguageId
+            serviceScope.launch(Dispatchers.Default) {
+                SmartWordPredictor.learnFromCompletedInput(applicationContext, textToLearn, langId)
+            }
         }
         lastSpaceTapTimeMs = 0L
         refreshSuggestions()
@@ -1786,11 +2560,12 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun handleCursorMove(steps: Int) {
         syncVipVisualsQuietly()
-        val ic = currentInputConnection ?: return
-        val keyCode = if (steps > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
-        repeat(kotlin.math.abs(steps).coerceAtMost(4)) {
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+        withSafeInputConnection { ic ->
+            val keyCode = if (steps > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
+            repeat(kotlin.math.abs(steps).coerceAtMost(4)) {
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+            }
         }
     }
 
@@ -1809,17 +2584,12 @@ class RgbKeyboardService : InputMethodService() {
         runCatching { startActivity(intent) }
     }
 
-    private fun syncSystemSubtype() {
-        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
-        val activeSubtype = runCatching { imm.currentInputMethodSubtype }.getOrNull()
-        val locale = activeSubtype?.locale
-        if (!locale.isNullOrBlank()) {
-            val detectedId = LanguageCatalog.idFromLocale(locale)
-            if ((detectedId == LanguageCatalog.ENGLISH_ID || languagePackManager.isDownloaded(detectedId)) &&
-                detectedId != currentSettings.activeLanguageId
-            ) {
-                serviceScope.launch { preferencesRepository.updateActiveLanguage(detectedId) }
-            }
-        }
+    companion object {
+        private const val VOICE_LOCK_HOLD_MS = 600L
+        private const val VIP_SYNC_INTERVAL_MS = 30_000L
+        private const val BACKSPACE_INITIAL_DELAY_MS = 300L
+        private const val BACKSPACE_CHAR_INTERVAL_MS = 40L
+        private const val BACKSPACE_WORD_ACCEL_MS = 1200L
+        private const val BACKSPACE_WORD_INTERVAL_MS = 85L
     }
 }

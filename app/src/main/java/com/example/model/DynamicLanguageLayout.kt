@@ -13,6 +13,7 @@ data class LanguagePackCatalogItem(
     val layoutSummary: String,
     val isRtl: Boolean = false,
     val isBuiltIn: Boolean = false,
+    val isVipOnly: Boolean = false,
     val approxSizeLabel: String = "1.0 KB"
 )
 
@@ -59,6 +60,7 @@ data class LanguagePackUiState(
 
 object LanguageCatalog {
     const val ENGLISH_ID = "en"
+    const val BANGLISH_ID = "bn_en"
 
     val englishBuiltIn = LanguagePackCatalogItem(
         id = ENGLISH_ID,
@@ -70,7 +72,22 @@ object LanguageCatalog {
         layoutSummary = "Built-in 4-row Gboard QWERTY with top-row number hints",
         isRtl = false,
         isBuiltIn = true,
+        isVipOnly = false,
         approxSizeLabel = "Built-in"
+    )
+
+    val banglishBuiltIn = LanguagePackCatalogItem(
+        id = BANGLISH_ID,
+        locale = "bn_IN",
+        englishName = "Banglish (BN-EN)",
+        nativeName = "বাংলিশ (BN-EN)",
+        shortBadge = "BN-EN",
+        scriptPreview = "অ আ ই · ক খ গ → Tumi kemon acho · Voice bn-IN",
+        layoutSummary = "VIP Bengali-key layout that auto-outputs natural Indian Romanized English",
+        isRtl = false,
+        isBuiltIn = true,
+        isVipOnly = true,
+        approxSizeLabel = "VIP Feature"
     )
 
     val downloadablePacks: List<LanguagePackCatalogItem> = listOf(
@@ -124,7 +141,9 @@ object LanguageCatalog {
         )
     )
 
-    val allItems: List<LanguagePackCatalogItem> = listOf(englishBuiltIn) + downloadablePacks
+    val allItems: List<LanguagePackCatalogItem> = listOf(englishBuiltIn, banglishBuiltIn) + downloadablePacks
+
+    fun isBuiltInId(id: String): Boolean = id == ENGLISH_ID || id == BANGLISH_ID
 
     fun findById(id: String): LanguagePackCatalogItem? = allItems.find { it.id == id }
 

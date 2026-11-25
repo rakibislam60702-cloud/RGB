@@ -23,6 +23,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
 import androidx.compose.ui.graphics.toArgb
+import androidx.core.content.res.ResourcesCompat
+import com.example.R
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.LanguagePackManager
@@ -33,6 +35,12 @@ import com.example.model.KeyboardSettings
 import com.example.model.KeycapStyle
 import com.example.model.LanguageCatalog
 import com.example.model.RgbEffect
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
@@ -48,6 +56,7 @@ class RgbKeyboardView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     var onKeyAction: ((String) -> Unit)? = null
+    var onDeleteWordAction: (() -> Unit)? = null
     var onKeyFeedback: ((Boolean) -> Unit)? = null
     var onEmojiModeChanged: ((Boolean) -> Unit)? = null
     var onEmojiOpenRequested: (() -> Unit)? = null
@@ -66,6 +75,7 @@ class RgbKeyboardView @JvmOverloads constructor(
     private var shiftMode: ShiftMode = ShiftMode.OFF
     private var lastShiftTapMs: Long = 0L
     private var isSymbols = false
+    private var isNumberPad = false
     private var isEmojiMode = false
     private var isSearchAction = false
     private var settings: KeyboardSettings = KeyboardSettings()
@@ -94,6 +104,7 @@ class RgbKeyboardView @JvmOverloads constructor(
 
     private var rgbPhase = 0f
     private var pressedKeyBox: KeyBox? = null
+    private var committedOnDown: Boolean = false
     private var longPressTriggered: Boolean = false
     private var pressedEmoji: String? = null
     private var touchDownX = 0f
@@ -105,6 +116,19 @@ class RgbKeyboardView @JvmOverloads constructor(
 
     private val handler = Handler(Looper.getMainLooper())
     private var isDeleting = false
+    private var deleteHoldStartMs: Long = 0L
+    private var lastInteractionMs: Long = SystemClock.uptimeMillis()
+    private var isWindowPaused: Boolean = false
+
+    private val particleScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val particleStateLock = Any()
+    private data class ParticleSnapshot(
+        val glows: List<ActiveKeyGlow> = emptyList(),
+        val trails: List<TrailPoint> = emptyList()
+    )
+    private val particleSnapshotRef = AtomicReference(ParticleSnapshot())
+    @Volatile
+    private var lastParticlePruneMs: Long = 0L
 
     private data class KeyBox(
         val id: String,
@@ -141,7 +165,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         listOf("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"),
         listOf("A", "S", "D", "F", "G", "H", "J", "K", "L"),
         listOf("SHIFT", "Z", "X", "C", "V", "B", "N", "M", "DEL"),
-        listOf("?123", ",", "GLOBE", "SPACE", ".", "ENTER")
+        listOf("?123", ",", "GLOBE", "SPACE", "1234", ".", "ENTER")
     )
     private val enTopRowHints = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
 
@@ -149,7 +173,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"),
         listOf("@", "#", "৳", "_", "&", "-", "+", "(", ")", "/"),
         listOf("=\\<", "*", "\"", "'", ":", ";", "!", "?", "DEL"),
-        listOf("ABC", ",", "GLOBE", "SPACE", ".", "ENTER")
+        listOf("ABC", ",", "GLOBE", "SPACE", "1234", ".", "ENTER")
     )
 
     private val density = resources.displayMetrics.density
@@ -181,12 +205,18 @@ class RgbKeyboardView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
         color = Color.parseColor("#E3E8F4")
     }
+    private val normalTypeface: Typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+    private val boldTypeface: Typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+    private val bengaliTypeface: Typeface = runCatching {
+        ResourcesCompat.getFont(context, R.font.noto_sans_bengali)
+    }.getOrNull() ?: normalTypeface
+
     private val popupBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val popupHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val popupTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        typeface = boldTypeface
     }
     private val trailOuterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -201,12 +231,12 @@ class RgbKeyboardView @JvmOverloads constructor(
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#F1F5FF")
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        typeface = normalTypeface
     }
     private val subLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#8C95AD")
         textAlign = Paint.Align.RIGHT
-        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        typeface = normalTypeface
         textSize = 9.5f * scaledDensity
     }
 
@@ -223,28 +253,57 @@ class RgbKeyboardView @JvmOverloads constructor(
     private var emojiBackRect = RectF()
     private var emojiDelRect = RectF()
     private val tempRect = RectF()
+    private val bubbleRect = RectF()
+
+    init {
+        if (!isInEditMode) {
+            setLayerType(LAYER_TYPE_HARDWARE, null)
+        }
+    }
 
     private val rgbAnimator: ValueAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
         duration = 3500L
         repeatCount = ValueAnimator.INFINITE
         interpolator = LinearInterpolator()
         addUpdateListener {
+            val nowMs = SystemClock.uptimeMillis()
+            if (isWindowPaused || !isAttachedToWindow) {
+                if (isRunning) pause()
+                return@addUpdateListener
+            }
+            val idleMs = nowMs - lastInteractionMs
+            val activeTouchOrEffects = pressedKeyBox != null || isDeleting || hasActiveVisualEffects()
+            // Pause animation loop after 1.5s of idle time to keep CPU/GPU cool and prevent IME stalls
+            if (idleMs >= IDLE_PAUSE_MS && !activeTouchOrEffects) {
+                if (isRunning) pause()
+                return@addUpdateListener
+            }
             rgbPhase = it.animatedValue as Float
+            if (activeTouchOrEffects && nowMs - lastParticlePruneMs >= 32L) {
+                scheduleParticlePrune(nowMs)
+            }
             val needsContinuousRgb = vipVisualsEnabled &&
                 settings.effect != RgbEffect.NORMAL_DEFAULT &&
                 settings.effect != RgbEffect.TOUCH_SPARK
-            if (needsContinuousRgb || hasActiveVisualEffects()) {
-                invalidate()
+            if (needsContinuousRgb || activeTouchOrEffects) {
+                postInvalidateOnAnimation()
             }
         }
     }
 
     private val deleteRunnable = object : Runnable {
         override fun run() {
-            if (isDeleting) {
-                onKeyFeedback?.invoke(true)
+            if (!isDeleting) return
+            val nowMs = SystemClock.uptimeMillis()
+            lastInteractionMs = nowMs
+            val heldMs = nowMs - deleteHoldStartMs
+            onKeyFeedback?.invoke(true)
+            if (heldMs >= DELETE_WORD_ACCEL_MS && onDeleteWordAction != null) {
+                onDeleteWordAction?.invoke()
+                handler.postDelayed(this, DELETE_WORD_REPEAT_INTERVAL_MS)
+            } else {
                 onKeyAction?.invoke("DEL")
-                handler.postDelayed(this, 60L)
+                handler.postDelayed(this, DELETE_CHAR_REPEAT_INTERVAL_MS)
             }
         }
     }
@@ -285,26 +344,53 @@ class RgbKeyboardView @JvmOverloads constructor(
         if (settings.hapticEnabled) {
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         }
-        // Swap the rising glowing pop-up bubble to show the long-pressed number immediately!
-        activeGlows.lastOrNull { it.keyId == active.id }?.let { glow ->
-            glow.displayLabel = alt
+        // Because normal keys commit immediately on ACTION_DOWN for zero-lag typing,
+        // swap the just-committed base character cleanly with its long-press alternate!
+        if (committedOnDown) {
+            onKeyAction?.invoke("DEL")
+            onKeyAction?.invoke(alt)
         }
-        invalidate()
+        updateGlowLabelAsync(active.id, alt)
+        postInvalidateOnAnimation()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (!rgbAnimator.isStarted) {
-            rgbAnimator.start()
-        }
+        resumeAnimations()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        rgbAnimator.cancel()
+        pauseAnimations()
+        particleScope.coroutineContext.cancelChildren()
+    }
+
+    fun pauseAnimations() {
+        isWindowPaused = true
+        if (rgbAnimator.isStarted || rgbAnimator.isRunning) {
+            rgbAnimator.cancel()
+        }
         isDeleting = false
+        committedOnDown = false
+        pressedKeyBox = null
+        pressedEmoji = null
         handler.removeCallbacks(deleteRunnable)
         handler.removeCallbacks(longPressRunnable)
+    }
+
+    fun resumeAnimations() {
+        isWindowPaused = false
+        wakeAnimator()
+    }
+
+    private fun wakeAnimator() {
+        lastInteractionMs = SystemClock.uptimeMillis()
+        if (isWindowPaused || !isAttachedToWindow) return
+        if (!rgbAnimator.isStarted) {
+            rgbAnimator.start()
+        } else if (rgbAnimator.isPaused) {
+            rgbAnimator.resume()
+        }
     }
 
     fun setSearchAction(isSearch: Boolean) {
@@ -314,11 +400,33 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Switches between the dedicated Gboard-style 3x4 Number Pad (auto-opened for
+     * `TYPE_CLASS_NUMBER` / `TYPE_CLASS_PHONE` fields or `1234` key tap) and normal keyboard.
+     */
+    fun setNumberPadMode(enabled: Boolean) {
+        if (isNumberPad != enabled || (enabled && (isSymbols || isEmojiMode))) {
+            isNumberPad = enabled
+            if (enabled) {
+                isSymbols = false
+                isEmojiMode = false
+                isKarBarActive = false
+                onEmojiModeChanged?.invoke(false)
+            }
+            pressedKeyBox = null
+            rebuildKeyBoxes()
+            wakeAnimator()
+            invalidate()
+        }
+    }
+
+    fun isNumberPadOpen(): Boolean = isNumberPad
+
     fun setVipVisualsEnabled(enabled: Boolean) {
         if (vipVisualsEnabled != enabled) {
             vipVisualsEnabled = enabled
             if (!enabled) {
-                trailPoints.clear()
+                clearTrailPointsAsync()
             }
             invalidate()
         }
@@ -343,12 +451,16 @@ class RgbKeyboardView @JvmOverloads constructor(
     }
 
     fun setActiveLanguage(langId: String) {
-        val loaded = if (langId == LanguageCatalog.ENGLISH_ID) {
-            null
-        } else {
-            languagePackManager.loadLayoutFromDisk(langId)
+        val loaded = when {
+            langId == LanguageCatalog.BANGLISH_ID -> languagePackManager.loadLayoutFromDisk("bn")
+            LanguageCatalog.isBuiltInId(langId) -> null
+            else -> languagePackManager.loadLayoutFromDisk(langId)
         }
-        val resolvedId = if (loaded != null) loaded.id else LanguageCatalog.ENGLISH_ID
+        val resolvedId = when {
+            langId == LanguageCatalog.BANGLISH_ID -> LanguageCatalog.BANGLISH_ID
+            loaded != null -> loaded.id
+            else -> LanguageCatalog.ENGLISH_ID
+        }
         val changed = resolvedId != activeLanguageId || loaded != activeDynamicLayout
         activeLanguageId = resolvedId
         activeDynamicLayout = loaded
@@ -357,17 +469,21 @@ class RgbKeyboardView @JvmOverloads constructor(
             isEmojiMode = false
             shiftMode = ShiftMode.OFF
             isKarBarActive = false
-            activeGlows.clear()
+            clearAllParticlesAsync()
             onEmojiModeChanged?.invoke(false)
             rebuildKeyBoxes()
+            wakeAnimator()
             invalidate()
         }
     }
 
-    fun cycleDownloadedLanguage(): String {
+    fun cycleDownloadedLanguage(allowVipLanguages: Boolean = vipVisualsEnabled): String {
         val downloaded = languagePackManager.getDownloadedLanguageIds()
         val cycleList = settings.enabledLanguageIds
-            .filter { it == LanguageCatalog.ENGLISH_ID || it in downloaded }
+            .filter {
+                (LanguageCatalog.isBuiltInId(it) || it in downloaded) &&
+                    (allowVipLanguages || it != LanguageCatalog.BANGLISH_ID)
+            }
             .ifEmpty { listOf(LanguageCatalog.ENGLISH_ID) }
         val idx = cycleList.indexOf(activeLanguageId)
         val nextId = cycleList[(idx + 1) % cycleList.size]
@@ -406,6 +522,7 @@ class RgbKeyboardView @JvmOverloads constructor(
 
         // Always verify dynamic JSON layout matches the requested activeLanguageId (handles fresh downloads too)
         setActiveLanguage(newSettings.activeLanguageId)
+        wakeAnimator()
         invalidate()
     }
 
@@ -415,21 +532,60 @@ class RgbKeyboardView @JvmOverloads constructor(
     }
 
     private fun hasActiveVisualEffects(): Boolean {
-        return pressedKeyBox != null || activeGlows.isNotEmpty() || trailPoints.isNotEmpty()
+        val snap = particleSnapshotRef.get()
+        return pressedKeyBox != null || snap.glows.isNotEmpty() || snap.trails.isNotEmpty()
     }
 
     private val isShifted: Boolean
         get() = shiftMode != ShiftMode.OFF
 
+    private fun numberPadRows(): List<List<String>> {
+        // Strictly Bengali mode ("bn") displays & commits Bengali digits; English ("en") & Banglish ("bn_en") use English digits.
+        val useBengaliDigits = activeLanguageId == "bn"
+        val d1 = if (useBengaliDigits) "১" else "1"
+        val d2 = if (useBengaliDigits) "২" else "2"
+        val d3 = if (useBengaliDigits) "৩" else "3"
+        val d4 = if (useBengaliDigits) "৪" else "4"
+        val d5 = if (useBengaliDigits) "৫" else "5"
+        val d6 = if (useBengaliDigits) "৬" else "6"
+        val d7 = if (useBengaliDigits) "৭" else "7"
+        val d8 = if (useBengaliDigits) "৮" else "8"
+        val d9 = if (useBengaliDigits) "৯" else "9"
+        val d0 = if (useBengaliDigits) "০" else "0"
+        return listOf(
+            listOf("+", d1, d2, d3, "%"),
+            listOf("-", d4, d5, d6, "NUM_SPACE"),
+            listOf("*", d7, d8, d9, "DEL"),
+            listOf("/", "NUM_ALPHA", ",", "NUM_SYM", d0, "=", ".", "ENTER")
+        )
+    }
+
+    private fun injectNumberPadKeyIntoBottomRow(rows: List<List<String>>): List<List<String>> {
+        if (rows.isEmpty()) return rows
+        val lastRow = rows.last()
+        val spaceIdx = lastRow.indexOf("SPACE")
+        if (spaceIdx < 0 || lastRow.contains("1234")) return rows
+        val updatedLastRow = ArrayList<String>(lastRow.size + 1).apply {
+            addAll(lastRow.subList(0, spaceIdx + 1))
+            add("1234")
+            addAll(lastRow.subList(spaceIdx + 1, lastRow.size))
+        }
+        return rows.dropLast(1) + listOf(updatedLastRow)
+    }
+
     private fun currentRows(): List<List<String>> {
+        if (isNumberPad) return numberPadRows()
         if (isSymbols) return symRows
         val dyn = activeDynamicLayout ?: return enRows
-        if (isShifted) return dyn.shiftRows
-        if (isKarBarActive && dyn.karBar.isNotEmpty() && dyn.rows.isNotEmpty()) {
-            // Dynamic Kar / Matra vowel-bar morphs Row 0 right after typing a consonant!
-            return listOf(dyn.karBar) + dyn.rows.drop(1)
+        val baseRows = when {
+            isShifted -> dyn.shiftRows
+            isKarBarActive && dyn.karBar.isNotEmpty() && dyn.rows.isNotEmpty() -> {
+                // Dynamic Kar / Matra vowel-bar morphs Row 0 right after typing a consonant!
+                listOf(dyn.karBar) + dyn.rows.drop(1)
+            }
+            else -> dyn.rows
         }
-        return dyn.rows
+        return injectNumberPadKeyIntoBottomRow(baseRows)
     }
 
     private fun rebuildKeyBoxes() {
@@ -439,9 +595,17 @@ class RgbKeyboardView @JvmOverloads constructor(
         val rows = currentRows()
         if (rows.isEmpty()) return
 
-        val isFiveRow = rows.size >= 5
-        val gapX = (if (isFiveRow) 3.8f else 5f) * density
-        val gapY = (if (isFiveRow) 5.0f else 7f) * density
+        val isFiveRow = !isNumberPad && rows.size >= 5
+        val gapX = (when {
+            isNumberPad -> 5.5f
+            isFiveRow -> 3.8f
+            else -> 5f
+        }) * density
+        val gapY = (when {
+            isNumberPad -> 6.5f
+            isFiveRow -> 5.0f
+            else -> 7f
+        }) * density
         val padTop = (if (isFiveRow) 3f else 4f) * density
         val padBottom = (if (isFiveRow) 3f else 4f) * density
         val usableH = (height.toFloat() - padTop - padBottom - gapY * (rows.size - 1)).coerceAtLeast(1f)
@@ -453,30 +617,38 @@ class RgbKeyboardView @JvmOverloads constructor(
         var curY = padTop
         rows.forEachIndexed { rIndex, row ->
             // Gboard symmetric inset for 9-key home rows (English ASDF or Urdu 9-key row)
-            val useHomeRowInset = !isSymbols && rIndex == 1 && row.size == 9 && rows.size == 4
+            val useHomeRowInset = !isNumberPad && !isSymbols && rIndex == 1 && row.size == 9 && rows.size == 4
             val sideInset = if (useHomeRowInset) (width * 0.048f) else 0f
 
-            val totalWeight = row.sumOf { keyWeight(it, isFiveRow).toDouble() }.toFloat().coerceAtLeast(1f)
+            val totalWeight = row.sumOf { keyWeight(it, isFiveRow, isNumberPad).toDouble() }.toFloat().coerceAtLeast(1f)
             val totalGapX = gapX * (row.size + 1) + sideInset * 2f
             val usableW = (width.toFloat() - totalGapX).coerceAtLeast(1f)
 
-            val isRowKarBar = !isSymbols && !isShifted && isKarBarActive && rIndex == 0 && dyn != null && dyn.karBar.isNotEmpty()
+            val isRowKarBar = !isNumberPad && !isSymbols && !isShifted && isKarBarActive && rIndex == 0 && dyn != null && dyn.karBar.isNotEmpty()
 
             var curX = gapX + sideInset
             row.forEachIndexed { cIndex, rawKey ->
-                val weight = keyWeight(rawKey, isFiveRow)
+                val weight = keyWeight(rawKey, isFiveRow, isNumberPad)
                 val keyW = usableW * (weight / totalWeight)
                 val rect = RectF(curX, curY, curX + keyW, curY + rowH)
-                val keyId = "${activeLanguageId}_${rIndex}_${cIndex}_$rawKey"
+                val keyId = "${activeLanguageId}_${if (isNumberPad) "num" else "kb"}_${rIndex}_${cIndex}_$rawKey"
 
                 val displayLabel = when {
-                    rawKey == "SPACE" -> dyn?.spacebarLabel ?: "English"
+                    rawKey == "SPACE" -> when {
+                        activeLanguageId == LanguageCatalog.BANGLISH_ID -> "বাংলিশ (BN-EN)"
+                        else -> dyn?.spacebarLabel ?: "English"
+                    }
+                    rawKey == "NUM_SPACE" -> "␣"
+                    rawKey == "NUM_ALPHA" -> if (activeLanguageId == "bn") "কখগ" else "ABC"
+                    rawKey == "NUM_SYM" -> "!?#"
+                    rawKey == "1234" -> "1234"
+                    rawKey == "।" && activeLanguageId == LanguageCatalog.BANGLISH_ID -> "."
                     rawKey == "DEL" -> "⌫"
                     rawKey == "SHIFT" -> ""
                     rawKey == "ENTER" -> "↵"
                     rawKey == "GLOBE" -> ""
                     rawKey == "ABC" -> dyn?.backToAlphaLabel ?: "ABC"
-                    isEnglish && !isSymbols && rawKey.length == 1 ->
+                    isEnglish && !isSymbols && !isNumberPad && rawKey.length == 1 ->
                         if (isShifted) rawKey.uppercase() else rawKey.lowercase()
                     else -> rawKey
                 }
@@ -485,6 +657,10 @@ class RgbKeyboardView @JvmOverloads constructor(
                 val subLabel: String?
                 val longPressOut: String?
                 when {
+                    isNumberPad -> {
+                        subLabel = null
+                        longPressOut = null
+                    }
                     !isSymbols && rIndex == 0 && isEnglish && cIndex < enTopRowHints.size -> {
                         subLabel = enTopRowHints[cIndex]
                         longPressOut = enTopRowHints[cIndex]
@@ -562,13 +738,9 @@ class RgbKeyboardView @JvmOverloads constructor(
         if (width <= 0 || height <= 0) return
 
         val nowMs = SystemClock.uptimeMillis()
-
-        // Prune expired touch spark glows (smooth 460ms release fade-out)
-        activeGlows.removeAll { glow ->
-            val rel = glow.releasedAtMs
-            rel != null && (nowMs - rel) > SPARK_FADE_MS
-        }
-        trailPoints.removeAll { nowMs - it.timeMs > TRAIL_LIFETIME_MS }
+        val snapshot = particleSnapshotRef.get()
+        val renderGlows = snapshot.glows
+        val renderTrails = snapshot.trails
 
         if (isEmojiMode) {
             drawEmojiGrid(canvas)
@@ -594,14 +766,33 @@ class RgbKeyboardView @JvmOverloads constructor(
 
         val continuousShader: SweepGradient? = if (allowRgbGlow && !isTouchSparkMode) {
             val shader = ensureSweepShader()
-            val angle = if (settings.effect == RgbEffect.STATIC_NEON) 0f else rgbPhase
+            val angle = when (settings.effect) {
+                RgbEffect.STATIC_NEON -> 0f
+                RgbEffect.AI_PLASMA_VORTEX -> rgbPhase * 1.85f
+                RgbEffect.AURORA_FLOW -> (kotlin.math.sin(Math.toRadians(rgbPhase.toDouble())) * 95.0).toFloat()
+                else -> rgbPhase
+            }
             shaderMatrix.setRotate(angle, width / 2f, height / 2f)
             shader.setLocalMatrix(shaderMatrix)
-            val alphaFactor = if (settings.effect == RgbEffect.CYBER_BREATHING) {
-                val breath = ((kotlin.math.sin(Math.toRadians(rgbPhase * 2.0)) + 1.0) * 0.5).toFloat()
-                (0.35f + 0.65f * breath) * settings.glowIntensity
-            } else {
-                settings.glowIntensity
+            val alphaFactor = when (settings.effect) {
+                RgbEffect.CYBER_BREATHING -> {
+                    val breath = ((kotlin.math.sin(Math.toRadians(rgbPhase * 2.0)) + 1.0) * 0.5).toFloat()
+                    (0.35f + 0.65f * breath) * settings.glowIntensity
+                }
+                RgbEffect.NEON_HEARTBEAT -> {
+                    val beat = ((rgbPhase * 0.015f) % 1f)
+                    val pulse = if (beat < 0.18f || (beat in 0.25f..0.40f)) 1f else 0.42f
+                    pulse * settings.glowIntensity
+                }
+                RgbEffect.LIGHTNING_ARC -> {
+                    val flash = ((rgbPhase * 0.03f) % 1f)
+                    (if (flash < 0.16f) 1.0f else 0.46f) * settings.glowIntensity
+                }
+                RgbEffect.FIREFLY_SPARKS -> {
+                    val glimmer = ((kotlin.math.sin(Math.toRadians(rgbPhase * 3.1)) + 1.0) * 0.5).toFloat()
+                    (0.45f + 0.55f * glimmer) * settings.glowIntensity
+                }
+                else -> settings.glowIntensity
             }.coerceIn(0.25f, 1.0f)
             rgbBorderPaint.shader = shader
             rgbBorderPaint.alpha = (255 * alphaFactor).toInt()
@@ -612,13 +803,28 @@ class RgbKeyboardView @JvmOverloads constructor(
             null
         }
 
+        val useBengaliFont = activeLanguageId == "bn" || activeLanguageId == LanguageCatalog.BANGLISH_ID
+        val activeLegendTypeface = if (useBengaliFont) bengaliTypeface else normalTypeface
+        subLabelPaint.typeface = activeLegendTypeface
+
         // 1. Draw Gboard Keycaps (pure matte-black in Normal Classic Black, or Touch Spark / RGB when VIP)
         for (i in keyBoxes.indices) {
             val box = keyBoxes[i]
             val rect = box.rect
             val isPressed = pressedKeyBox?.id == box.id
-            val glowEntry = activeGlows.lastOrNull { it.keyId == box.id }
-            val glowIntensity = if (allowRgbGlow) computeGlowFactor(glowEntry, nowMs) else 0f
+            var glowEntry: ActiveKeyGlow? = null
+            for (gIdx in renderGlows.lastIndex downTo 0) {
+                val candidate = renderGlows[gIdx]
+                if (candidate.keyId == box.id) {
+                    glowEntry = candidate
+                    break
+                }
+            }
+            val glowIntensity = when {
+                !allowRgbGlow -> 0f
+                isPressed -> 1f
+                else -> computeGlowFactor(glowEntry, nowMs)
+            }
             val isShiftOnce = box.rawKey == "SHIFT" && shiftMode == ShiftMode.ONCE
             val isCapsLocked = box.rawKey == "SHIFT" && shiftMode == ShiftMode.CAPS_LOCK
             val isShiftLit = isShiftOnce || isCapsLocked
@@ -633,17 +839,18 @@ class RgbKeyboardView @JvmOverloads constructor(
                 // Clean matte-black Gboard rounded keycaps (translucent when VIP custom photo is active)
                 val letterAlpha = if (hasCustomPhoto) 154 else 242
                 val modAlpha = if (hasCustomPhoto) 138 else 235
+                val isNumberPadSideKey = isNumberPad && !isNumberPadDigit(box.rawKey)
                 keyBgPaint.color = when {
                     isNormalClassicBlack && isPressed -> Color.argb(245, 42, 45, 58)
                     isCapsLocked -> Color.argb(225, 24, 62, 118)
                     isShiftOnce -> Color.argb(215, 36, 48, 72)
                     box.isKarBarKey -> Color.argb(if (hasCustomPhoto) 185 else 235, 22, 42, 58)
                     isNormalClassicBlack && box.rawKey == "SPACE" -> Color.argb(letterAlpha, 24, 25, 32)
-                    isNormalClassicBlack && (isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey)) ->
+                    isNormalClassicBlack && (isNumberPadSideKey || isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey)) ->
                         Color.argb(modAlpha, 16, 17, 23)
                     isNormalClassicBlack -> Color.argb(letterAlpha, 26, 28, 36)
                     box.rawKey == "SPACE" -> Color.argb(letterAlpha, 34, 37, 49)
-                    isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey) ->
+                    isNumberPadSideKey || isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey) ->
                         Color.argb(modAlpha, 25, 28, 39)
                     else -> Color.argb(letterAlpha, 35, 39, 52)
                 }
@@ -762,15 +969,19 @@ class RgbKeyboardView @JvmOverloads constructor(
                 )
             }
 
-            // Crisp centered keycap letter / label
+            // Crisp centered keycap letter / label (cached Typeface — zero allocations per frame)
             val rowH = rect.height()
+            val isNumDigit = isNumberPad && isNumberPadDigit(box.rawKey)
             textPaint.typeface = when {
-                box.rawKey == "SPACE" || isModifierKey(box.rawKey) ->
-                    Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-                else -> Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+                isNumDigit && activeLanguageId != "bn" -> boldTypeface
+                else -> activeLegendTypeface
             }
             textPaint.textSize = when {
                 box.rawKey == "SPACE" -> (rowH * 0.29f).coerceIn(11f * scaledDensity, 13.5f * scaledDensity)
+                box.rawKey == "1234" -> (rowH * 0.27f).coerceIn(10f * scaledDensity, 12.5f * scaledDensity)
+                box.rawKey == "NUM_ALPHA" || box.rawKey == "NUM_SYM" -> (rowH * 0.28f).coerceIn(10.5f * scaledDensity, 13f * scaledDensity)
+                box.rawKey == "NUM_SPACE" -> (rowH * 0.44f).coerceIn(16f * scaledDensity, 21f * scaledDensity)
+                isNumDigit -> (rowH * 0.50f).coerceIn(18f * scaledDensity, 25f * scaledDensity)
                 box.displayLabel.length > 2 -> (rowH * 0.30f).coerceIn(10.5f * scaledDensity, 13.5f * scaledDensity)
                 box.rawKey == "SHIFT" || box.rawKey == "DEL" -> (rowH * 0.43f).coerceIn(15f * scaledDensity, 20f * scaledDensity)
                 box.isKarBarKey -> (rowH * 0.50f).coerceIn(15f * scaledDensity, 21f * scaledDensity)
@@ -799,12 +1010,14 @@ class RgbKeyboardView @JvmOverloads constructor(
         textPaint.shader = null
 
         // 2. Smooth fading multicolor Glide / Swipe trail (VIP + non-Normal mode only)
-        if (allowRgbGlow) {
-            drawGlideTrail(canvas, nowMs)
+        if (allowRgbGlow && renderTrails.size >= 2) {
+            drawGlideTrail(canvas, renderTrails, nowMs)
         }
 
         // 3. Key pop-up bubbles (glowing multicolor rising bubbles when VIP RGB, clean matte dark popup when Normal/Free)
-        drawRisingSparkBubbles(canvas, nowMs)
+        if (renderGlows.isNotEmpty()) {
+            drawRisingSparkBubbles(canvas, renderGlows, nowMs, useBengaliFont)
+        }
     }
 
     private fun drawGboardCircularActionKey(
@@ -965,9 +1178,15 @@ class RgbKeyboardView @JvmOverloads constructor(
         return linear * linear
     }
 
-    private fun drawRisingSparkBubbles(canvas: Canvas, nowMs: Long) {
-        for (i in activeGlows.indices) {
-            val glow = activeGlows[i]
+    private fun drawRisingSparkBubbles(
+        canvas: Canvas,
+        renderGlows: List<ActiveKeyGlow>,
+        nowMs: Long,
+        useBengaliFont: Boolean
+    ) {
+        popupTextPaint.typeface = if (useBengaliFont) bengaliTypeface else boldTypeface
+        for (i in renderGlows.indices) {
+            val glow = renderGlows[i]
             if (!glow.showPopup) continue
 
             // In Free Standard Mode or explicit Normal / Classic Black mode, show clean matte-dark popup only while pressed
@@ -978,7 +1197,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                 val cx = glow.rect.centerX().coerceIn(bubbleW / 2f + 4f * density, width - bubbleW / 2f - 4f * density)
                 val minTop = if (allowTopOverflow) -30f * density else 3f * density
                 val top = (glow.rect.top - 8f * density - bubbleH).coerceAtLeast(minTop)
-                val bubbleRect = RectF(cx - bubbleW / 2f, top, cx + bubbleW / 2f, top + bubbleH)
+                bubbleRect.set(cx - bubbleW / 2f, top, cx + bubbleW / 2f, top + bubbleH)
                 val bubbleCorner = 12f * density
 
                 popupBgPaint.color = Color.parseColor("#2E3344")
@@ -989,7 +1208,6 @@ class RgbKeyboardView @JvmOverloads constructor(
 
                 popupTextPaint.textSize = 22f * scaledDensity
                 popupTextPaint.color = Color.WHITE
-                popupTextPaint.clearShadowLayer()
                 val fm = popupTextPaint.fontMetrics
                 val ty = bubbleRect.centerY() - (fm.ascent + fm.descent) / 2f
                 canvas.drawText(glow.displayLabel, bubbleRect.centerX(), ty, popupTextPaint)
@@ -1011,29 +1229,20 @@ class RgbKeyboardView @JvmOverloads constructor(
             val minTop = if (allowTopOverflow) -36f * density else 3f * density
             val top = (baseBottom - risePx - bubbleH).coerceAtLeast(minTop)
             val bottom = top + bubbleH
-            val bubbleRect = RectF(cx - bubbleW / 2f, top, cx + bubbleW / 2f, bottom)
+            bubbleRect.set(cx - bubbleW / 2f, top, cx + bubbleW / 2f, bottom)
 
             val neon = glow.neonColor
             val r = Color.red(neon)
             val g = Color.green(neon)
             val b = Color.blue(neon)
 
-            // Outer radial neon glow halo rising around the pop-up bubble
-            val haloRadius = maxOf(bubbleW, bubbleH) * 0.92f
-            popupHaloPaint.shader = RadialGradient(
-                bubbleRect.centerX(),
-                bubbleRect.centerY(),
-                haloRadius,
-                intArrayOf(
-                    Color.argb((fade * 180 * settings.glowIntensity).toInt().coerceIn(0, 215), r, g, b),
-                    Color.argb((fade * 65 * settings.glowIntensity).toInt().coerceIn(0, 110), r, g, b),
-                    Color.TRANSPARENT
-                ),
-                floatArrayOf(0f, 0.55f, 1f),
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawCircle(bubbleRect.centerX(), bubbleRect.centerY(), haloRadius, popupHaloPaint)
+            // Hardware-accelerated layered neon halo (zero RadialGradient/shadowLayer allocations!)
+            val haloRadius = maxOf(bubbleW, bubbleH) * 0.78f
             popupHaloPaint.shader = null
+            popupHaloPaint.color = Color.argb((fade * 52 * settings.glowIntensity).toInt().coerceIn(0, 95), r, g, b)
+            canvas.drawCircle(bubbleRect.centerX(), bubbleRect.centerY(), haloRadius, popupHaloPaint)
+            popupHaloPaint.color = Color.argb((fade * 92 * settings.glowIntensity).toInt().coerceIn(0, 140), r, g, b)
+            canvas.drawCircle(bubbleRect.centerX(), bubbleRect.centerY(), haloRadius * 0.66f, popupHaloPaint)
 
             val bubbleCorner = 14f * density
             popupBgPaint.color = Color.argb((fade * 240).toInt().coerceIn(0, 245), 16, 19, 30)
@@ -1048,25 +1257,23 @@ class RgbKeyboardView @JvmOverloads constructor(
 
             popupTextPaint.textSize = (24f * scaledDensity) * (0.92f + 0.12f * easeOutRise)
             popupTextPaint.color = Color.argb((fade * 255).toInt().coerceIn(0, 255), 255, 255, 255)
-            popupTextPaint.setShadowLayer(12f * fade, 0f, 0f, neon)
             val fm = popupTextPaint.fontMetrics
             val ty = bubbleRect.centerY() - (fm.ascent + fm.descent) / 2f
             canvas.drawText(glow.displayLabel, bubbleRect.centerX(), ty, popupTextPaint)
-            popupTextPaint.clearShadowLayer()
         }
     }
 
-    private fun drawGlideTrail(canvas: Canvas, nowMs: Long) {
-        if (trailPoints.size < 2) return
+    private fun drawGlideTrail(canvas: Canvas, renderTrails: List<TrailPoint>, nowMs: Long) {
+        if (renderTrails.size < 2) return
 
-        for (i in 1 until trailPoints.size) {
-            val p0 = trailPoints[i - 1]
-            val p1 = trailPoints[i]
+        for (i in 1 until renderTrails.size) {
+            val p0 = renderTrails[i - 1]
+            val p1 = renderTrails[i]
             val age = (nowMs - p1.timeMs).toFloat()
             val life = (1f - age / TRAIL_LIFETIME_MS).coerceIn(0f, 1f)
             if (life <= 0.02f) continue
 
-            val progress = i.toFloat() / trailPoints.size.toFloat()
+            val progress = i.toFloat() / renderTrails.size.toFloat()
             val widthFactor = life * (0.35f + 0.65f * progress)
             val c = p1.color
             val r = Color.red(c)
@@ -1140,13 +1347,37 @@ class RgbKeyboardView @JvmOverloads constructor(
         canvas.drawText("⌫", emojiDelRect.centerX(), yText, textPaint)
     }
 
-    private fun keyWeight(key: String, isFiveRow: Boolean): Float = when (key) {
-        "SPACE" -> 4.35f
-        "?123", "?১২৩", "?१२३", "?١٢٣", "?۱۲۳", "ABC" -> 1.42f
-        "ENTER" -> 1.48f
-        "SHIFT", "DEL", "=\\<" -> if (isFiveRow) 1.25f else 1.45f
-        "GLOBE", ",", "،", ".", "।", "।" , "۔" -> 0.92f
-        else -> 1.0f
+    private fun isNumberPadDigit(key: String): Boolean {
+        if (key.length != 1) return false
+        val ch = key[0]
+        return ch in '0'..'9' || ch in '০'..'৯'
+    }
+
+    private fun keyWeight(key: String, isFiveRow: Boolean, isNumPad: Boolean = false): Float {
+        if (isNumPad) {
+            return when (key) {
+                "+", "-", "*" -> 0.95f
+                "%", "NUM_SPACE", "DEL" -> 1.12f
+                "/" -> 0.74f
+                "NUM_ALPHA" -> 1.14f
+                "," -> 0.62f
+                "NUM_SYM" -> 0.92f
+                "0", "০" -> 1.08f
+                "=" -> 0.66f
+                "." -> 0.62f
+                "ENTER" -> 1.12f
+                else -> if (isNumberPadDigit(key)) 1.55f else 1.0f
+            }
+        }
+        return when (key) {
+            "SPACE" -> 3.65f
+            "1234" -> 1.12f
+            "?123", "?১২৩", "?१२३", "?١٢٣", "?۱۲۳", "ABC" -> 1.38f
+            "ENTER" -> 1.44f
+            "SHIFT", "DEL", "=\\<" -> if (isFiveRow) 1.25f else 1.45f
+            "GLOBE", ",", "،", ".", "।", "۔" -> 0.88f
+            else -> 1.0f
+        }
     }
 
     private fun isSymbolSwitchKey(key: String): Boolean =
@@ -1156,7 +1387,27 @@ class RgbKeyboardView @JvmOverloads constructor(
         key == "," || key == "،" || key == "." || key == "।" || key == "۔"
 
     private fun isModifierKey(key: String): Boolean =
-        key == "SHIFT" || key == "DEL" || isSymbolSwitchKey(key) || key == "ABC" || key == "=\\<" || key == "ENTER"
+        key == "SHIFT" ||
+            key == "DEL" ||
+            isSymbolSwitchKey(key) ||
+            key == "ABC" ||
+            key == "=\\<" ||
+            key == "ENTER" ||
+            key == "1234" ||
+            key == "NUM_ALPHA" ||
+            key == "NUM_SYM" ||
+            key == "NUM_SPACE"
+
+    private fun shouldCommitImmediatelyOnDown(rawKey: String): Boolean {
+        if (isNumberPad) {
+            return rawKey != "DEL"
+        }
+        return rawKey != "DEL" &&
+            rawKey != "SHIFT" &&
+            rawKey != "SPACE" &&
+            rawKey != "," &&
+            rawKey != "،"
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isEmojiMode) {
@@ -1166,6 +1417,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         val x = event.x
         val y = event.y
         val nowMs = SystemClock.uptimeMillis()
+        wakeAnimator()
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1177,6 +1429,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                 isSpaceDragging = false
                 isGliding = false
                 longPressTriggered = false
+                committedOnDown = false
                 handler.removeCallbacks(longPressRunnable)
 
                 val hit = findKeyAt(x, y)
@@ -1187,6 +1440,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                         performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     }
                     if (hit.rawKey == "DEL") {
+                        committedOnDown = true
                         onKeyFeedback?.invoke(true)
                         if (isKarBarActive) {
                             isKarBarActive = false
@@ -1194,12 +1448,83 @@ class RgbKeyboardView @JvmOverloads constructor(
                         }
                         onKeyAction?.invoke("DEL")
                         isDeleting = true
-                        handler.postDelayed(deleteRunnable, 380L)
-                    } else if (hit.rawKey == "SHIFT" || hit.longPressOutput != null || hit.rawKey == "," || hit.rawKey == "،") {
-                        handler.postDelayed(longPressRunnable, LONG_PRESS_DELAY_MS)
+                        deleteHoldStartMs = nowMs
+                        handler.removeCallbacks(deleteRunnable)
+                        handler.postDelayed(deleteRunnable, DELETE_INITIAL_DELAY_MS)
+                    } else if (shouldCommitImmediatelyOnDown(hit.rawKey)) {
+                        // Instant zero-lag commit directly on ACTION_DOWN!
+                        committedOnDown = true
+                        onKeyFeedback?.invoke(isModifierKey(hit.rawKey) || hit.rawKey == "GLOBE")
+                        handleKeyPress(hit.rawKey)
+                        if (hit.longPressOutput != null) {
+                            handler.postDelayed(longPressRunnable, LONG_PRESS_DELAY_MS)
+                        }
+                    } else {
+                        // SHIFT, SPACE, comma wait for ACTION_UP (to support cursor swipe / Caps Lock / Emoji long-press)
+                        if (hit.rawKey == "SHIFT" || hit.rawKey == "," || hit.rawKey == "،") {
+                            handler.postDelayed(longPressRunnable, LONG_PRESS_DELAY_MS)
+                        }
                     }
                     invalidate()
                 }
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // Multi-touch rollover for lightning-fast two-thumb typing!
+                val pointerIndex = event.actionIndex
+                val px = event.getX(pointerIndex)
+                val py = event.getY(pointerIndex)
+                val hit = findKeyAt(px, py) ?: return true
+
+                handler.removeCallbacks(deleteRunnable)
+                handler.removeCallbacks(longPressRunnable)
+                isDeleting = false
+
+                // If previous deferred key (e.g. SPACE / SHIFT / comma) hasn't committed yet, flush it cleanly before the new thumb's key!
+                val prev = pressedKeyBox
+                if (prev != null && !committedOnDown && !longPressTriggered && !(prev.rawKey == "SPACE" && isSpaceDragging)) {
+                    onKeyFeedback?.invoke(isModifierKey(prev.rawKey) || prev.rawKey == "GLOBE")
+                    handleKeyPress(prev.rawKey)
+                }
+
+                releaseCurrentGlow(nowMs)
+                pressedKeyBox = hit
+                touchDownX = px
+                touchDownY = py
+                lastTouchX = px
+                spaceDragAccum = 0f
+                isSpaceDragging = false
+                isGliding = false
+                longPressTriggered = false
+                committedOnDown = false
+
+                activateKeyGlow(hit, nowMs)
+                if (settings.hapticEnabled) {
+                    performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                }
+                if (hit.rawKey == "DEL") {
+                    committedOnDown = true
+                    onKeyFeedback?.invoke(true)
+                    if (isKarBarActive) {
+                        isKarBarActive = false
+                        rebuildKeyBoxes()
+                    }
+                    onKeyAction?.invoke("DEL")
+                    isDeleting = true
+                    deleteHoldStartMs = nowMs
+                    handler.postDelayed(deleteRunnable, DELETE_INITIAL_DELAY_MS)
+                } else if (shouldCommitImmediatelyOnDown(hit.rawKey)) {
+                    committedOnDown = true
+                    onKeyFeedback?.invoke(isModifierKey(hit.rawKey) || hit.rawKey == "GLOBE")
+                    handleKeyPress(hit.rawKey)
+                    if (hit.longPressOutput != null) {
+                        handler.postDelayed(longPressRunnable, LONG_PRESS_DELAY_MS)
+                    }
+                } else if (hit.rawKey == "SHIFT" || hit.rawKey == "," || hit.rawKey == "،") {
+                    handler.postDelayed(longPressRunnable, LONG_PRESS_DELAY_MS)
+                }
+                invalidate()
                 return true
             }
 
@@ -1222,7 +1547,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                 }
 
                 val movedDist = hypot(x - touchDownX, y - touchDownY)
-                if (movedDist > 15f * density && !longPressTriggered) {
+                if (movedDist > 18f * density && !longPressTriggered) {
                     isGliding = true
                     isDeleting = false
                     handler.removeCallbacks(deleteRunnable)
@@ -1230,10 +1555,7 @@ class RgbKeyboardView @JvmOverloads constructor(
 
                     val hue = ((x / width.coerceAtLeast(1).toFloat()) * 320f + (nowMs % 3600L) * 0.1f) % 360f
                     val trailColor = RgbLightingEngine.hsvToColor(hue, 0.96f, 1.0f).toArgb()
-                    trailPoints.add(TrailPoint(x, y, nowMs, trailColor))
-                    if (trailPoints.size > 42) {
-                        trailPoints.removeAt(0)
-                    }
+                    appendTrailPointAsync(x, y, nowMs, trailColor)
 
                     val hovered = findKeyAt(x, y)
                     if (hovered != null && hovered.id != pressedKeyBox?.id) {
@@ -1241,7 +1563,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                         pressedKeyBox = hovered
                         activateKeyGlow(hovered, nowMs)
                     }
-                    invalidate()
+                    postInvalidateOnAnimation()
                 }
                 return true
             }
@@ -1255,7 +1577,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                 releaseCurrentGlow(nowMs)
                 pressedKeyBox = null
 
-                if (released != null && released.rawKey != "DEL") {
+                if (!committedOnDown && released != null && released.rawKey != "DEL") {
                     if (longPressTriggered && released.rawKey == "SHIFT") {
                         // Already locked Caps Lock on long-press
                     } else if (longPressTriggered && released.longPressOutput != null) {
@@ -1266,18 +1588,13 @@ class RgbKeyboardView @JvmOverloads constructor(
                     } else if (!isGliding) {
                         onKeyFeedback?.invoke(isModifierKey(released.rawKey) || released.rawKey == "GLOBE")
                         handleKeyPress(released.rawKey)
-                    } else {
-                        val landed = findKeyAt(x, y) ?: released
-                        if (!isModifierKey(landed.rawKey) && landed.rawKey != "SPACE" && landed.rawKey != "GLOBE") {
-                            onKeyFeedback?.invoke(false)
-                            handleKeyPress(landed.rawKey)
-                        }
                     }
                 }
+                committedOnDown = false
                 longPressTriggered = false
                 isSpaceDragging = false
                 isGliding = false
-                invalidate()
+                postInvalidateOnAnimation()
                 return true
             }
 
@@ -1286,12 +1603,13 @@ class RgbKeyboardView @JvmOverloads constructor(
                 handler.removeCallbacks(deleteRunnable)
                 handler.removeCallbacks(longPressRunnable)
                 isDeleting = false
+                committedOnDown = false
                 longPressTriggered = false
                 releaseCurrentGlow(nowMs)
                 pressedKeyBox = null
                 isSpaceDragging = false
                 isGliding = false
-                invalidate()
+                postInvalidateOnAnimation()
                 return true
             }
         }
@@ -1300,28 +1618,150 @@ class RgbKeyboardView @JvmOverloads constructor(
 
     private fun activateKeyGlow(box: KeyBox, nowMs: Long) {
         val showPopup = !isModifierKey(box.rawKey) && box.rawKey != "SPACE" && box.rawKey != "GLOBE"
-        activeGlows.removeAll { it.keyId == box.id }
-        activeGlows.add(
-            ActiveKeyGlow(
-                keyId = box.id,
-                displayLabel = box.displayLabel,
-                rect = RectF(box.rect),
-                neonColor = box.neonColor,
-                pressedAtMs = nowMs,
-                releasedAtMs = null,
-                showPopup = showPopup
+        val newGlow = ActiveKeyGlow(
+            keyId = box.id,
+            displayLabel = box.displayLabel,
+            rect = RectF(box.rect),
+            neonColor = box.neonColor,
+            pressedAtMs = nowMs,
+            releasedAtMs = null,
+            showPopup = showPopup
+        )
+        particleScope.launch {
+            synchronized(particleStateLock) {
+                for (i in activeGlows.lastIndex downTo 0) {
+                    if (activeGlows[i].keyId == box.id) {
+                        activeGlows.removeAt(i)
+                    }
+                }
+                activeGlows.add(newGlow)
+                pruneAndCapLocked(nowMs)
+                publishParticleSnapshotLocked()
+            }
+            postInvalidateOnAnimation()
+        }
+    }
+
+    private fun appendTrailPointAsync(x: Float, y: Float, nowMs: Long, color: Int) {
+        particleScope.launch {
+            synchronized(particleStateLock) {
+                trailPoints.add(TrailPoint(x, y, nowMs, color))
+                pruneAndCapLocked(nowMs)
+                publishParticleSnapshotLocked()
+            }
+        }
+    }
+
+    private fun updateGlowLabelAsync(keyId: String, altLabel: String) {
+        particleScope.launch {
+            synchronized(particleStateLock) {
+                for (i in activeGlows.lastIndex downTo 0) {
+                    if (activeGlows[i].keyId == keyId) {
+                        activeGlows[i].displayLabel = altLabel
+                        break
+                    }
+                }
+                publishParticleSnapshotLocked()
+            }
+            postInvalidateOnAnimation()
+        }
+    }
+
+    private fun scheduleParticlePrune(nowMs: Long) {
+        lastParticlePruneMs = nowMs
+        particleScope.launch {
+            val changed: Boolean
+            synchronized(particleStateLock) {
+                changed = pruneAndCapLocked(nowMs)
+                if (changed) {
+                    publishParticleSnapshotLocked()
+                }
+            }
+            if (changed) {
+                postInvalidateOnAnimation()
+            }
+        }
+    }
+
+    private fun clearTrailPointsAsync() {
+        particleScope.launch {
+            synchronized(particleStateLock) {
+                trailPoints.clear()
+                publishParticleSnapshotLocked()
+            }
+        }
+    }
+
+    private fun clearAllParticlesAsync() {
+        particleScope.launch {
+            synchronized(particleStateLock) {
+                activeGlows.clear()
+                trailPoints.clear()
+                publishParticleSnapshotLocked()
+            }
+        }
+    }
+
+    /**
+     * Runs strictly off the UI thread on Dispatchers.Default under [particleStateLock].
+     * Hard-caps live RGB particles to <= 25 items and prunes expired animations with zero lambdas.
+     */
+    private fun pruneAndCapLocked(nowMs: Long): Boolean {
+        var mutated = false
+        for (i in activeGlows.lastIndex downTo 0) {
+            val rel = activeGlows[i].releasedAtMs
+            if (rel != null && (nowMs - rel) > SPARK_FADE_MS) {
+                activeGlows.removeAt(i)
+                mutated = true
+            }
+        }
+        for (i in trailPoints.lastIndex downTo 0) {
+            if (nowMs - trailPoints[i].timeMs > TRAIL_LIFETIME_MS) {
+                trailPoints.removeAt(i)
+                mutated = true
+            }
+        }
+        while (activeGlows.size > MAX_ACTIVE_GLOWS) {
+            activeGlows.removeAt(0)
+            mutated = true
+        }
+        while (trailPoints.size > MAX_TRAIL_POINTS) {
+            trailPoints.removeAt(0)
+            mutated = true
+        }
+        while (activeGlows.size + trailPoints.size > MAX_RGB_PARTICLES) {
+            if (trailPoints.isNotEmpty()) {
+                trailPoints.removeAt(0)
+            } else if (activeGlows.isNotEmpty()) {
+                activeGlows.removeAt(0)
+            } else {
+                break
+            }
+            mutated = true
+        }
+        return mutated
+    }
+
+    private fun publishParticleSnapshotLocked() {
+        particleSnapshotRef.set(
+            ParticleSnapshot(
+                glows = ArrayList(activeGlows),
+                trails = ArrayList(trailPoints)
             )
         )
-        if (activeGlows.size > 14) {
-            activeGlows.removeAt(0)
-        }
     }
 
     private fun releaseCurrentGlow(nowMs: Long) {
         val activeId = pressedKeyBox?.id ?: return
-        activeGlows.forEach { glow ->
-            if (glow.keyId == activeId && glow.releasedAtMs == null) {
-                glow.releasedAtMs = nowMs
+        particleScope.launch {
+            synchronized(particleStateLock) {
+                for (i in activeGlows.indices) {
+                    val glow = activeGlows[i]
+                    if (glow.keyId == activeId && glow.releasedAtMs == null) {
+                        glow.releasedAtMs = nowMs
+                    }
+                }
+                publishParticleSnapshotLocked()
             }
         }
     }
@@ -1350,7 +1790,9 @@ class RgbKeyboardView @JvmOverloads constructor(
                         onKeyFeedback?.invoke(true)
                         onKeyAction?.invoke("DEL")
                         isDeleting = true
-                        handler.postDelayed(deleteRunnable, 380L)
+                        deleteHoldStartMs = SystemClock.uptimeMillis()
+                        handler.removeCallbacks(deleteRunnable)
+                        handler.postDelayed(deleteRunnable, DELETE_INITIAL_DELAY_MS)
                     }
                     else -> {
                         val hit = emojiBoxes.find { it.rect.contains(event.x, event.y) }
@@ -1403,12 +1845,35 @@ class RgbKeyboardView @JvmOverloads constructor(
                 if (shiftMode != ShiftMode.OFF) isKarBarActive = false
                 rebuildKeyBoxes()
             }
+            key == "1234" -> {
+                isNumberPad = true
+                isSymbols = false
+                isKarBarActive = false
+                rebuildKeyBoxes()
+            }
+            key == "NUM_ALPHA" -> {
+                isNumberPad = false
+                isSymbols = false
+                isKarBarActive = false
+                rebuildKeyBoxes()
+            }
+            key == "NUM_SYM" -> {
+                isNumberPad = false
+                isSymbols = true
+                isKarBarActive = false
+                rebuildKeyBoxes()
+            }
+            key == "NUM_SPACE" -> {
+                onKeyAction?.invoke(" ")
+            }
             isSymbolSwitchKey(key) -> {
+                isNumberPad = false
                 isSymbols = true
                 isKarBarActive = false
                 rebuildKeyBoxes()
             }
             key == "ABC" || key == "=\\<" -> {
+                isNumberPad = false
                 isSymbols = false
                 isKarBarActive = false
                 rebuildKeyBoxes()
@@ -1437,7 +1902,7 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
             else -> {
                 val dyn = activeDynamicLayout
-                val out = if (dyn == null && !isSymbols && !isShifted) key.lowercase() else key
+                val out = if (dyn == null && !isSymbols && !isNumberPad && !isShifted) key.lowercase() else key
                 onKeyAction?.invoke(out)
 
                 var needsRebuild = false
@@ -1480,5 +1945,13 @@ class RgbKeyboardView @JvmOverloads constructor(
         private const val TRAIL_LIFETIME_MS = 380L
         private const val LONG_PRESS_DELAY_MS = 350L
         private const val DOUBLE_TAP_SHIFT_MS = 380L
+        private const val IDLE_PAUSE_MS = 1500L
+        private const val MAX_RGB_PARTICLES = 25
+        private const val MAX_ACTIVE_GLOWS = 10
+        private const val MAX_TRAIL_POINTS = 15
+        private const val DELETE_INITIAL_DELAY_MS = 300L
+        private const val DELETE_CHAR_REPEAT_INTERVAL_MS = 40L
+        private const val DELETE_WORD_ACCEL_MS = 1200L
+        private const val DELETE_WORD_REPEAT_INTERVAL_MS = 85L
     }
 }

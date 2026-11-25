@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.model.ImeStatus
 import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonMagenta
@@ -75,6 +77,9 @@ import com.example.ui.theme.TextSecondary
 import kotlin.math.roundToInt
 
 enum class FeatureTourTarget {
+    ENABLE_KEYBOARD,
+    SELECT_KEYBOARD,
+    ADD_LANGUAGES,
     AI_HUB,
     RGB_STICKER,
     FONTS_AND_CLIPBOARD,
@@ -132,66 +137,100 @@ private data class TourStepSpec(
     val target: FeatureTourTarget,
     val titleRes: Int,
     val subtitleRes: Int,
-    val stepBadgeBn: String,
     val arrowColor: Color
 )
 
 private val NeonTourGreen = Color(0xFF00FF88)
 private val NeonTourRed = Color(0xFFFF2E63)
 
-private val featureTourSteps = listOf(
-    TourStepSpec(
+private fun buildSilentTourSteps(imeStatus: ImeStatus): List<TourStepSpec> {
+    val list = mutableListOf<TourStepSpec>()
+    if (!imeStatus.isEnabled) {
+        list += TourStepSpec(
+            target = FeatureTourTarget.ENABLE_KEYBOARD,
+            titleRes = R.string.tour_step_enable_title,
+            subtitleRes = R.string.tour_step_enable_desc,
+            arrowColor = NeonTourGreen
+        )
+    }
+    if (!imeStatus.isSelected) {
+        list += TourStepSpec(
+            target = FeatureTourTarget.SELECT_KEYBOARD,
+            titleRes = R.string.tour_step_select_title,
+            subtitleRes = R.string.tour_step_select_desc,
+            arrowColor = NeonTourRed
+        )
+    }
+    list += TourStepSpec(
+        target = FeatureTourTarget.ADD_LANGUAGES,
+        titleRes = R.string.tour_step_languages_title,
+        subtitleRes = R.string.tour_step_languages_desc,
+        arrowColor = NeonTourGreen
+    )
+    list += TourStepSpec(
         target = FeatureTourTarget.AI_HUB,
         titleRes = R.string.tour_step_1_title,
         subtitleRes = R.string.tour_step_1_desc,
-        stepBadgeBn = "১/৫",
-        arrowColor = NeonTourGreen
-    ),
-    TourStepSpec(
+        arrowColor = NeonTourRed
+    )
+    list += TourStepSpec(
         target = FeatureTourTarget.RGB_STICKER,
         titleRes = R.string.tour_step_2_title,
         subtitleRes = R.string.tour_step_2_desc,
-        stepBadgeBn = "২/৫",
-        arrowColor = NeonTourRed
-    ),
-    TourStepSpec(
+        arrowColor = NeonTourGreen
+    )
+    list += TourStepSpec(
         target = FeatureTourTarget.FONTS_AND_CLIPBOARD,
         titleRes = R.string.tour_step_3_title,
         subtitleRes = R.string.tour_step_3_desc,
-        stepBadgeBn = "৩/৫",
-        arrowColor = NeonTourGreen
-    ),
-    TourStepSpec(
+        arrowColor = NeonTourRed
+    )
+    list += TourStepSpec(
         target = FeatureTourTarget.VOICE_AND_GLOBE,
         titleRes = R.string.tour_step_4_title,
         subtitleRes = R.string.tour_step_4_desc,
-        stepBadgeBn = "৪/৫",
-        arrowColor = NeonTourRed
-    ),
-    TourStepSpec(
+        arrowColor = NeonTourGreen
+    )
+    list += TourStepSpec(
         target = FeatureTourTarget.TOUCH_SPARK_DECK,
         titleRes = R.string.tour_step_5_title,
         subtitleRes = R.string.tour_step_5_desc,
-        stepBadgeBn = "৫/৫",
-        arrowColor = NeonTourGreen
+        arrowColor = NeonTourRed
     )
-)
+    return list
+}
+
+private fun toBengaliStepBadge(current: Int, total: Int): String {
+    val map = charArrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
+    fun conv(n: Int) = n.toString().map { if (it in '0'..'9') map[it - '0'] else it }.joinToString("")
+    return "${conv(current)}/${conv(total)}"
+}
 
 /**
- * Stage 2: 100% SILENT dark spotlight overlay with a glowing bouncing Neon Green (#00FF88) /
- * Neon Red (#FF2E63) arrow and compact Bengali label.
+ * 100% SILENT (ZERO VOICE) dark spotlight onboarding walkthrough with a glowing bouncing
+ * Neon Green (#00FF88) / Neon Red (#FF2E63) pointer arrow (`👇`) and compact Bengali callout.
  * - Fixed "Skip ✕" pill stays pinned strictly at the top-right corner of the screen.
- * - User must tap the pointed spotlight area to advance step-by-step when not skipping.
+ * - Tapping the pointed spotlight area advances step-by-step.
  */
 @Composable
 fun SilentFeatureTourOverlay(
     coordinates: FeatureTourCoordinates,
+    imeStatus: ImeStatus,
+    onActiveTargetChanged: (FeatureTourTarget) -> Unit,
     onFinishOrSkip: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val steps = remember(imeStatus.isEnabled, imeStatus.isSelected) {
+        buildSilentTourSteps(imeStatus)
+    }
     var currentStepIndex by remember { mutableIntStateOf(0) }
-    val step = featureTourSteps[currentStepIndex.coerceIn(0, featureTourSteps.lastIndex)]
+    val safeIndex = currentStepIndex.coerceIn(0, steps.lastIndex)
+    val step = steps[safeIndex]
     val density = LocalDensity.current
+
+    LaunchedEffect(step.target) {
+        onActiveTargetChanged(step.target)
+    }
 
     val bounceTransition = rememberInfiniteTransition(label = "tour_arrow_bounce")
     val bounceOffsetDp by bounceTransition.animateFloat(
@@ -214,8 +253,8 @@ fun SilentFeatureTourOverlay(
     )
 
     val advanceStep: () -> Unit = {
-        if (currentStepIndex < featureTourSteps.lastIndex) {
-            currentStepIndex += 1
+        if (safeIndex < steps.lastIndex) {
+            currentStepIndex = safeIndex + 1
         } else {
             onFinishOrSkip()
         }
@@ -244,11 +283,18 @@ fun SilentFeatureTourOverlay(
                 bottom = (rawRect.bottom + padPx).coerceIn(52f, screenHeightPx - 4f)
             )
         } else {
-            // Safe fallback centered in lower half if coordinates are still settling
+            // Safe fallback while coordinates settle after scroll
             val fallbackW = screenWidthPx * 0.72f
             val fallbackH = with(density) { 64.dp.toPx() }
             val left = (screenWidthPx - fallbackW) / 2f
-            val top = screenHeightPx * 0.62f
+            val top = if (step.target == FeatureTourTarget.ENABLE_KEYBOARD ||
+                step.target == FeatureTourTarget.SELECT_KEYBOARD ||
+                step.target == FeatureTourTarget.ADD_LANGUAGES
+            ) {
+                screenHeightPx * 0.34f
+            } else {
+                screenHeightPx * 0.62f
+            }
             Rect(left, top, left + fallbackW, top + fallbackH)
         }
 
@@ -263,7 +309,6 @@ fun SilentFeatureTourOverlay(
             val rectTopLeft = Offset(spotlightRect.left, spotlightRect.top)
             val rectSize = Size(spotlightRect.width, spotlightRect.height)
 
-            // Punch crisp spotlight window over the active feature
             drawRoundRect(
                 color = Color.Transparent,
                 topLeft = rectTopLeft,
@@ -272,7 +317,6 @@ fun SilentFeatureTourOverlay(
                 blendMode = BlendMode.Clear
             )
 
-            // Outer soft neon halo
             drawRoundRect(
                 color = step.arrowColor.copy(alpha = 0.34f * ringPulseAlpha),
                 topLeft = Offset(rectTopLeft.x - 4f, rectTopLeft.y - 4f),
@@ -281,7 +325,6 @@ fun SilentFeatureTourOverlay(
                 style = Stroke(width = 9f)
             )
 
-            // Sharp neon spotlight border
             drawRoundRect(
                 color = step.arrowColor.copy(alpha = ringPulseAlpha),
                 topLeft = rectTopLeft,
@@ -291,7 +334,7 @@ fun SilentFeatureTourOverlay(
             )
         }
 
-        // Interactive tap target strictly over the pointed feature area (requires tapping here to advance)
+        // Interactive tap target strictly over the pointed feature area
         val minHitPx = with(density) { 52.dp.toPx() }
         val hitW = maxOf(spotlightRect.width, minHitPx)
         val hitH = maxOf(spotlightRect.height, minHitPx)
@@ -308,7 +351,7 @@ fun SilentFeatureTourOverlay(
                 .testTag("feature_tour_target_${step.target.name.lowercase()}")
         )
 
-        // Position bouncing Neon Green / Neon Red Arrow + compact Bengali callout cleanly above (or below) the target
+        // Position bouncing Neon Arrow cleanly above (or below) the target
         val placeAbove = spotlightRect.top > with(density) { 185.dp.toPx() }
         val arrowSizeDp = 46.dp
         val arrowSizePx = with(density) { arrowSizeDp.toPx() }
@@ -323,7 +366,6 @@ fun SilentFeatureTourOverlay(
             (spotlightRect.bottom + gapPx + bouncePx).coerceAtMost(screenHeightPx - arrowSizePx - with(density) { 110.dp.toPx() })
         }
 
-        // Glowing Bouncing Neon Arrow (pointing Down when above target, Up when below target)
         Box(
             modifier = Modifier
                 .offset { IntOffset(arrowLeftPx.roundToInt(), arrowTopPx.roundToInt()) }
@@ -343,7 +385,7 @@ fun SilentFeatureTourOverlay(
         val cardWidthPx = with(density) { cardMaxW.toPx() }
         val cardLeftPx = (spotlightRect.center.x - cardWidthPx / 2f)
             .coerceIn(with(density) { 16.dp.toPx() }, (screenWidthPx - cardWidthPx - with(density) { 16.dp.toPx() }).coerceAtLeast(16f))
-        val estimatedCardHeightPx = with(density) { 98.dp.toPx() }
+        val estimatedCardHeightPx = with(density) { 102.dp.toPx() }
         val safeTopPx = with(density) { 78.dp.toPx() }
         val cardTopPx = if (placeAbove) {
             (arrowTopPx - estimatedCardHeightPx - with(density) { 6.dp.toPx() }).coerceAtLeast(safeTopPx)
@@ -388,7 +430,7 @@ fun SilentFeatureTourOverlay(
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = step.stepBadgeBn,
+                        text = toBengaliStepBadge(safeIndex + 1, steps.size),
                         fontFamily = NotoSansBengaliFamily,
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -412,7 +454,7 @@ fun SilentFeatureTourOverlay(
             )
         }
 
-        // Fixed Top-Right "Skip ✕" Pill Button (strictly pinned to screen top-right, never attached to moving arrow)
+        // Fixed Top-Right "Skip ✕" Pill Button (strictly pinned to screen top-right)
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -472,7 +514,6 @@ private fun NeonBouncingArrowCanvas(
             }
         }
 
-        // Soft glowing neon aura stroke
         drawPath(
             path = path,
             color = color.copy(alpha = 0.34f),
@@ -482,7 +523,6 @@ private fun NeonBouncingArrowCanvas(
                 join = StrokeJoin.Round
             )
         )
-        // Bright neon core stroke
         drawPath(
             path = path,
             color = color,
@@ -492,7 +532,6 @@ private fun NeonBouncingArrowCanvas(
                 join = StrokeJoin.Round
             )
         )
-        // Crisp inner highlight
         drawPath(
             path = path,
             color = Color.White.copy(alpha = 0.8f),
@@ -506,15 +545,20 @@ private fun NeonBouncingArrowCanvas(
 }
 
 /**
- * Stage 3: Auto-disappearing glowing GTA VI neon Lifetime VIP banner shown in the center of the screen
- * right after the final tour step or top-right "Skip ✕" tap, fading out completely after 3 seconds
- * without blocking user interaction.
+ * Auto-disappearing glowing neon VIP banner shown in the center of the screen right after
+ * the walkthrough finishes or is skipped, fading out completely after 3 seconds.
  */
 @Composable
 fun FinalLifetimeVipAutoBanner(
     visible: Boolean,
+    freeTrialDays: Int = 7,
     modifier: Modifier = Modifier
 ) {
+    val bnDays = remember(freeTrialDays) {
+        val map = charArrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
+        freeTrialDays.coerceAtLeast(0).toString().map { if (it in '0'..'9') map[it - '0'] else it }.joinToString("")
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -550,7 +594,7 @@ fun FinalLifetimeVipAutoBanner(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = stringResource(R.string.tour_final_vip_banner_text),
+                    text = stringResource(R.string.tour_final_vip_banner_text, bnDays),
                     fontFamily = NotoSansBengaliFamily,
                     fontSize = 15.sp,
                     lineHeight = 22.sp,

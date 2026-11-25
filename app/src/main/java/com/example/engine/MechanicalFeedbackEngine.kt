@@ -34,12 +34,19 @@ class MechanicalFeedbackEngine(context: Context) {
     }
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
+    @Volatile
+    private var lastSoundDispatchMs: Long = 0L
 
     private val sampleRate = 22050
     private val samsungSoftPcm: ShortArray by lazy { synthesizeSamsungSoft() }
     private val clickyPcm: ShortArray by lazy { synthesizeClickyBlue() }
     private val tactilePcm: ShortArray by lazy { synthesizeTactileBrown() }
     private val linearPcm: ShortArray by lazy { synthesizeLinearRed() }
+
+    init {
+        // Pre-warm default acoustic PCM off the main UI thread
+        runCatching { audioExecutor.execute { samsungSoftPcm } }
+    }
 
     fun triggerKeyFeedback(settings: KeyboardSettings, isModifier: Boolean = false) {
         if (settings.hapticEnabled) {
@@ -79,15 +86,19 @@ class MechanicalFeedbackEngine(context: Context) {
     }
 
     private fun triggerSwitchSound(profile: SwitchSoundProfile) {
-        val pcm = when (profile) {
-            SwitchSoundProfile.SAMSUNG_SOFT -> samsungSoftPcm
-            SwitchSoundProfile.CLICKY_BLUE -> clickyPcm
-            SwitchSoundProfile.TACTILE_BROWN -> tactilePcm
-            SwitchSoundProfile.LINEAR_RED -> linearPcm
-            SwitchSoundProfile.SILENT -> return
-        }
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastSoundDispatchMs < 20L) return
+        lastSoundDispatchMs = now
 
-        audioExecutor.execute {
+        runCatching {
+            audioExecutor.execute {
+                val pcm = when (profile) {
+                    SwitchSoundProfile.SAMSUNG_SOFT -> samsungSoftPcm
+                    SwitchSoundProfile.CLICKY_BLUE -> clickyPcm
+                    SwitchSoundProfile.TACTILE_BROWN -> tactilePcm
+                    SwitchSoundProfile.LINEAR_RED -> linearPcm
+                    SwitchSoundProfile.SILENT -> return@execute
+                }
             val played = runCatching {
                 val bufferBytes = pcm.size * 2
                 val attributes = AudioAttributes.Builder()
@@ -115,9 +126,10 @@ class MechanicalFeedbackEngine(context: Context) {
                 true
             }.getOrDefault(false)
 
-            if (!played) {
-                runCatching {
-                    audioManager?.playSoundEffect(AudioManager.FX_KEY_CLICK, 0.25f)
+                if (!played) {
+                    runCatching {
+                        audioManager?.playSoundEffect(AudioManager.FX_KEY_CLICK, 0.25f)
+                    }
                 }
             }
         }
