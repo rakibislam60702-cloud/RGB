@@ -17,6 +17,7 @@ import com.example.model.LanguageCatalog
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.model.SwitchSoundProfile
+import com.example.model.TouchTypingEffect
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -34,6 +35,7 @@ class KeyboardPreferencesRepository private constructor(
         val ACTIVE_LANGUAGE_ID = stringPreferencesKey("active_language_id")
         val ENABLED_LANGUAGE_IDS = stringPreferencesKey("enabled_language_ids")
         val EFFECT = stringPreferencesKey("rgb_effect")
+        val TOUCH_EFFECT = stringPreferencesKey("touch_typing_effect")
         val PALETTE = stringPreferencesKey("rgb_palette")
         val KEYCAP_STYLE = stringPreferencesKey("keycap_style")
         val SWITCH_SOUND = stringPreferencesKey("switch_sound")
@@ -70,9 +72,8 @@ class KeyboardPreferencesRepository private constructor(
                 language = legacyLang,
                 activeLanguageId = activeId,
                 enabledLanguageIds = enabledIds,
-                effect = prefs[Keys.EFFECT]?.let { name ->
-                    RgbEffect.entries.find { it.name == name }
-                } ?: RgbEffect.TOUCH_SPARK,
+                effect = RgbEffect.fromSavedName(prefs[Keys.EFFECT]),
+                touchEffect = TouchTypingEffect.fromSavedName(prefs[Keys.TOUCH_EFFECT]),
                 palette = prefs[Keys.PALETTE]?.let { name ->
                     RgbPalette.entries.find { it.name == name }
                 } ?: RgbPalette.VICE_CITY_NEON,
@@ -179,14 +180,17 @@ class KeyboardPreferencesRepository private constructor(
         context.rgbKeyboardDataStore.edit { it[Keys.EFFECT] = effect.name }
     }
 
+    suspend fun updateTouchEffect(touchEffect: TouchTypingEffect) {
+        context.rgbKeyboardDataStore.edit { it[Keys.TOUCH_EFFECT] = touchEffect.name }
+    }
+
     suspend fun updatePalette(palette: RgbPalette) {
         context.rgbKeyboardDataStore.edit { it[Keys.PALETTE] = palette.name }
     }
 
     suspend fun cycleEffect() {
         context.rgbKeyboardDataStore.edit { prefs ->
-            val current = prefs[Keys.EFFECT]?.let { n -> RgbEffect.entries.find { it.name == n } }
-                ?: RgbEffect.TOUCH_SPARK
+            val current = RgbEffect.fromSavedName(prefs[Keys.EFFECT])
             prefs[Keys.EFFECT] = current.next().name
         }
     }

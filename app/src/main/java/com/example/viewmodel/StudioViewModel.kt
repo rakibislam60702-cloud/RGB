@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.RgbKeyboardService
 import com.example.data.ClipboardHistoryManager
+import com.example.data.CloudAnimationConfig
 import com.example.data.ComboThemePreset
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
@@ -34,6 +35,7 @@ import com.example.model.LanguagePackUiState
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.model.SwitchSoundProfile
+import com.example.model.TouchTypingEffect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +58,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val feedbackEngine = MechanicalFeedbackEngine(application)
 
     val customPhotoTheme: StateFlow<CustomPhotoTheme> = customBackgroundManager.theme
+    val downloadedThemeIds: StateFlow<Set<String>> = customBackgroundManager.downloadedThemeIds
     val licenseState: StateFlow<LicenseUiState> = trialLicenseManager.licenseState
+
+    private val _downloadingThemeIds = MutableStateFlow<Set<String>>(emptySet())
+    val downloadingThemeIds: StateFlow<Set<String>> = _downloadingThemeIds.asStateFlow()
 
     val settings: StateFlow<KeyboardSettings> = repository.settingsFlow.stateIn(
         scope = viewModelScope,
@@ -113,6 +119,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val uiLanguagePrefs = application.getSharedPreferences(PREFS_UI_LANGUAGE, Context.MODE_PRIVATE)
     private var hasCompletedFeatureTour: Boolean =
         onboardingPrefs.getBoolean(KEY_HAS_COMPLETED_FEATURE_TOUR, false)
+
+    private val _showStartupStepper = MutableStateFlow(
+        !onboardingPrefs.getBoolean(KEY_SETUP_COMPLETED, false)
+    )
+    val showStartupStepper: StateFlow<Boolean> = _showStartupStepper.asStateFlow()
 
     private val _appUiLanguage = MutableStateFlow(
         AppUiLanguage.fromCode(uiLanguagePrefs.getString(KEY_APP_UI_LANGUAGE, AppUiLanguage.BENGALI.code))
@@ -254,11 +265,20 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         )
         _imeStatus.value = updated
 
-        // 100% SILENT onboarding walkthrough (zero voice): launches once on first visit
+        // 100% SILENT onboarding walkthrough (zero voice): launches once after startup stepper is done
         if (!hasInitializedImeStatus) {
             hasInitializedImeStatus = true
-            maybeLaunchSilentFeatureTour()
+            if (!_showStartupStepper.value) {
+                maybeLaunchSilentFeatureTour()
+            }
         }
+    }
+
+    fun completeStartupStepper() {
+        _showStartupStepper.value = false
+        onboardingPrefs.edit().putBoolean(KEY_SETUP_COMPLETED, true).apply()
+        refreshImeStatus()
+        maybeLaunchSilentFeatureTour()
     }
 
     private fun maybeLaunchSilentFeatureTour() {
@@ -660,6 +680,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { repository.updateEffect(effect) }
     }
 
+    fun setTouchEffect(touchEffect: TouchTypingEffect) {
+        viewModelScope.launch { repository.updateTouchEffect(touchEffect) }
+    }
+
     fun setPalette(palette: RgbPalette) {
         viewModelScope.launch { repository.updatePalette(palette) }
     }
@@ -737,24 +761,61 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         customBackgroundManager.selectPreset(presetId)
     }
 
-    /** Section 1: 1-Tap Photo + AI Animation Combo — applies BOTH HD background AND matching AI RGB animation together. */
-    fun applyComboTheme(combo: ComboThemePreset) {
-        customBackgroundManager.selectPreset(combo.bannerPresetId)
+    /** On-demand download & apply for any of the 52 Combos or remote Cloud Themes (`filesDir/themes/`). */
+    fun downloadComboTheme(combo: ComboThemePreset, applyAfterDownload: Boolean = true) {
+        if (combo.id in _downloadingThemeIds.value) return
         viewModelScope.launch {
-            repository.updateEffect(combo.effect)
-            repository.updatePalette(combo.palette)
+            _downloadingThemeIds.update { it + combo.id }
+            val result = customBackgroundManager.downloadComboTheme(combo)
+            _downloadingThemeIds.update { it - combo.id }
+            if (result.isSuccess && applyAfterDownload) {
+                customBackgroundManager.selectDownloadedCombo(combo.id)
+                repository.updateEffect(combo.effect)
+                repository.updateTouchEffect(combo.touchEffect)
+                repository.updatePalette(combo.palette)
+            }
         }
     }
 
-    /** Section 2: Pure AI Lighting Animation Only — clears background photo/banner and applies pure RGB animation. */
+    /** 1-Tap Combo apply: applies locally cached `filesDir/themes/` artwork or downloads on demand. */
+    fun applyComboTheme(combo: ComboThemePreset) {
+        if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
+            viewModelScope.launch {
+                repository.updateEffect(combo.effect)
+                repository.updateTouchEffect(combo.touchEffect)
+                repository.updatePalette(combo.palette)
+            }
+        } else {
+            downloadComboTheme(combo, applyAfterDownload = true)
+        }
+    }
+
+    /**
+     * Dual-layer Ambient Physics Animation selector:
+     * - Selecting Classic Black (`NORMAL_DEFAULT`) clears any background photo for clean Classic Black.
+     * - Selecting any of the 20 Ambient Physics Animations layers it cleanly while preserving the active Touch Effect!
+     */
     fun applyAnimationOnly(effect: RgbEffect) {
-        customBackgroundManager.clearCustomPhoto()
+        if (effect == RgbEffect.NORMAL_DEFAULT) {
+            customBackgroundManager.clearCustomPhoto()
+        }
         viewModelScope.launch {
             repository.updateEffect(effect)
         }
     }
 
-    /** Section 3: Pure Static HD Photo Banner Only (No Animation) — applies static banner with RgbEffect.NORMAL_DEFAULT. */
+    /** Applies a remote Cloud Animation synced from Firebase `/admin_config/cloudAnimations`. */
+    fun applyCloudAnimation(anim: CloudAnimationConfig) {
+        val mappedEffect = RgbEffect.fromSavedName(anim.baseEffectId)
+        val mappedPalette = RgbPalette.entries.find { it.name.equals(anim.paletteName, ignoreCase = true) }
+            ?: settings.value.palette
+        viewModelScope.launch {
+            repository.updateEffect(mappedEffect)
+            repository.updatePalette(mappedPalette)
+        }
+    }
+
+    /** Static HD Photo Banner — applies static banner (keeps user's active Touch Effect intact!). */
     fun applyStaticBannerOnly(presetId: String) {
         customBackgroundManager.selectPreset(presetId)
         viewModelScope.launch {
@@ -789,6 +850,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     companion object {
         private const val PREFS_ONBOARDING = "ai_keyboard_onboarding_prefs"
         private const val KEY_HAS_COMPLETED_FEATURE_TOUR = "has_completed_feature_tour"
+        private const val KEY_SETUP_COMPLETED = "setup_completed"
         private const val PREFS_UI_LANGUAGE = "ai_keyboard_ui_lang_prefs"
         private const val KEY_APP_UI_LANGUAGE = "app_ui_language"
     }

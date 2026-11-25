@@ -85,6 +85,30 @@ data class PendingPaymentSnapshot(
 }
 
 @Immutable
+data class CloudThemeConfig(
+    val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val category: String = "cyber",
+    val imageUrl: String = "",
+    val effectId: String = "quantum_vortex",
+    val touchEffectId: String = "touch_spark",
+    val paletteName: String = "VICE_CITY_NEON",
+    val previewColors: List<Long> = listOf(0xFF00E5FF, 0xFFFF2A85, 0xFF0C1022),
+    val isFree: Boolean = false
+)
+
+@Immutable
+data class CloudAnimationConfig(
+    val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val baseEffectId: String = "quantum_vortex",
+    val paletteName: String = "SPECTRUM_PRISM",
+    val isFree: Boolean = false
+)
+
+@Immutable
 data class RemoteAdminConfig(
     val freeTrialDays: Int = DEFAULT_FREE_TRIAL_DAYS,
     val globalAllFree: Boolean = false,
@@ -99,7 +123,10 @@ data class RemoteAdminConfig(
     val banglishMonthlyPrice: Int = DEFAULT_BANGLISH_PRICE,
     val banglishCustomPlans: List<BanglishPlanOption> = emptyList(),
     val globalFreeFeatures: FreeFeatureOverrides = FreeFeatureOverrides(),
-    val banners: PromoBannerConfig = PromoBannerConfig()
+    val banners: PromoBannerConfig = PromoBannerConfig(),
+    val freeThemeIds: Set<String> = emptySet(),
+    val cloudThemes: List<CloudThemeConfig> = emptyList(),
+    val cloudAnimations: List<CloudAnimationConfig> = emptyList()
 ) {
     val trialDurationMs: Long
         get() = freeTrialDays.coerceIn(0, 365).toLong() * 86_400_000L
@@ -658,6 +685,10 @@ class FirebaseRemoteManager private constructor(context: Context) {
                 ?: PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE
         )
 
+        val freeThemeIds = parseFreeThemeIds(snapshot.child(FIELD_FREE_THEME_IDS))
+        val cloudThemes = parseCloudThemes(snapshot.child(FIELD_CLOUD_THEMES))
+        val cloudAnimations = parseCloudAnimations(snapshot.child(FIELD_CLOUD_ANIMATIONS))
+
         return RemoteAdminConfig(
             freeTrialDays = freeTrialDays,
             globalAllFree = globalAllFree,
@@ -672,8 +703,98 @@ class FirebaseRemoteManager private constructor(context: Context) {
             banglishMonthlyPrice = banglishMonthlyPrice,
             banglishCustomPlans = customBanglishPlans,
             globalFreeFeatures = globalFree,
-            banners = banners
+            banners = banners,
+            freeThemeIds = freeThemeIds,
+            cloudThemes = cloudThemes,
+            cloudAnimations = cloudAnimations
         )
+    }
+
+    private fun parseFreeThemeIds(node: DataSnapshot): Set<String> {
+        if (!node.exists()) return emptySet()
+        val result = linkedSetOf<String>()
+        if (node.childrenCount > 0) {
+            node.children.forEach { child ->
+                val rawVal = child.value
+                when (rawVal) {
+                    is Boolean -> if (rawVal) child.key?.trim()?.takeIf { it.isNotEmpty() }?.let { result.add(it) }
+                    is String -> {
+                        val trimmed = rawVal.trim()
+                        if (trimmed.equals("true", ignoreCase = true) || trimmed == "1") {
+                            child.key?.trim()?.takeIf { it.isNotEmpty() }?.let { result.add(it) }
+                        } else if (trimmed.isNotEmpty() && !trimmed.equals("false", ignoreCase = true)) {
+                            result.add(trimmed)
+                        }
+                    }
+                    is Number -> if (rawVal.toInt() != 0) child.key?.trim()?.takeIf { it.isNotEmpty() }?.let { result.add(it) }
+                }
+            }
+        } else {
+            val csv = node.readStringOrNull().orEmpty()
+            csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { result.add(it) }
+        }
+        return result
+    }
+
+    private fun parseCloudThemes(node: DataSnapshot): List<CloudThemeConfig> {
+        if (!node.exists()) return emptyList()
+        val list = mutableListOf<CloudThemeConfig>()
+        node.children.forEach { child ->
+            val enabled = child.child("enabled").readBooleanOrNull() ?: true
+            if (!enabled) return@forEach
+            val id = child.child("id").readStringOrNull() ?: child.key?.trim().orEmpty()
+            val title = child.child("title").readStringOrNull() ?: return@forEach
+            if (id.isBlank()) return@forEach
+            val colors = mutableListOf<Long>()
+            child.child("colors").children.forEach { cChild ->
+                val hex = cChild.readStringOrNull()?.removePrefix("#")
+                val parsed = hex?.toLongOrNull(16)
+                if (parsed != null) {
+                    colors.add(if (hex.length <= 6) (0xFF000000L or parsed) else parsed)
+                }
+            }
+            list += CloudThemeConfig(
+                id = id,
+                title = title,
+                subtitle = child.child("subtitle").readStringOrNull().orEmpty(),
+                category = child.child("category").readStringOrNull() ?: "cyber",
+                imageUrl = child.child("imageUrl").readStringOrNull()
+                    ?: child.child("image").readStringOrNull().orEmpty(),
+                effectId = child.child("effectId").readStringOrNull()
+                    ?: child.child("effect").readStringOrNull()
+                    ?: "quantum_vortex",
+                touchEffectId = child.child("touchEffectId").readStringOrNull()
+                    ?: child.child("touchEffect").readStringOrNull()
+                    ?: "touch_spark",
+                paletteName = child.child("palette").readStringOrNull() ?: "VICE_CITY_NEON",
+                previewColors = colors.ifEmpty { listOf(0xFF00E5FF, 0xFFFF2A85, 0xFF0C1022) },
+                isFree = child.child("isFree").readBooleanOrNull() ?: false
+            )
+        }
+        return list
+    }
+
+    private fun parseCloudAnimations(node: DataSnapshot): List<CloudAnimationConfig> {
+        if (!node.exists()) return emptyList()
+        val list = mutableListOf<CloudAnimationConfig>()
+        node.children.forEach { child ->
+            val enabled = child.child("enabled").readBooleanOrNull() ?: true
+            if (!enabled) return@forEach
+            val id = child.child("id").readStringOrNull() ?: child.key?.trim().orEmpty()
+            val title = child.child("title").readStringOrNull() ?: return@forEach
+            if (id.isBlank()) return@forEach
+            list += CloudAnimationConfig(
+                id = id,
+                title = title,
+                subtitle = child.child("subtitle").readStringOrNull().orEmpty(),
+                baseEffectId = child.child("baseEffectId").readStringOrNull()
+                    ?: child.child("effect").readStringOrNull()
+                    ?: "quantum_vortex",
+                paletteName = child.child("palette").readStringOrNull() ?: "SPECTRUM_PRISM",
+                isFree = child.child("isFree").readBooleanOrNull() ?: false
+            )
+        }
+        return list
     }
 
     private fun parseCustomBanglishPlans(plansNode: DataSnapshot): List<BanglishPlanOption> {
@@ -830,6 +951,9 @@ class FirebaseRemoteManager private constructor(context: Context) {
         private const val FIELD_BANNER2_IMAGE = "banner2Image"
         private const val FIELD_BANNER2_TITLE = "banner2Title"
         private const val FIELD_BANNER2_SUBTITLE = "banner2Subtitle"
+        private const val FIELD_FREE_THEME_IDS = "freeThemeIds"
+        private const val FIELD_CLOUD_THEMES = "cloudThemes"
+        private const val FIELD_CLOUD_ANIMATIONS = "cloudAnimations"
 
         private const val FIELD_DEVICE_ID = "deviceId"
         private const val FIELD_DEVICE_MODEL = "deviceModel"

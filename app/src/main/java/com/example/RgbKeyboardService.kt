@@ -1,8 +1,11 @@
 package com.example
 
+import android.Manifest
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.PorterDuff
@@ -15,6 +18,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.telecom.TelecomManager
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
@@ -35,6 +42,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
 import com.example.data.ClipboardHistoryManager
 import com.example.data.CustomBackgroundManager
@@ -88,6 +96,17 @@ class RgbKeyboardService : InputMethodService() {
     private lateinit var clipboardManager: ClipboardHistoryManager
     private lateinit var feedbackEngine: MechanicalFeedbackEngine
     private lateinit var voiceController: OnlineVoiceTypingController
+
+    private var callBannerBar: View? = null
+    private var tvCallStatus: TextView? = null
+    private var btnCallReceive: TextView? = null
+    private var btnCallEnd: TextView? = null
+    private var currentCallState: Int = TelephonyManager.CALL_STATE_IDLE
+    private var callOffhookStartMs: Long = 0L
+    private var callListenerRegistered: Boolean = false
+    private var telephonyCallbackObj: Any? = null
+    @Suppress("DEPRECATION")
+    private var legacyPhoneStateListener: PhoneStateListener? = null
 
     private var topBar: View? = null
     private var tvBrandSignature: TextView? = null
@@ -201,6 +220,21 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
+    private val callTimerRunnable = object : Runnable {
+        override fun run() {
+            if (currentCallState == TelephonyManager.CALL_STATE_OFFHOOK &&
+                isInputViewShown &&
+                currentLicenseState.isCallBarUnlocked
+            ) {
+                val elapsedSec = ((SystemClock.elapsedRealtime() - callOffhookStartMs) / 1000L).coerceAtLeast(0L)
+                val mins = elapsedSec / 60L
+                val secs = elapsedSec % 60L
+                tvCallStatus?.text = String.format(java.util.Locale.US, "📞 Active Call • %02d:%02d", mins, secs)
+                uiHandler.postDelayed(this, 1000L)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         preferencesRepository = KeyboardPreferencesRepository.getInstance(applicationContext)
@@ -298,11 +332,27 @@ class RgbKeyboardService : InputMethodService() {
                 renderClipboardSnippets(snippets)
             }
         }
+
+        registerCallStateListenerIfPermitted()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreateInputView(): View {
         val root = layoutInflater.inflate(R.layout.keyboard_view, null)
+
+        callBannerBar = root.findViewById(R.id.callBannerBar)
+        tvCallStatus = root.findViewById(R.id.tvCallStatus)
+        btnCallReceive = root.findViewById(R.id.btnCallReceive)
+        btnCallEnd = root.findViewById(R.id.btnCallEnd)
+        styleCallBannerBar()
+        btnCallReceive?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            answerIncomingCall()
+        }
+        btnCallEnd?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            endActiveCall()
+        }
 
         topBar = root.findViewById(R.id.topBar)
         tvBrandSignature = root.findViewById(R.id.tvBrandSignature)
@@ -595,13 +645,17 @@ class RgbKeyboardService : InputMethodService() {
         keyboardView?.resumeAnimations()
         currentLicenseState = trialLicenseManager.refreshState()
         lastVipSyncMs = SystemClock.uptimeMillis()
+        registerCallStateListenerIfPermitted()
         applyTrialLockState()
+        updateCallBannerVisibility()
         refreshSuggestions(immediate = true)
     }
 
     override fun onWindowShown() {
         super.onWindowShown()
         keyboardView?.resumeAnimations()
+        registerCallStateListenerIfPermitted()
+        updateCallBannerVisibility()
     }
 
     override fun onWindowHidden() {
@@ -610,6 +664,8 @@ class RgbKeyboardService : InputMethodService() {
         isEmojiBackspaceRepeating = false
         uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
         uiHandler.removeCallbacks(micHoldLockRunnable)
+        uiHandler.removeCallbacks(callTimerRunnable)
+        callBannerBar?.visibility = View.GONE
     }
 
     override fun onUpdateSelection(
@@ -650,9 +706,11 @@ class RgbKeyboardService : InputMethodService() {
             voiceController.stopListening()
         }
         voiceBar?.visibility = View.GONE
+        callBannerBar?.visibility = View.GONE
         isEmojiBackspaceRepeating = false
         uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
         uiHandler.removeCallbacks(micHoldLockRunnable)
+        uiHandler.removeCallbacks(callTimerRunnable)
     }
 
     override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype?) {
@@ -675,6 +733,7 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterCallStateListener()
         stopStickerPulseAnimation()
         stickerCardViews.clear()
         isEmojiBackspaceRepeating = false
@@ -686,6 +745,10 @@ class RgbKeyboardService : InputMethodService() {
         if (::feedbackEngine.isInitialized) {
             feedbackEngine.release()
         }
+        callBannerBar = null
+        tvCallStatus = null
+        btnCallReceive = null
+        btnCallEnd = null
         topBar = null
         tvBrandSignature = null
         voiceBar = null
@@ -775,6 +838,7 @@ class RgbKeyboardService : InputMethodService() {
         }
         suggestionBar?.visibility = if (activeOverlay == OverlayMode.NONE && !isAiTopicTypingMode) View.VISIBLE else View.GONE
         keyboardView?.setVipVisualsEnabled(currentLicenseState.isRgbThemesUnlocked)
+        updateCallBannerVisibility()
         updateToolbarTints()
         refreshSuggestions()
     }
@@ -981,7 +1045,11 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun startVoiceTyping(lockedContinuous: Boolean) {
         syncVipVisualsQuietly()
-        if (!voiceController.hasAudioPermission()) {
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasMicPermission) {
             voiceBar?.visibility = View.VISIBLE
             tvVoiceStatus?.text = getString(R.string.voice_permission_needed)
             tvVoiceStatus?.setTextColor(Color.parseColor("#FFB300"))
@@ -2582,6 +2650,155 @@ class RgbKeyboardService : InputMethodService() {
             putExtra(MainActivity.EXTRA_OPEN_UNLOCK_SCREEN, true)
         }
         runCatching { startActivity(intent) }
+    }
+
+    private fun styleCallBannerBar() {
+        val density = resources.displayMetrics.density
+        callBannerBar?.background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.parseColor("#0D1530"), Color.parseColor("#1D1036"))
+        ).apply {
+            cornerRadius = 10f * density
+            setStroke((1.2f * density).toInt(), Color.parseColor("#00F5D4"))
+        }
+        btnCallReceive?.background = GradientDrawable().apply {
+            setColor(Color.parseColor("#0D9458"))
+            cornerRadius = 999f * density
+            setStroke((1f * density).toInt(), Color.parseColor("#34D399"))
+        }
+        btnCallEnd?.background = GradientDrawable().apply {
+            setColor(Color.parseColor("#C81E4C"))
+            cornerRadius = 999f * density
+            setStroke((1f * density).toInt(), Color.parseColor("#FF6B8A"))
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun registerCallStateListenerIfPermitted() {
+        if (callListenerRegistered) return
+        val hasPhoneState = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.READ_PHONE_STATE
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasPhoneState) return
+
+        val tm = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                    override fun onCallStateChanged(state: Int) {
+                        handleTelephonyCallStateChanged(state)
+                    }
+                }
+                tm.registerTelephonyCallback(mainExecutor, callback)
+                telephonyCallbackObj = callback
+            } else {
+                val listener = object : PhoneStateListener() {
+                    @Deprecated("Deprecated in Java")
+                    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                        handleTelephonyCallStateChanged(state)
+                    }
+                }
+                tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+                legacyPhoneStateListener = listener
+            }
+            callListenerRegistered = true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun unregisterCallStateListener() {
+        if (!callListenerRegistered) return
+        val tm = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (telephonyCallbackObj as? TelephonyCallback)?.let { cb ->
+                    tm?.unregisterTelephonyCallback(cb)
+                }
+                telephonyCallbackObj = null
+            } else {
+                legacyPhoneStateListener?.let { listener ->
+                    tm?.listen(listener, PhoneStateListener.LISTEN_NONE)
+                }
+                legacyPhoneStateListener = null
+            }
+        }
+        callListenerRegistered = false
+    }
+
+    private fun handleTelephonyCallStateChanged(state: Int) {
+        uiHandler.post {
+            val prevState = currentCallState
+            currentCallState = state
+            if (state == TelephonyManager.CALL_STATE_OFFHOOK && prevState != TelephonyManager.CALL_STATE_OFFHOOK) {
+                callOffhookStartMs = SystemClock.elapsedRealtime()
+            } else if (state == TelephonyManager.CALL_STATE_IDLE) {
+                callOffhookStartMs = 0L
+            }
+            updateCallBannerVisibility()
+        }
+    }
+
+    private fun updateCallBannerVisibility() {
+        val bar = callBannerBar ?: return
+        uiHandler.removeCallbacks(callTimerRunnable)
+
+        val shouldShow = isInputViewShown &&
+            currentLicenseState.isCallBarUnlocked &&
+            currentCallState != TelephonyManager.CALL_STATE_IDLE
+
+        if (!shouldShow) {
+            bar.visibility = View.GONE
+            return
+        }
+
+        bar.visibility = View.VISIBLE
+        when (currentCallState) {
+            TelephonyManager.CALL_STATE_RINGING -> {
+                tvCallStatus?.text = "📞 Incoming Call..."
+                tvCallStatus?.setTextColor(Color.parseColor("#00F5D4"))
+                btnCallReceive?.visibility = View.VISIBLE
+                btnCallEnd?.visibility = View.VISIBLE
+            }
+            TelephonyManager.CALL_STATE_OFFHOOK -> {
+                if (callOffhookStartMs <= 0L) {
+                    callOffhookStartMs = SystemClock.elapsedRealtime()
+                }
+                tvCallStatus?.setTextColor(Color.parseColor("#34D399"))
+                btnCallReceive?.visibility = View.GONE
+                btnCallEnd?.visibility = View.VISIBLE
+                uiHandler.post(callTimerRunnable)
+            }
+            else -> {
+                bar.visibility = View.GONE
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun answerIncomingCall() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ANSWER_PHONE_CALLS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return
+        runCatching { telecomManager.acceptRingingCall() }
+    }
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun endActiveCall() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ANSWER_PHONE_CALLS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return
+        runCatching { telecomManager.endCall() }
     }
 
     companion object {

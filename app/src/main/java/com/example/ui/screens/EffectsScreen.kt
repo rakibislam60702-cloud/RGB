@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -11,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +23,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,10 +33,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -45,7 +51,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -70,17 +78,19 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.BannerPresetCatalog
 import com.example.data.BannerThemePreset
+import com.example.data.CloudAnimationConfig
+import com.example.data.ComboCategory
 import com.example.data.ComboThemeCatalog
 import com.example.data.ComboThemePreset
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.LicenseUiState
 import com.example.engine.RgbLightingEngine
-import com.example.engine.RipplePulse
 import com.example.model.KeyboardSettings
 import com.example.model.KeycapStyle
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
+import com.example.model.TouchTypingEffect
 import com.example.ui.theme.FlagshipCyanMagentaBrush
 import com.example.ui.theme.FlagshipGlassRimGoldSubtle
 import com.example.ui.theme.FlagshipGlassRimSubtle
@@ -97,22 +107,27 @@ import com.example.ui.theme.KeyChassisDark
 import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonEmerald
-import com.example.ui.theme.NeonError
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NotoSansBengaliFamily
 import com.example.ui.theme.RoyalBlueDeep
 import com.example.ui.theme.RoyalGold
 import com.example.ui.theme.luminousGlassCard
 import kotlinx.coroutines.isActive
+import kotlin.math.sin
 
 @Composable
 fun EffectsScreen(
     settings: KeyboardSettings,
     customPhotoTheme: CustomPhotoTheme,
     licenseState: LicenseUiState,
+    downloadedThemeIds: Set<String>,
+    downloadingThemeIds: Set<String>,
     onApplyVipToKeyboard: () -> Unit,
     onApplyComboTheme: (ComboThemePreset) -> Unit,
+    onDownloadComboTheme: (ComboThemePreset) -> Unit,
     onApplyAnimationOnly: (RgbEffect) -> Unit,
+    onSelectTouchEffect: (TouchTypingEffect) -> Unit,
+    onApplyCloudAnimation: (CloudAnimationConfig) -> Unit,
     onApplyStaticBannerOnly: (String) -> Unit,
     onSelectBannerPreset: (String) -> Unit,
     onPickCustomPhoto: (Uri) -> Unit,
@@ -129,9 +144,17 @@ fun EffectsScreen(
     modifier: Modifier = Modifier
 ) {
     var timeSec by remember { mutableFloatStateOf(0f) }
+    var selectedCategoryName by rememberSaveable { mutableStateOf(ComboCategory.ALL.name) }
+    val selectedCategory = remember(selectedCategoryName) {
+        ComboCategory.entries.firstOrNull { it.name == selectedCategoryName } ?: ComboCategory.ALL
+    }
 
-    val galleryPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+    val filteredCombos = remember(selectedCategory, licenseState.adminConfig.cloudThemes) {
+        ComboThemeCatalog.byCategory(selectedCategory, licenseState.adminConfig.cloudThemes)
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { selectedUri: Uri? ->
         if (selectedUri != null) {
             onPickCustomPhoto(selectedUri)
@@ -147,6 +170,8 @@ fun EffectsScreen(
         }
     }
 
+    val themesLocked = !licenseState.isRgbThemesUnlocked
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -160,7 +185,7 @@ fun EffectsScreen(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Header (Pure White Typography)
+            // Header
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = stringResource(R.string.effects_header),
@@ -169,21 +194,20 @@ fun EffectsScreen(
                     color = Color.White
                 )
                 Text(
-                    text = stringResource(R.string.effects_subtitle),
+                    text = "Dual-Layer RGB Engine: Combine any Background Theme / Ambient Physics + Touch Typing Effect simultaneously!",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.White.copy(alpha = 0.90f)
                 )
             }
 
-            // Live Mini Keyboard Preview (shows active HD Photo/Banner + Live AI Animation together!)
+            // Live Dual-Layer Keyboard Preview (Theme Photo + Layer 1 Ambient + Layer 2 Touch Effect)
             LiveMiniDeckPreview(
                 settings = settings,
                 customPhotoTheme = customPhotoTheme,
                 timeSec = timeSec
             )
 
-            // VIP Expired Lock Notice + Dynamic VIP Unlock CTA (respects remote rgbThemes override)
-            val themesLocked = !licenseState.isRgbThemesUnlocked
+            // VIP Expired Lock Notice + Dynamic VIP Unlock CTA
             if (themesLocked) {
                 Column(
                     modifier = Modifier
@@ -244,32 +268,32 @@ fun EffectsScreen(
             }
 
             // =========================================================================
-            // SECTION 1 — 🔥 1-Tap Photo + AI Animation Combos (10 All-in-One Ready Themes)
+            // SECTION 1 — ⚡ 7 Touch-Reactive Typing Effects (Layer 2 — Stacks on ANY Theme/Ambient!)
             // =========================================================================
             GallerySectionHeader(
-                title = stringResource(R.string.section_theme_combos),
-                subtitle = stringResource(R.string.section_theme_combos_sub)
+                title = "⚡ 7 Touch-Reactive Typing Effects (Layer 2)",
+                subtitle = "Bursts vividly on every keypress — stacks simultaneously on top of your active Theme & Ambient Animation"
             )
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ComboThemeCatalog.allCombos.chunked(2).forEach { pair ->
+            Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                TouchTypingEffect.entries.chunked(2).forEach { pair ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(11.dp)
                     ) {
-                        pair.forEach { combo ->
-                            val isSelected = customPhotoTheme.presetId == combo.bannerPresetId &&
-                                settings.effect == combo.effect
-                            ComboThemeCard(
-                                combo = combo,
-                                selected = isSelected,
-                                isLockedVip = themesLocked,
+                        pair.forEach { touchEffect ->
+                            val isSelected = settings.touchEffect == touchEffect
+                            val isUnlocked = licenseState.isThemeItemUnlocked(touchEffect.id, isPermanentlyFree = false)
+                            TouchTypingEffectCard(
+                                touchEffect = touchEffect,
+                                settings = settings,
                                 timeSec = timeSec,
+                                selected = isSelected,
+                                isLockedVip = !isUnlocked,
                                 onClick = {
-                                    if (themesLocked) {
-                                        onApplyComboTheme(combo)
+                                    if (!isUnlocked) {
                                         onApplyVipToKeyboard()
                                     } else {
-                                        onApplyComboTheme(combo)
+                                        onSelectTouchEffect(touchEffect)
                                     }
                                 },
                                 modifier = Modifier.weight(1f)
@@ -283,11 +307,11 @@ fun EffectsScreen(
             }
 
             // =========================================================================
-            // SECTION 2 — ✨ AI Lighting Animations Only (12 Pure RGB Modes + Classic Black)
+            // SECTION 2 — 🌈 Classic Black (FREE) + 20 Next-Gen Ambient Physics RGB Animations
             // =========================================================================
             GallerySectionHeader(
-                title = stringResource(R.string.section_animations_only),
-                subtitle = stringResource(R.string.section_animations_only_sub)
+                title = "🌈 20 Ambient Physics RGB Animations (Layer 1)",
+                subtitle = "Classic Black is permanently FREE • All 20 Next-Gen physics modes combine cleanly with your Touch Effect"
             )
             Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 RgbEffect.entries.chunked(2).forEach { pair ->
@@ -296,17 +320,162 @@ fun EffectsScreen(
                         horizontalArrangement = Arrangement.spacedBy(11.dp)
                     ) {
                         pair.forEach { effect ->
-                            val isSelected = settings.effect == effect && !customPhotoTheme.hasPhoto
+                            val isSelected = settings.effect == effect
+                            val isUnlocked = licenseState.isThemeItemUnlocked(
+                                themeId = effect.id,
+                                isPermanentlyFree = !effect.isVipEffect
+                            )
                             EffectPreviewCard(
                                 effect = effect,
                                 settings = settings,
                                 timeSec = timeSec,
                                 selected = isSelected,
-                                isLockedVip = themesLocked && effect.isVipEffect,
+                                isLockedVip = !isUnlocked,
                                 onClick = {
-                                    onApplyAnimationOnly(effect)
-                                    if (themesLocked && effect.isVipEffect) {
+                                    if (!isUnlocked) {
                                         onApplyVipToKeyboard()
+                                    } else {
+                                        onApplyAnimationOnly(effect)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (pair.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+
+                // Remote Firebase Cloud Animations (/admin_config/cloudAnimations)
+                if (licenseState.adminConfig.cloudAnimations.isNotEmpty()) {
+                    Text(
+                        text = "☁️ LIVE CLOUD ANIMATIONS",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonCyan,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                    licenseState.adminConfig.cloudAnimations.chunked(2).forEach { pair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(11.dp)
+                        ) {
+                            pair.forEach { cloudAnim ->
+                                val mappedEffect = RgbEffect.fromSavedName(cloudAnim.baseEffectId)
+                                val mappedPalette = RgbPalette.entries.firstOrNull {
+                                    it.name.equals(cloudAnim.paletteName, ignoreCase = true)
+                                } ?: settings.palette
+                                val isUnlocked = licenseState.isThemeItemUnlocked(
+                                    themeId = cloudAnim.id,
+                                    isPermanentlyFree = cloudAnim.isFree
+                                )
+                                CloudAnimationCard(
+                                    cloudAnim = cloudAnim,
+                                    previewEffect = mappedEffect,
+                                    previewPalette = mappedPalette,
+                                    settings = settings,
+                                    timeSec = timeSec,
+                                    selected = settings.effect == mappedEffect && settings.palette == mappedPalette,
+                                    isLockedVip = !isUnlocked,
+                                    onClick = {
+                                        if (!isUnlocked) {
+                                            onApplyVipToKeyboard()
+                                        } else {
+                                            onApplyCloudAnimation(cloudAnim)
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (pair.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // =========================================================================
+            // SECTION 3 — ☁️ 52 On-Demand Downloadable 1-Tap Combos + Remote Cloud Themes
+            // =========================================================================
+            GallerySectionHeader(
+                title = "☁️ 52 Downloadable 1-Tap Flagship Combos",
+                subtitle = "Download HD themes locally on demand (filesDir/themes/) — combines Background + Ambient + Touch Effect in 1 tap"
+            )
+
+            // Category Filter Chips
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("combo_category_filter_row")
+            ) {
+                items(ComboCategory.entries, key = { it.id }) { cat ->
+                    val active = cat == selectedCategory
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(
+                                if (active) {
+                                    Brush.horizontalGradient(listOf(NeonCyan.copy(alpha = 0.28f), NeonMagenta.copy(alpha = 0.28f)))
+                                } else {
+                                    Brush.horizontalGradient(listOf(GlassCardSurface, GlassCardSurface))
+                                }
+                            )
+                            .border(
+                                width = if (active) 1.4.dp else 1.dp,
+                                brush = if (active) FlagshipGoldCyanBrush else FlagshipGlassRimSubtle,
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .clickable { selectedCategoryName = cat.name }
+                            .padding(horizontal = 13.dp, vertical = 9.dp)
+                            .testTag("combo_cat_${cat.id}")
+                    ) {
+                        Text(
+                            text = cat.label,
+                            fontSize = 12.sp,
+                            fontWeight = if (active) FontWeight.ExtraBold else FontWeight.SemiBold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                filteredCombos.chunked(2).forEach { pair ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        pair.forEach { combo ->
+                            val isDownloaded = downloadedThemeIds.contains(combo.id) ||
+                                BannerPresetCatalog.findById(combo.bannerPresetId)?.drawableRes != null
+                            val isDownloading = downloadingThemeIds.contains(combo.id)
+                            val isSelected = (customPhotoTheme.presetId == combo.id ||
+                                customPhotoTheme.presetId == combo.bannerPresetId) &&
+                                settings.effect == combo.effect
+                            val isUnlocked = licenseState.isThemeItemUnlocked(
+                                themeId = combo.id,
+                                isPermanentlyFree = combo.isCloudFree
+                            )
+                            ComboThemeCard(
+                                combo = combo,
+                                selected = isSelected,
+                                isDownloaded = isDownloaded,
+                                isDownloading = isDownloading,
+                                isLockedVip = !isUnlocked,
+                                timeSec = timeSec,
+                                onClick = {
+                                    if (!isUnlocked) {
+                                        onApplyVipToKeyboard()
+                                    } else if (isDownloaded) {
+                                        onApplyComboTheme(combo)
+                                    } else if (!isDownloading) {
+                                        onDownloadComboTheme(combo)
                                     }
                                 },
                                 modifier = Modifier.weight(1f)
@@ -320,7 +489,7 @@ fun EffectsScreen(
             }
 
             // =========================================================================
-            // SECTION 3 — 🖼️ HD Photo Banners Only (No Animation) + Custom Gallery Photo
+            // SECTION 4 — 🖼️ HD Photo Banners Only + Custom Gallery Photo (👑 VIP)
             // =========================================================================
             GallerySectionHeader(
                 title = stringResource(R.string.section_static_banners),
@@ -328,27 +497,33 @@ fun EffectsScreen(
             )
             StaticPhotoBannersSection(
                 photoTheme = customPhotoTheme,
+                licenseState = licenseState,
                 isStaticBannerMode = settings.effect == RgbEffect.NORMAL_DEFAULT,
                 isFreeStandardMode = themesLocked,
                 onApplyVipToKeyboard = onApplyVipToKeyboard,
                 onSelectStaticBanner = { presetId ->
-                    onApplyStaticBannerOnly(presetId)
-                    if (themesLocked) {
+                    val unlocked = licenseState.isThemeItemUnlocked(presetId, isPermanentlyFree = false)
+                    if (!unlocked) {
                         onApplyVipToKeyboard()
+                    } else {
+                        onApplyStaticBannerOnly(presetId)
                     }
                 },
                 onPickClick = {
-                    if (themesLocked) {
+                    val galleryUnlocked = licenseState.isThemeItemUnlocked("custom_gallery_photo", isPermanentlyFree = false)
+                    if (!galleryUnlocked) {
                         onApplyVipToKeyboard()
                     } else {
-                        galleryPickerLauncher.launch("image/*")
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
                     }
                 },
                 onDimChange = onPhotoDimChange,
                 onRemoveClick = onRemoveCustomPhoto
             )
 
-            // Color Palettes Grid (2 columns)
+            // Color Palettes Grid (2 columns — 👑 VIP when locked)
             SectionTitle(title = stringResource(R.string.section_color_palette))
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 RgbPalette.entries.chunked(2).forEach { pair ->
@@ -357,10 +532,21 @@ fun EffectsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         pair.forEach { palette ->
+                            val unlocked = licenseState.isThemeItemUnlocked(
+                                themeId = "palette_${palette.name.lowercase()}",
+                                isPermanentlyFree = false
+                            )
                             PaletteCard(
                                 palette = palette,
                                 selected = settings.palette == palette,
-                                onClick = { onSelectPalette(palette) },
+                                isLockedVip = !unlocked,
+                                onClick = {
+                                    if (!unlocked) {
+                                        onApplyVipToKeyboard()
+                                    } else {
+                                        onSelectPalette(palette)
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -371,7 +557,7 @@ fun EffectsScreen(
                 }
             }
 
-            // Keycap Architecture Grid (2 columns)
+            // Keycap Architecture Grid (2 columns — 👑 VIP when locked)
             SectionTitle(title = stringResource(R.string.section_keycap_style))
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 KeycapStyle.entries.chunked(2).forEach { pair ->
@@ -380,19 +566,33 @@ fun EffectsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         pair.forEach { style ->
+                            val unlocked = licenseState.isThemeItemUnlocked(
+                                themeId = "keycap_${style.name.lowercase()}",
+                                isPermanentlyFree = false
+                            )
                             KeycapStyleCard(
                                 style = style,
                                 accentColor = RgbLightingEngine.samplePalette(settings.palette, timeSec * 0.25f),
                                 selected = settings.keycapStyle == style,
-                                onClick = { onSelectKeycapStyle(style) },
+                                isLockedVip = !unlocked,
+                                onClick = {
+                                    if (!unlocked) {
+                                        onApplyVipToKeyboard()
+                                    } else {
+                                        onSelectKeycapStyle(style)
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+                        if (pair.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
             }
 
-            // Optical Tuning Sliders & Switches (Luminous Flagship Glass Card)
+            // Optical Tuning Sliders & Switches
             SectionTitle(title = stringResource(R.string.section_tuning))
             Column(
                 modifier = Modifier
@@ -475,9 +675,241 @@ private fun GallerySectionHeader(
 }
 
 @Composable
+private fun TouchTypingEffectCard(
+    touchEffect: TouchTypingEffect,
+    settings: KeyboardSettings,
+    timeSec: Float,
+    selected: Boolean,
+    isLockedVip: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .luminousGlassCard(
+                shape = RoundedCornerShape(16.dp),
+                borderBrush = when {
+                    selected -> FlagshipGoldCyanBrush
+                    isLockedVip -> FlagshipGoldAmberBrush
+                    else -> FlagshipGlassRimSubtle
+                },
+                borderWidth = if (selected) 1.7.dp else 1.1.dp,
+                glowColor = if (selected) NeonCyan else RoyalGold,
+                glowElevation = if (selected) 12.dp else 6.dp,
+                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+            )
+            .clickable(onClick = onClick)
+            .padding(11.dp)
+            .testTag("touch_effect_card_${touchEffect.id}"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(42.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(KeyChassisDark)
+            ) {
+                val cols = 7
+                val rows = 3
+                val gap = 2.5.dp.toPx()
+                val pad = 4.dp.toPx()
+                val kw = (size.width - pad * 2 - gap * (cols - 1)) / cols
+                val kh = (size.height - pad * 2 - gap * (rows - 1)) / rows
+                val cr = CornerRadius(3.dp.toPx(), 3.dp.toPx())
+                for (r in 0 until rows) {
+                    for (c in 0 until cols) {
+                        val x = pad + c * (kw + gap)
+                        val y = pad + r * (kh + gap)
+                        val nx = (c + 0.5f) / cols
+                        val ny = (r + 0.5f) / rows
+                        val touchCol = RgbLightingEngine.computeTouchPreviewColor(
+                            touchEffect = touchEffect,
+                            nx = nx,
+                            ny = ny,
+                            row = r,
+                            col = c,
+                            rows = rows,
+                            cols = cols,
+                            timeSec = timeSec,
+                            palette = settings.palette,
+                            glowIntensity = settings.glowIntensity
+                        )
+                        drawRoundRect(
+                            color = Color(0xFF151926),
+                            topLeft = Offset(x, y),
+                            size = Size(kw, kh),
+                            cornerRadius = cr
+                        )
+                        if (touchCol.alpha > 0.03f) {
+                            drawRoundRect(
+                                color = touchCol,
+                                topLeft = Offset(x, y),
+                                size = Size(kw, kh),
+                                cornerRadius = cr
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isLockedVip) {
+                VipCornerPill(
+                    text = "👑 VIP",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(3.dp)
+                )
+            } else if (selected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(3.dp)
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.7f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = NeonEmerald,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = touchEffect.displayName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = touchEffect.description,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.84f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun CloudAnimationCard(
+    cloudAnim: CloudAnimationConfig,
+    previewEffect: RgbEffect,
+    previewPalette: RgbPalette,
+    settings: KeyboardSettings,
+    timeSec: Float,
+    selected: Boolean,
+    isLockedVip: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val previewSettings = remember(previewEffect, previewPalette, settings.animationSpeed, settings.glowIntensity) {
+        settings.copy(effect = previewEffect, palette = previewPalette)
+    }
+
+    Column(
+        modifier = modifier
+            .luminousGlassCard(
+                shape = RoundedCornerShape(16.dp),
+                borderBrush = if (selected) FlagshipGoldCyanBrush else FlagshipCyanMagentaBrush,
+                borderWidth = if (selected) 1.7.dp else 1.1.dp,
+                glowColor = NeonCyan,
+                glowElevation = if (selected) 12.dp else 7.dp,
+                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+            )
+            .clickable(onClick = onClick)
+            .padding(11.dp)
+            .testTag("cloud_anim_${cloudAnim.id}"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(KeyChassisDark)
+            ) {
+                val cols = 7
+                val rows = 2
+                val gap = 3.dp.toPx()
+                val pad = 4.dp.toPx()
+                val kw = (size.width - pad * 2 - gap * (cols - 1)) / cols
+                val kh = (size.height - pad * 2 - gap * (rows - 1)) / rows
+                for (r in 0 until rows) {
+                    for (c in 0 until cols) {
+                        val col = RgbLightingEngine.computeKeyColor(
+                            nx = (c + 0.5f) / cols,
+                            ny = (r + 0.5f) / rows,
+                            keyHash = r * 19 + c * 11,
+                            timeSec = timeSec,
+                            settings = previewSettings,
+                            ripples = emptyList(),
+                            isPressed = false
+                        )
+                        drawRoundRect(
+                            color = if (col == Color.Transparent) Color(0xFF1A1B23) else col,
+                            topLeft = Offset(pad + c * (kw + gap), pad + r * (kh + gap)),
+                            size = Size(kw, kh),
+                            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx())
+                        )
+                    }
+                }
+            }
+            if (isLockedVip) {
+                VipCornerPill(
+                    text = "👑 VIP",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(3.dp)
+                )
+            } else {
+                FreeCornerPill(
+                    text = "☁️ CLOUD",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(3.dp)
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = cloudAnim.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = cloudAnim.subtitle.ifBlank { previewEffect.displayName },
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.84f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun ComboThemeCard(
     combo: ComboThemePreset,
     selected: Boolean,
+    isDownloaded: Boolean,
+    isDownloading: Boolean,
     isLockedVip: Boolean,
     timeSec: Float,
     onClick: () -> Unit,
@@ -488,14 +920,14 @@ private fun ComboThemeCard(
     val proceduralPreview = remember(combo.bannerPresetId) {
         if (preset != null && preset.drawableRes == null) {
             CustomBackgroundManager.getInstance(context)
-                .renderProceduralPresetBitmap(preset.id, w = 360, h = 180)
+                .renderProceduralPresetBitmap(preset.id, w = 320, h = 160)
                 .asImageBitmap()
         } else {
             null
         }
     }
     val pulseAlpha = remember(timeSec) {
-        0.55f + 0.45f * ((kotlin.math.sin((timeSec * 3.2f).toDouble()) + 1.0) * 0.5).toFloat()
+        0.55f + 0.45f * ((sin((timeSec * 3.2f).toDouble()) + 1.0) * 0.5).toFloat()
     }
 
     Column(
@@ -558,9 +990,9 @@ private fun ComboThemeCard(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0.0f to Color.Black.copy(alpha = 0.12f),
-                            0.6f to Color.Black.copy(alpha = 0.25f),
-                            1.0f to Color.Black.copy(alpha = 0.72f)
+                            0.0f to Color.Black.copy(alpha = 0.14f),
+                            0.6f to Color.Black.copy(alpha = 0.28f),
+                            1.0f to Color.Black.copy(alpha = 0.74f)
                         )
                     )
             )
@@ -581,7 +1013,7 @@ private fun ComboThemeCard(
             // Combo Animation Badge
             Text(
                 text = combo.badge,
-                fontSize = 9.sp,
+                fontSize = 8.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 maxLines = 1,
@@ -589,25 +1021,17 @@ private fun ComboThemeCard(
                     .align(Alignment.TopStart)
                     .padding(5.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(Color.Black.copy(alpha = 0.58f))
+                    .background(Color.Black.copy(alpha = 0.60f))
                     .border(0.8.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
 
             if (isLockedVip) {
-                Text(
-                    text = "🔒 VIP",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 8.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                VipCornerPill(
+                    text = "👑 VIP",
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(5.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xD9330B28))
-                        .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 5.dp, vertical = 1.5.dp)
                 )
             } else if (selected) {
                 Box(
@@ -639,13 +1063,97 @@ private fun ComboThemeCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = combo.subtitle,
+                text = "${combo.touchEffect.badge} • ${combo.effect.shortLabel}",
                 style = MaterialTheme.typography.bodySmall,
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.82f),
+                fontSize = 10.5.sp,
+                color = Color.White.copy(alpha = 0.84f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+
+        // On-Demand Download / Apply Pill Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                    when {
+                        selected -> NeonEmerald.copy(alpha = 0.22f)
+                        isLockedVip -> Color(0xCC2C1329)
+                        isDownloaded -> NeonCyan.copy(alpha = 0.20f)
+                        else -> Color(0xFF17213B)
+                    }
+                )
+                .border(
+                    width = 1.dp,
+                    color = when {
+                        selected -> NeonEmerald
+                        isLockedVip -> NeonAmber.copy(alpha = 0.85f)
+                        isDownloaded -> NeonCyan.copy(alpha = 0.75f)
+                        else -> Color.White.copy(alpha = 0.24f)
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                )
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (isDownloading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 1.6.dp,
+                    color = NeonCyan
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Downloading...",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonCyan,
+                    maxLines = 1
+                )
+            } else if (selected) {
+                Text(
+                    text = "✓ Active",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = NeonEmerald,
+                    maxLines = 1
+                )
+            } else if (isLockedVip) {
+                Text(
+                    text = "👑 Unlock VIP",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonAmber,
+                    maxLines = 1
+                )
+            } else if (isDownloaded) {
+                Text(
+                    text = "✨ Apply",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.CloudDownload,
+                    contentDescription = null,
+                    tint = NeonCyan,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "☁️ Download",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
@@ -653,6 +1161,7 @@ private fun ComboThemeCard(
 @Composable
 private fun StaticPhotoBannersSection(
     photoTheme: CustomPhotoTheme,
+    licenseState: LicenseUiState,
     isStaticBannerMode: Boolean,
     isFreeStandardMode: Boolean,
     onApplyVipToKeyboard: () -> Unit,
@@ -672,6 +1181,7 @@ private fun StaticPhotoBannersSection(
     val activePreset = remember(photoTheme.presetId) {
         BannerPresetCatalog.findById(photoTheme.presetId)
     }
+    val galleryLocked = !licenseState.isThemeItemUnlocked("custom_gallery_photo", isPermanentlyFree = false)
 
     Column(
         modifier = Modifier
@@ -686,7 +1196,6 @@ private fun StaticPhotoBannersSection(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Custom Gallery Photo CTA + Remove Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -715,12 +1224,20 @@ private fun StaticPhotoBannersSection(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text(
-                    text = stringResource(R.string.custom_photo_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.custom_photo_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    if (galleryLocked) {
+                        VipCornerPill(text = "👑 VIP")
+                    }
+                }
                 Text(
                     text = stringResource(R.string.custom_photo_subtitle),
                     style = MaterialTheme.typography.bodySmall,
@@ -730,7 +1247,6 @@ private fun StaticPhotoBannersSection(
             }
         }
 
-        // Active Photo Preview Banner
         if (previewBitmap != null) {
             Box(
                 modifier = Modifier
@@ -751,7 +1267,7 @@ private fun StaticPhotoBannersSection(
                         .background(Color.Black.copy(alpha = photoTheme.dimAlpha))
                 )
                 Text(
-                    text = activePreset?.title ?: "Custom Gallery Photo",
+                    text = activePreset?.title ?: "Active Keyboard Theme Photo",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -789,7 +1305,6 @@ private fun StaticPhotoBannersSection(
             }
         }
 
-        // 10 Pure Static HD Photo Banners Grid (2 columns — tapping applies banner + No Animation)
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             BannerPresetCatalog.staticBannerPresets.chunked(2).forEach { pair ->
                 Row(
@@ -798,10 +1313,11 @@ private fun StaticPhotoBannersSection(
                 ) {
                     pair.forEach { preset ->
                         val isSelected = photoTheme.presetId == preset.id && isStaticBannerMode
+                        val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
                         StaticBannerTile(
                             preset = preset,
                             selected = isSelected,
-                            isLockedVip = isFreeStandardMode,
+                            isLockedVip = isLocked,
                             onClick = { onSelectStaticBanner(preset.id) },
                             modifier = Modifier.weight(1f)
                         )
@@ -813,7 +1329,6 @@ private fun StaticPhotoBannersSection(
             }
         }
 
-        // Gallery Picker + Remove Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -839,10 +1354,14 @@ private fun StaticPhotoBannersSection(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = stringResource(
-                        if (photoTheme.hasCustomGalleryPhoto) R.string.action_change_photo
-                        else R.string.action_choose_gallery_photo
-                    ),
+                    text = if (galleryLocked) {
+                        "👑 Gallery Photo (VIP)"
+                    } else {
+                        stringResource(
+                            if (photoTheme.hasCustomGalleryPhoto) R.string.action_change_photo
+                            else R.string.action_choose_gallery_photo
+                        )
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = RoyalBlueDeep,
@@ -975,19 +1494,11 @@ private fun StaticBannerTile(
         )
 
         if (isLockedVip) {
-            Text(
-                text = "🔒 VIP",
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 8.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
+            VipCornerPill(
+                text = "👑 VIP",
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(5.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color(0xD9330B28))
-                    .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
             )
         } else {
             Text(
@@ -1065,195 +1576,222 @@ private fun LiveMiniDeckPreview(
         }
     }
     val barColors = RgbLightingEngine.computeBarColors(timeSec, settings)
-    val demoRipples = remember(timeSec, settings.effect) {
-        if (settings.effect == RgbEffect.REACTIVE_RIPPLE) {
-            val cycle = (timeSec % 1.35f)
-            val createdAt = timeSec - cycle
-            listOf(RipplePulse(x = 0.5f, y = 0.5f, createdAtSec = createdAt, id = 1L))
-        } else {
-            emptyList()
-        }
-    }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(KeyChassisDark)
-            .border(1.2.dp, GlassBorder, RoundedCornerShape(18.dp))
+            .border(1.2.dp, FlagshipGoldCyanBrush, RoundedCornerShape(18.dp))
     ) {
-        if (bgBitmap != null) {
-            Image(
-                bitmap = bgBitmap,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.matchParentSize()
-            )
-            Box(
+        // Dual-Layer Status Strip
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0A0E1D))
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "L1: ${settings.effect.shortLabel}",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = NeonCyan,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .matchParentSize()
-                    .background(Color.Black.copy(alpha = customPhotoTheme.dimAlpha))
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF121C33))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+            Text(
+                text = "L2: ${settings.touchEffect.badge}",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = RoyalGold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF22162E))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             )
         }
 
-        Column(modifier = Modifier.fillMaxWidth()) {
-            if (settings.chassisAura) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            if (bgBitmap != null) {
+                Image(
+                    bitmap = bgBitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize()
+                )
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.5.dp)
-                        .background(Brush.horizontalGradient(barColors))
+                        .matchParentSize()
+                        .background(Color.Black.copy(alpha = customPhotoTheme.dimAlpha))
                 )
             }
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(92.dp)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            ) {
-                val cols = 10
-                val rows = 3
-                val gap = 5.dp.toPx()
-                val keyW = (size.width - gap * (cols - 1)) / cols
-                val keyH = (size.height - gap * (rows - 1)) / rows
-                val radius = (settings.keyCornerRadiusDp * 0.7f).dp.toPx()
-                val cr = CornerRadius(radius, radius)
 
-                for (r in 0 until rows) {
-                    for (c in 0 until cols) {
-                        val x = c * (keyW + gap)
-                        val y = r * (keyH + gap)
-                        val nx = (c + 0.5f) / cols
-                        val ny = (r + 0.5f) / rows
-                        val idx = r * cols + c
-                        val activeSparkIdx = ((timeSec * 2.4f).toInt() * 7) % (rows * cols)
-                        val sparkAge = (timeSec * 2.4f) % 1f
-                        val isSparked = settings.effect == RgbEffect.TOUCH_SPARK && idx == activeSparkIdx
-                        val sparkStrength = if (isSparked) (1f - sparkAge * 0.75f).coerceIn(0f, 1f) else 0f
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (settings.chassisAura) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.5.dp)
+                            .background(Brush.horizontalGradient(barColors))
+                    )
+                }
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(94.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    val cols = 10
+                    val rows = 3
+                    val gap = 5.dp.toPx()
+                    val keyW = (size.width - gap * (cols - 1)) / cols
+                    val keyH = (size.height - gap * (rows - 1)) / rows
+                    val radius = (settings.keyCornerRadiusDp * 0.7f).dp.toPx()
+                    val cr = CornerRadius(radius, radius)
 
-                        val color = RgbLightingEngine.computeKeyColor(
-                            nx = nx,
-                            ny = ny,
-                            keyHash = r * 31 + c * 17,
-                            timeSec = timeSec,
-                            settings = settings,
-                            ripples = demoRipples,
-                            isPressed = false,
-                            keyLabel = ('a' + (idx % 26)).toString(),
-                            touchGlowStrength = sparkStrength
-                        )
+                    for (r in 0 until rows) {
+                        for (c in 0 until cols) {
+                            val x = c * (keyW + gap)
+                            val y = r * (keyH + gap)
+                            val nx = (c + 0.5f) / cols
+                            val ny = (r + 0.5f) / rows
+                            val idx = r * cols + c
 
-                        val keyAlpha = if (bgBitmap != null) 0.62f else 1f
-                        if (settings.effect == RgbEffect.NORMAL_DEFAULT) {
-                            drawRoundRect(
-                                color = Color(0xFF15161D).copy(alpha = keyAlpha),
-                                topLeft = Offset(x, y),
-                                size = Size(keyW, keyH),
-                                cornerRadius = cr
+                            // Layer 1: Ambient Physics RGB Color
+                            val ambientColor = RgbLightingEngine.computeKeyColor(
+                                nx = nx,
+                                ny = ny,
+                                keyHash = r * 31 + c * 17,
+                                timeSec = timeSec,
+                                settings = settings,
+                                ripples = emptyList(),
+                                isPressed = false,
+                                keyLabel = ('a' + (idx % 26)).toString()
                             )
-                            drawRoundRect(
-                                color = Color.White.copy(alpha = 0.22f),
-                                topLeft = Offset(x, y),
-                                size = Size(keyW, keyH),
-                                cornerRadius = cr,
-                                style = Stroke(width = 0.8.dp.toPx())
-                            )
-                        } else if (settings.effect == RgbEffect.TOUCH_SPARK) {
-                            drawRoundRect(
-                                color = Color(0xFF131620).copy(alpha = keyAlpha),
-                                topLeft = Offset(x, y),
-                                size = Size(keyW, keyH),
-                                cornerRadius = cr
-                            )
-                            if (sparkStrength > 0.05f) {
+
+                            val keyAlpha = if (bgBitmap != null) 0.62f else 1f
+                            if (settings.effect == RgbEffect.NORMAL_DEFAULT) {
                                 drawRoundRect(
-                                    color = color.copy(alpha = sparkStrength * 0.45f),
+                                    color = Color(0xFF15161D).copy(alpha = keyAlpha),
                                     topLeft = Offset(x, y),
                                     size = Size(keyW, keyH),
                                     cornerRadius = cr
                                 )
                                 drawRoundRect(
-                                    color = color,
-                                    topLeft = Offset(x, y),
-                                    size = Size(keyW, keyH),
-                                    cornerRadius = cr,
-                                    style = Stroke(width = 1.6.dp.toPx())
-                                )
-                            } else {
-                                drawRoundRect(
-                                    color = Color(0xFF202434).copy(alpha = keyAlpha),
+                                    color = Color.White.copy(alpha = 0.22f),
                                     topLeft = Offset(x, y),
                                     size = Size(keyW, keyH),
                                     cornerRadius = cr,
                                     style = Stroke(width = 0.8.dp.toPx())
                                 )
+                            } else {
+                                when (settings.keycapStyle) {
+                                    KeycapStyle.PUDDING -> {
+                                        drawRoundRect(
+                                            color = ambientColor.copy(alpha = 0.82f),
+                                            topLeft = Offset(x, y),
+                                            size = Size(keyW, keyH),
+                                            cornerRadius = cr
+                                        )
+                                        drawRoundRect(
+                                            color = Color(0xFF11141E).copy(alpha = keyAlpha),
+                                            topLeft = Offset(x + 2f, y + 2f),
+                                            size = Size((keyW - 4f).coerceAtLeast(2f), (keyH - 6f).coerceAtLeast(2f)),
+                                            cornerRadius = cr
+                                        )
+                                    }
+                                    KeycapStyle.FLOATING_GLOW -> {
+                                        drawRoundRect(
+                                            color = KeyCapSurface.copy(alpha = keyAlpha),
+                                            topLeft = Offset(x, y),
+                                            size = Size(keyW, keyH),
+                                            cornerRadius = cr
+                                        )
+                                        drawRoundRect(
+                                            color = ambientColor,
+                                            topLeft = Offset(x, y),
+                                            size = Size(keyW, keyH),
+                                            cornerRadius = cr,
+                                            style = Stroke(width = 1.4.dp.toPx())
+                                        )
+                                    }
+                                    KeycapStyle.NEON_WIREFRAME -> {
+                                        drawRoundRect(
+                                            color = ambientColor,
+                                            topLeft = Offset(x, y),
+                                            size = Size(keyW, keyH),
+                                            cornerRadius = cr,
+                                            style = Stroke(width = 1.5.dp.toPx())
+                                        )
+                                    }
+                                    KeycapStyle.SOLID_MECH -> {
+                                        drawRoundRect(
+                                            color = Color(0xFF1C2133).copy(alpha = keyAlpha),
+                                            topLeft = Offset(x, y),
+                                            size = Size(keyW, keyH),
+                                            cornerRadius = cr
+                                        )
+                                        drawRoundRect(
+                                            color = ambientColor,
+                                            topLeft = Offset(x + keyW * 0.25f, y + keyH - 4.dp.toPx()),
+                                            size = Size(keyW * 0.5f, 2.dp.toPx()),
+                                            cornerRadius = CornerRadius(2f, 2f)
+                                        )
+                                    }
+                                }
                             }
-                        } else {
-                            when (settings.keycapStyle) {
-                                KeycapStyle.PUDDING -> {
-                                    drawRoundRect(
-                                        color = color.copy(alpha = 0.8f),
-                                        topLeft = Offset(x, y),
-                                        size = Size(keyW, keyH),
-                                        cornerRadius = cr
-                                    )
-                                    drawRoundRect(
-                                        color = Color(0xFF11141E).copy(alpha = keyAlpha),
-                                        topLeft = Offset(x + 2f, y + 2f),
-                                        size = Size((keyW - 4f).coerceAtLeast(2f), (keyH - 6f).coerceAtLeast(2f)),
-                                        cornerRadius = cr
-                                    )
-                                }
-                                KeycapStyle.FLOATING_GLOW -> {
-                                    drawRoundRect(
-                                        color = KeyCapSurface.copy(alpha = keyAlpha),
-                                        topLeft = Offset(x, y),
-                                        size = Size(keyW, keyH),
-                                        cornerRadius = cr
-                                    )
-                                    drawRoundRect(
-                                        color = color,
-                                        topLeft = Offset(x, y),
-                                        size = Size(keyW, keyH),
-                                        cornerRadius = cr,
-                                        style = Stroke(width = 1.4.dp.toPx())
-                                    )
-                                }
-                                KeycapStyle.NEON_WIREFRAME -> {
-                                    drawRoundRect(
-                                        color = color,
-                                        topLeft = Offset(x, y),
-                                        size = Size(keyW, keyH),
-                                        cornerRadius = cr,
-                                        style = Stroke(width = 1.5.dp.toPx())
-                                    )
-                                }
-                                KeycapStyle.SOLID_MECH -> {
-                                    drawRoundRect(
-                                        color = Color(0xFF1C2133).copy(alpha = keyAlpha),
-                                        topLeft = Offset(x, y),
-                                        size = Size(keyW, keyH),
-                                        cornerRadius = cr
-                                    )
-                                    drawRoundRect(
-                                        color = color,
-                                        topLeft = Offset(x + keyW * 0.25f, y + keyH - 4.dp.toPx()),
-                                        size = Size(keyW * 0.5f, 2.dp.toPx()),
-                                        cornerRadius = CornerRadius(2f, 2f)
-                                    )
-                                }
+
+                            // Layer 2: Simultaneous Touch-Reactive Typing Effect Overlay
+                            val touchOverlay = RgbLightingEngine.computeTouchPreviewColor(
+                                touchEffect = settings.touchEffect,
+                                nx = nx,
+                                ny = ny,
+                                row = r,
+                                col = c,
+                                rows = rows,
+                                cols = cols,
+                                timeSec = timeSec,
+                                palette = settings.palette,
+                                glowIntensity = settings.glowIntensity
+                            )
+                            if (touchOverlay.alpha > 0.04f) {
+                                drawRoundRect(
+                                    color = touchOverlay.copy(alpha = (touchOverlay.alpha * 0.62f).coerceIn(0f, 0.85f)),
+                                    topLeft = Offset(x, y),
+                                    size = Size(keyW, keyH),
+                                    cornerRadius = cr
+                                )
+                                drawRoundRect(
+                                    color = touchOverlay.copy(alpha = touchOverlay.alpha.coerceIn(0.45f, 1f)),
+                                    topLeft = Offset(x, y),
+                                    size = Size(keyW, keyH),
+                                    cornerRadius = cr,
+                                    style = Stroke(width = 1.6.dp.toPx())
+                                )
                             }
                         }
                     }
                 }
-            }
-            if (settings.chassisAura) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .background(Brush.horizontalGradient(barColors.reversed()))
-                )
+                if (settings.chassisAura) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(Brush.horizontalGradient(barColors.reversed()))
+                    )
+                }
             }
         }
     }
@@ -1271,14 +1809,6 @@ private fun EffectPreviewCard(
 ) {
     val previewSettings = remember(effect, settings.palette, settings.animationSpeed, settings.glowIntensity) {
         settings.copy(effect = effect)
-    }
-    val demoRipples = remember(timeSec, effect) {
-        if (effect == RgbEffect.REACTIVE_RIPPLE) {
-            val cycle = timeSec % 1.35f
-            listOf(RipplePulse(x = 0.5f, y = 0.5f, createdAtSec = timeSec - cycle, id = 3L))
-        } else {
-            emptyList()
-        }
     }
 
     Column(
@@ -1314,30 +1844,22 @@ private fun EffectPreviewCard(
                 val pad = 4.dp.toPx()
                 val kw = (size.width - pad * 2 - gap * (cols - 1)) / cols
                 val kh = (size.height - pad * 2 - gap * (rows - 1)) / rows
+                val isNormalBlack = effect == RgbEffect.NORMAL_DEFAULT
                 for (r in 0 until rows) {
                     for (c in 0 until cols) {
                         val idx = r * cols + c
-                        val sparkIdx = ((timeSec * 2.2f).toInt() * 5) % (rows * cols)
-                        val isTouchSpark = effect == RgbEffect.TOUCH_SPARK
-                        val isNormalBlack = effect == RgbEffect.NORMAL_DEFAULT
-                        val sparkVal = if (isTouchSpark && idx == sparkIdx) 1f else 0f
                         val col = RgbLightingEngine.computeKeyColor(
                             nx = (c + 0.5f) / cols,
                             ny = (r + 0.5f) / rows,
                             keyHash = r * 19 + c * 11,
                             timeSec = timeSec,
                             settings = previewSettings,
-                            ripples = demoRipples,
+                            ripples = emptyList(),
                             isPressed = false,
-                            keyLabel = ('q'.code + idx).toChar().toString(),
-                            touchGlowStrength = sparkVal
+                            keyLabel = ('q'.code + idx).toChar().toString()
                         )
                         drawRoundRect(
-                            color = when {
-                                isNormalBlack -> Color(0xFF1A1B23)
-                                isTouchSpark && sparkVal <= 0f -> Color(0xFF151824)
-                                else -> col
-                            },
+                            color = if (isNormalBlack || col == Color.Transparent) Color(0xFF1A1B23) else col,
                             topLeft = Offset(pad + c * (kw + gap), pad + r * (kh + gap)),
                             size = Size(kw, kh),
                             cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx())
@@ -1347,34 +1869,18 @@ private fun EffectPreviewCard(
             }
 
             if (isLockedVip) {
-                Text(
-                    text = "🔒 VIP",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 8.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                VipCornerPill(
+                    text = "👑 VIP",
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(3.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xD9330B28))
-                        .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 5.dp, vertical = 1.dp)
                 )
             } else if (!effect.isVipEffect) {
-                Text(
+                FreeCornerPill(
                     text = "FREE",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(3.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xD9052B1E))
-                        .border(0.8.dp, NeonEmerald, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 5.dp, vertical = 1.dp)
                 )
             }
         }
@@ -1416,6 +1922,7 @@ private fun EffectPreviewCard(
 private fun PaletteCard(
     palette: RgbPalette,
     selected: Boolean,
+    isLockedVip: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1425,7 +1932,7 @@ private fun PaletteCard(
             .background(if (selected) GlassCardSelected else GlassCardSurface)
             .border(
                 width = if (selected) 1.6.dp else 1.dp,
-                color = if (selected) Color.White else GlassBorder,
+                color = if (selected) Color.White else if (isLockedVip) NeonAmber.copy(alpha = 0.6f) else GlassBorder,
                 shape = RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onClick)
@@ -1440,14 +1947,24 @@ private fun PaletteCard(
                 .clip(RoundedCornerShape(999.dp))
                 .background(Brush.horizontalGradient(palette.colors))
         )
-        Text(
-            text = palette.displayName,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = palette.displayName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (isLockedVip) {
+                VipCornerPill(text = "👑 VIP")
+            }
+        }
     }
 }
 
@@ -1456,6 +1973,7 @@ private fun KeycapStyleCard(
     style: KeycapStyle,
     accentColor: Color,
     selected: Boolean,
+    isLockedVip: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1465,7 +1983,7 @@ private fun KeycapStyleCard(
             .background(if (selected) GlassCardSelected else GlassCardSurface)
             .border(
                 width = if (selected) 1.6.dp else 1.dp,
-                color = if (selected) Color.White else GlassBorder,
+                color = if (selected) Color.White else if (isLockedVip) NeonAmber.copy(alpha = 0.6f) else GlassBorder,
                 shape = RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onClick)
@@ -1473,47 +1991,56 @@ private fun KeycapStyleCard(
             .testTag("keycap_style_${style.name.lowercase()}"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Box(
-            modifier = Modifier.size(width = 48.dp, height = 34.dp),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val cr = CornerRadius(7.dp.toPx(), 7.dp.toPx())
-                when (style) {
-                    KeycapStyle.PUDDING -> {
-                        drawRoundRect(color = accentColor.copy(alpha = 0.85f), cornerRadius = cr)
-                        drawRoundRect(
-                            color = Color(0xFF11141E),
-                            topLeft = Offset(3.dp.toPx(), 2.dp.toPx()),
-                            size = Size(size.width - 6.dp.toPx(), size.height - 7.dp.toPx()),
-                            cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx())
-                        )
-                    }
-                    KeycapStyle.FLOATING_GLOW -> {
-                        drawRoundRect(color = KeyCapSurface, cornerRadius = cr)
-                        drawRoundRect(color = accentColor, cornerRadius = cr, style = Stroke(1.5.dp.toPx()))
-                    }
-                    KeycapStyle.NEON_WIREFRAME -> {
-                        drawRoundRect(color = KeyChassisDark, cornerRadius = cr)
-                        drawRoundRect(color = accentColor, cornerRadius = cr, style = Stroke(1.8.dp.toPx()))
-                    }
-                    KeycapStyle.SOLID_MECH -> {
-                        drawRoundRect(color = Color(0xFF1D2233), cornerRadius = cr)
-                        drawRoundRect(
-                            color = accentColor,
-                            topLeft = Offset(size.width * 0.25f, size.height - 5.dp.toPx()),
-                            size = Size(size.width * 0.5f, 2.dp.toPx()),
-                            cornerRadius = CornerRadius(2f, 2f)
-                        )
+            Box(
+                modifier = Modifier.size(width = 48.dp, height = 34.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val cr = CornerRadius(7.dp.toPx(), 7.dp.toPx())
+                    when (style) {
+                        KeycapStyle.PUDDING -> {
+                            drawRoundRect(color = accentColor.copy(alpha = 0.85f), cornerRadius = cr)
+                            drawRoundRect(
+                                color = Color(0xFF11141E),
+                                topLeft = Offset(3.dp.toPx(), 2.dp.toPx()),
+                                size = Size(size.width - 6.dp.toPx(), size.height - 7.dp.toPx()),
+                                cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx())
+                            )
+                        }
+                        KeycapStyle.FLOATING_GLOW -> {
+                            drawRoundRect(color = KeyCapSurface, cornerRadius = cr)
+                            drawRoundRect(color = accentColor, cornerRadius = cr, style = Stroke(1.5.dp.toPx()))
+                        }
+                        KeycapStyle.NEON_WIREFRAME -> {
+                            drawRoundRect(color = KeyChassisDark, cornerRadius = cr)
+                            drawRoundRect(color = accentColor, cornerRadius = cr, style = Stroke(1.8.dp.toPx()))
+                        }
+                        KeycapStyle.SOLID_MECH -> {
+                            drawRoundRect(color = Color(0xFF1D2233), cornerRadius = cr)
+                            drawRoundRect(
+                                color = accentColor,
+                                topLeft = Offset(size.width * 0.25f, size.height - 5.dp.toPx()),
+                                size = Size(size.width * 0.5f, 2.dp.toPx()),
+                                cornerRadius = CornerRadius(2f, 2f)
+                            )
+                        }
                     }
                 }
+                Text(
+                    text = "R",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
-            Text(
-                text = "R",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+            if (isLockedVip) {
+                VipCornerPill(text = "👑 VIP")
+            }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1532,6 +2059,44 @@ private fun KeycapStyleCard(
             )
         }
     }
+}
+
+@Composable
+private fun VipCornerPill(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = text,
+        fontFamily = JetBrainsMonoFamily,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xD9330B28))
+            .border(0.8.dp, NeonAmber, RoundedCornerShape(999.dp))
+            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+    )
+}
+
+@Composable
+private fun FreeCornerPill(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = text,
+        fontFamily = JetBrainsMonoFamily,
+        fontSize = 8.sp,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xD9052B1E))
+            .border(0.8.dp, NeonEmerald, RoundedCornerShape(999.dp))
+            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+    )
 }
 
 @Composable

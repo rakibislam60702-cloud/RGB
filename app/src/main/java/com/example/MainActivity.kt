@@ -80,6 +80,7 @@ import com.example.ui.components.FeatureTourTarget
 import com.example.ui.components.FinalLifetimeVipAutoBanner
 import com.example.ui.components.LifetimeUnlockScreen
 import com.example.ui.components.SilentFeatureTourOverlay
+import com.example.ui.components.StartupSetupStepper
 import com.example.ui.components.UnlockPaywallFocus
 import com.example.ui.screens.EffectsScreen
 import com.example.ui.screens.HardwareScreen
@@ -157,7 +158,6 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         handleIncomingIntent(intent)
-        requestMicPermissionOnceIfNeeded()
         setContent {
             ProRgbKeyboardTheme {
                 ProRgbKeyboardApp(
@@ -165,24 +165,6 @@ class MainActivity : ComponentActivity() {
                     openUnlockTrigger = openUnlockTrigger
                 )
             }
-        }
-    }
-
-    /**
-     * Requests RECORD_AUDIO once inside the companion app so tapping the Mic key
-     * on the system keyboard starts direct voice typing immediately without re-opening the app.
-     */
-    private fun requestMicPermissionOnceIfNeeded() {
-        val granted = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) return
-
-        val prefs = getSharedPreferences(PREFS_PERMISSIONS, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(KEY_MIC_PROMPTED_ONCE, false)) {
-            prefs.edit().putBoolean(KEY_MIC_PROMPTED_ONCE, true).apply()
-            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -243,6 +225,9 @@ fun ProRgbKeyboardApp(
     val languagePacks by viewModel.languagePacks.collectAsStateWithLifecycle()
     val playgroundText by viewModel.playgroundText.collectAsStateWithLifecycle()
     val clipboardClips by viewModel.clipboardClips.collectAsStateWithLifecycle()
+    val downloadedThemeIds by viewModel.downloadedThemeIds.collectAsStateWithLifecycle()
+    val downloadingThemeIds by viewModel.downloadingThemeIds.collectAsStateWithLifecycle()
+    val showStartupStepper by viewModel.showStartupStepper.collectAsStateWithLifecycle()
     val showFeatureTour by viewModel.showFeatureTour.collectAsStateWithLifecycle()
     val showFinalVipBanner by viewModel.showFinalVipBanner.collectAsStateWithLifecycle()
     val featureTourCoordinates = remember { FeatureTourCoordinates() }
@@ -391,6 +376,8 @@ fun ProRgbKeyboardApp(
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
+                            downloadedThemeIds = downloadedThemeIds,
+                            downloadingThemeIds = downloadingThemeIds,
                             viewModel = viewModel,
                             onOpenImeSettings = openImeSettings,
                             onShowImePicker = showImePicker,
@@ -470,6 +457,8 @@ fun ProRgbKeyboardApp(
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
+                            downloadedThemeIds = downloadedThemeIds,
+                            downloadingThemeIds = downloadingThemeIds,
                             viewModel = viewModel,
                             onOpenImeSettings = openImeSettings,
                             onShowImePicker = showImePicker,
@@ -485,8 +474,18 @@ fun ProRgbKeyboardApp(
                 }
             }
 
+            // Stage 1: Clean One-Time Startup Setup Stepper (requests Mic + Phone + Notifications once together & hides forever)
+            if (showStartupStepper) {
+                StartupSetupStepper(
+                    imeStatus = imeStatus,
+                    onOpenImeSettings = openImeSettings,
+                    onShowImePicker = showImePicker,
+                    onCompleteSetup = viewModel::completeStartupStepper
+                )
+            }
+
             // Stage 2: 100% Silent Bouncing Green/Red Arrow Feature Tour with fixed top-right "Skip ✕"
-            if (showFeatureTour && !showVipUnlockModal) {
+            if (!showStartupStepper && showFeatureTour && !showVipUnlockModal) {
                 SilentFeatureTourOverlay(
                     coordinates = featureTourCoordinates,
                     imeStatus = imeStatus,
@@ -529,6 +528,8 @@ private fun TabContent(
     languagePacks: List<LanguagePackUiState>,
     playgroundText: String,
     clipboardClips: List<String>,
+    downloadedThemeIds: Set<String>,
+    downloadingThemeIds: Set<String>,
     viewModel: StudioViewModel,
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
@@ -608,9 +609,14 @@ private fun TabContent(
                 settings = settings,
                 customPhotoTheme = customPhotoTheme,
                 licenseState = licenseState,
+                downloadedThemeIds = downloadedThemeIds,
+                downloadingThemeIds = downloadingThemeIds,
                 onApplyVipToKeyboard = onOpenUnlockScreen,
                 onApplyComboTheme = viewModel::applyComboTheme,
+                onDownloadComboTheme = { combo -> viewModel.downloadComboTheme(combo, applyAfterDownload = true) },
                 onApplyAnimationOnly = viewModel::applyAnimationOnly,
+                onSelectTouchEffect = viewModel::setTouchEffect,
+                onApplyCloudAnimation = viewModel::applyCloudAnimation,
                 onApplyStaticBannerOnly = viewModel::applyStaticBannerOnly,
                 onSelectBannerPreset = viewModel::selectBannerPreset,
                 onPickCustomPhoto = viewModel::saveCustomPhoto,

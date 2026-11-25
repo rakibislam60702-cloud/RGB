@@ -209,16 +209,24 @@ fun LifetimeUnlockScreen(
         }
     }
 
-    val launchPlanUpiPayment: (String, Int, String, Int) -> Unit = { scope, baseAmount, uniqueAmount, durationDays ->
+    val launchPlanUpiPayment: (String, Int, String, Int, String?) -> Unit = { scope, baseAmount, uniqueAmount, durationDays, targetPackage ->
         paymentStatusMessage = null
         val (txnRef, upiIntent) = createUpiPaymentIntent(scope, baseAmount, uniqueAmount, durationDays)
         pendingTxnRef = txnRef
         pendingPlanScope = scope
         pendingDurationDays = durationDays
         val chooserTitle = context.getString(R.string.bn_upi_chooser_title)
-        val chooser = Intent.createChooser(upiIntent, chooserTitle)
         try {
-            upiLauncher.launch(chooser)
+            if (!targetPackage.isNullOrBlank()) {
+                val targeted = Intent(upiIntent).setPackage(targetPackage)
+                try {
+                    upiLauncher.launch(targeted)
+                } catch (_: ActivityNotFoundException) {
+                    upiLauncher.launch(Intent.createChooser(upiIntent, chooserTitle))
+                }
+            } else {
+                upiLauncher.launch(Intent.createChooser(upiIntent, chooserTitle))
+            }
         } catch (_: ActivityNotFoundException) {
             pendingTxnRef = null
             pendingDurationDays = null
@@ -423,7 +431,17 @@ fun LifetimeUnlockScreen(
                             TrialLicenseManager.PLAN_SCOPE_VIP_FEATURES,
                             adminConfig.vipPrice,
                             vipDiscountedAmount,
-                            adminConfig.vipDurationDays
+                            adminConfig.vipDurationDays,
+                            null
+                        )
+                    },
+                    onPayWithPackage = { pkg ->
+                        launchPlanUpiPayment(
+                            TrialLicenseManager.PLAN_SCOPE_VIP_FEATURES,
+                            adminConfig.vipPrice,
+                            vipDiscountedAmount,
+                            adminConfig.vipDurationDays,
+                            pkg
                         )
                     }
                 )
@@ -459,7 +477,17 @@ fun LifetimeUnlockScreen(
                             TrialLicenseManager.PLAN_SCOPE_BANGLISH,
                             selectedBanglishOption.priceInr,
                             banglishDiscountedAmount,
-                            selectedBanglishOption.durationDays
+                            selectedBanglishOption.durationDays,
+                            null
+                        )
+                    },
+                    onPayWithPackage = { pkg ->
+                        launchPlanUpiPayment(
+                            TrialLicenseManager.PLAN_SCOPE_BANGLISH,
+                            selectedBanglishOption.priceInr,
+                            banglishDiscountedAmount,
+                            selectedBanglishOption.durationDays,
+                            pkg
                         )
                     }
                 )
@@ -498,7 +526,8 @@ private fun IndependentVipFeaturesCard(
     showQr: Boolean,
     qrPayload: String,
     onToggleQr: () -> Unit,
-    onPayClick: () -> Unit
+    onPayClick: () -> Unit,
+    onPayWithPackage: (String) -> Unit
 ) {
     val shape = RoundedCornerShape(22.dp)
     val isUnlocked = licenseState.isPaidOrAdminVip
@@ -663,7 +692,8 @@ private fun IndependentVipFeaturesCard(
             UpiQrCodeCard(
                 upiPayload = qrPayload,
                 uniqueAmountStr = discountedUniqueAmount,
-                planLabel = "✨ RGB & VIP ($durationTextBn)"
+                onPhonePeClick = { onPayWithPackage(PKG_PHONEPE) },
+                onGPayClick = { onPayWithPackage(PKG_GPAY) }
             )
         }
     }
@@ -680,7 +710,8 @@ private fun IndependentBanglishCard(
     qrPayload: String,
     onSelectOption: (BanglishPlanOption) -> Unit,
     onToggleQr: () -> Unit,
-    onPayClick: () -> Unit
+    onPayClick: () -> Unit,
+    onPayWithPackage: (String) -> Unit
 ) {
     val shape = RoundedCornerShape(22.dp)
     val isPermanent = licenseState.isGlobalOrAdminAllFree || licenseState.isBanglishLifetimeUnlocked
@@ -885,7 +916,8 @@ private fun IndependentBanglishCard(
             UpiQrCodeCard(
                 upiPayload = qrPayload,
                 uniqueAmountStr = discountedUniqueAmount,
-                planLabel = "🇮🇳 Romanized Bengali (${selectedOption.labelBn})"
+                onPhonePeClick = { onPayWithPackage(PKG_PHONEPE) },
+                onGPayClick = { onPayWithPackage(PKG_GPAY) }
             )
         }
     }
@@ -1026,11 +1058,15 @@ fun BanglishCountdownTimerBar(
     }
 }
 
+private const val PKG_PHONEPE = "com.phonepe.app"
+private const val PKG_GPAY = "com.google.android.apps.nbu.paisa.user"
+
 @Composable
 private fun UpiQrCodeCard(
     upiPayload: String,
     uniqueAmountStr: String,
-    planLabel: String
+    onPhonePeClick: () -> Unit,
+    onGPayClick: () -> Unit
 ) {
     val qrBitmap = remember(upiPayload) {
         generateQrBitmap(payload = upiPayload, sizePx = 420)
@@ -1048,14 +1084,6 @@ private fun UpiQrCodeCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "যেকোনো UPI অ্যাপ দিয়ে ₹$uniqueAmountStr স্ক্যান করুন",
-                fontFamily = NotoSansBengaliFamily,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-                textAlign = TextAlign.Center
-            )
             Box(
                 modifier = Modifier
                     .size(164.dp)
@@ -1066,18 +1094,73 @@ private fun UpiQrCodeCard(
             ) {
                 Image(
                     bitmap = qrBitmap.asImageBitmap(),
-                    contentDescription = "UPI QR ₹$uniqueAmountStr",
+                    contentDescription = "Verified Merchant QR ₹$uniqueAmountStr",
                     modifier = Modifier.fillMaxSize()
                 )
             }
             Text(
-                text = "6296603748@okbizaxis • ₹$uniqueAmountStr • $planLabel",
+                text = "Verified Merchant: QUALITY FOODS ✅",
                 fontFamily = JetBrainsMonoFamily,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = NeonCyan,
-                textAlign = TextAlign.Center
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = NeonEmerald,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("verified_merchant_label")
             )
+            Text(
+                text = "ঠিক ₹$uniqueAmountStr পেমেন্ট করুন",
+                fontFamily = NotoSansBengaliFamily,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = RoyalGold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("exact_payable_amount_label")
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onPhonePeClick,
+                    shape = RoundedCornerShape(11.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF5F259F),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp)
+                        .testTag("btn_pay_phonepe")
+                ) {
+                    Text(
+                        text = "PhonePe",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+                Button(
+                    onClick = onGPayClick,
+                    shape = RoundedCornerShape(11.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1A73E8),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp)
+                        .testTag("btn_pay_gpay")
+                ) {
+                    Text(
+                        text = "GPay",
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
         }
     }
 }

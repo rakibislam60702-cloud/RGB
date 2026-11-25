@@ -90,6 +90,16 @@ data class LicenseUiState(
     val isRgbThemesUnlocked: Boolean
         get() = resolveVipFeatureAccess(deviceOverrides.allowedFeatures.rgbThemes, adminConfig.globalFreeFeatures.rgbThemes)
 
+    /**
+     * Checks whether a specific theme combo, ambient animation, touch effect, banner, palette, or keycap
+     * item is unlocked via permanent free flag, active VIP/trial/override, or `/admin_config/freeThemeIds`.
+     */
+    fun isThemeItemUnlocked(themeId: String, isPermanentlyFree: Boolean = false): Boolean {
+        if (isPermanentlyFree) return true
+        if (isRgbThemesUnlocked) return true
+        return themeId.isNotBlank() && adminConfig.freeThemeIds.any { it.equals(themeId, ignoreCase = true) }
+    }
+
     /** Independent Card 2 unlock check for Romanized Bengali (BN-EN): Card 1 VIP purchase excludes Banglish. */
     val isBanglishUnlocked: Boolean
         get() {

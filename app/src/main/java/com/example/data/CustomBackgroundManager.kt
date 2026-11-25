@@ -12,13 +12,14 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import android.net.Uri
+import android.util.Base64
 import androidx.annotation.DrawableRes
 import androidx.compose.runtime.Immutable
 import com.example.R
-import com.example.model.RgbEffect
-import com.example.model.RgbPalette
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
@@ -35,18 +36,6 @@ data class BannerThemePreset(
     @DrawableRes val drawableRes: Int? = null,
     val previewColors: List<Long>,
     val isStaticGalleryBanner: Boolean = true
-)
-
-@Immutable
-data class ComboThemePreset(
-    val id: String,
-    val title: String,
-    val badge: String,
-    val subtitle: String,
-    val bannerPresetId: String,
-    val effect: RgbEffect,
-    val palette: RgbPalette,
-    val previewColors: List<Long>
 )
 
 object BannerPresetCatalog {
@@ -227,133 +216,29 @@ object BannerPresetCatalog {
     fun findById(id: String?): BannerThemePreset? = allPresets.firstOrNull { it.id == id }
 }
 
-/**
- * Section 1: 10 Luxury All-in-One 1-Tap Photo + AI Animation Combos.
- * Tapping 1 card applies BOTH the HD background artwork AND its matching AI RGB lighting animation together.
- */
-object ComboThemeCatalog {
-    val allCombos: List<ComboThemePreset> = listOf(
-        ComboThemePreset(
-            id = "combo_cyber_dragon_fire",
-            title = "Cyber Dragon Fire",
-            badge = "🔥 Plasma Vortex",
-            subtitle = "Inferno dragon art + swirling plasma RGB",
-            bannerPresetId = BannerPresetCatalog.PRESET_CYBER_DRAGON_FIRE,
-            effect = RgbEffect.AI_PLASMA_VORTEX,
-            palette = RgbPalette.SOLAR_FLARE,
-            previewColors = listOf(0xFFFF4500, 0xFFFF9E00, 0xFF200A0E)
-        ),
-        ComboThemePreset(
-            id = "combo_vice_city_sunset",
-            title = "Vice City Sunset",
-            badge = "🌴 Neon Pulse",
-            subtitle = "Miami palms HD + Cyber Breathing glow",
-            bannerPresetId = BannerPresetCatalog.PRESET_VICE_SUNSET_PALMS,
-            effect = RgbEffect.CYBER_BREATHING,
-            palette = RgbPalette.VICE_CITY_NEON,
-            previewColors = listOf(0xFFFF2A85, 0xFFFF9E00, 0xFF00F5D4)
-        ),
-        ComboThemePreset(
-            id = "combo_galaxy_nebula",
-            title = "Galaxy Nebula",
-            badge = "✨ Starlight",
-            subtitle = "Deep space cosmos + Starlight Embers",
-            bannerPresetId = BannerPresetCatalog.PRESET_GALAXY_NEBULA,
-            effect = RgbEffect.STARLIGHT,
-            palette = RgbPalette.VAPORWAVE,
-            previewColors = listOf(0xFF7B2FFF, 0xFF00D4FF, 0xFF090816)
-        ),
-        ComboThemePreset(
-            id = "combo_golden_royal_tiger",
-            title = "Golden Royal Tiger",
-            badge = "👑 Touch Spark",
-            subtitle = "Royal gold stripes + Touch Spark keys",
-            bannerPresetId = BannerPresetCatalog.PRESET_GOLDEN_ROYAL_TIGER,
-            effect = RgbEffect.TOUCH_SPARK,
-            palette = RgbPalette.SOLAR_FLARE,
-            previewColors = listOf(0xFFFFB703, 0xFFFF6B00, 0xFF1A1107)
-        ),
-        ComboThemePreset(
-            id = "combo_ai_quantum_circuit",
-            title = "AI Quantum Circuit",
-            badge = "⚡ Spectrum Wave",
-            subtitle = "Cyberpunk neural grid + Spectrum Wave",
-            bannerPresetId = BannerPresetCatalog.PRESET_NEON_CYBER,
-            effect = RgbEffect.RAINBOW_WAVE,
-            palette = RgbPalette.CYBERPUNK,
-            previewColors = listOf(0xFF00E5FF, 0xFFFF00E5, 0xFF0D1020)
-        ),
-        ComboThemePreset(
-            id = "combo_love_heart_glow",
-            title = "Love Heart Glow",
-            badge = "❤️ Heartbeat",
-            subtitle = "Neon romantic hearts + Heartbeat RGB",
-            bannerPresetId = BannerPresetCatalog.PRESET_LOVE_HEART_GLOW,
-            effect = RgbEffect.NEON_HEARTBEAT,
-            palette = RgbPalette.VAPORWAVE,
-            previewColors = listOf(0xFFFF2A85, 0xFFFF79B0, 0xFF2A0823)
-        ),
-        ComboThemePreset(
-            id = "combo_thunder_storm",
-            title = "Thunder Storm",
-            badge = "⚡ Lightning",
-            subtitle = "Electric storm bolts + Lightning Arcs",
-            bannerPresetId = BannerPresetCatalog.PRESET_THUNDER_STORM,
-            effect = RgbEffect.LIGHTNING_ARC,
-            palette = RgbPalette.ARCTIC_FROST,
-            previewColors = listOf(0xFF00E5FF, 0xFF3B82F6, 0xFF07112B)
-        ),
-        ComboThemePreset(
-            id = "combo_emerald_matrix",
-            title = "Emerald Matrix",
-            badge = "💚 Matrix Rain",
-            subtitle = "Hacker cyber grid + Matrix Cascade",
-            bannerPresetId = BannerPresetCatalog.PRESET_EMERALD_MATRIX,
-            effect = RgbEffect.MATRIX_RAIN,
-            palette = RgbPalette.EMERALD_MATRIX,
-            previewColors = listOf(0xFF00FF66, 0xFF008F4C, 0xFF041914)
-        ),
-        ComboThemePreset(
-            id = "combo_aurora_northern",
-            title = "Aurora Northern",
-            badge = "🌌 Aurora Flow",
-            subtitle = "Polar ribbon sky + Aurora Flow RGB",
-            bannerPresetId = BannerPresetCatalog.PRESET_AURORA_LIGHTS,
-            effect = RgbEffect.AURORA_FLOW,
-            palette = RgbPalette.SPECTRUM_PRISM,
-            previewColors = listOf(0xFF00F5D4, 0xFF7B2FFF, 0xFF0A1734)
-        ),
-        ComboThemePreset(
-            id = "combo_firefly_night",
-            title = "Firefly Enchanted",
-            badge = "✨ Firefly Sparks",
-            subtitle = "Starlit forest dusk + Firefly Sparks",
-            bannerPresetId = BannerPresetCatalog.PRESET_FIREFLY_NIGHT,
-            effect = RgbEffect.FIREFLY_SPARKS,
-            palette = RgbPalette.VICE_CITY_NEON,
-            previewColors = listOf(0xFFFFB703, 0xFF00F59B, 0xFF0C1830)
-        )
-    )
-}
-
 @Immutable
 data class CustomPhotoTheme(
     val photoPath: String? = null,
     val presetId: String? = null,
+    val downloadedThemeId: String? = null,
     val dimAlpha: Float = 0.44f,
     val updatedAtMs: Long = 0L
 ) {
     val hasPreset: Boolean
         get() = BannerPresetCatalog.findById(presetId) != null
 
+    val hasDownloadedCombo: Boolean
+        get() = !downloadedThemeId.isNullOrBlank() && !photoPath.isNullOrBlank() && File(photoPath).exists()
+
     val hasCustomGalleryPhoto: Boolean
-        get() = !hasPreset && !photoPath.isNullOrBlank() && File(photoPath).exists()
+        get() = !hasPreset && !hasDownloadedCombo && !photoPath.isNullOrBlank() && File(photoPath).exists()
 
     val hasPhoto: Boolean
         get() = hasPreset || (!photoPath.isNullOrBlank() && File(photoPath).exists())
 
     val cacheKey: String
         get() = when {
+            hasDownloadedCombo -> "combo:${downloadedThemeId.orEmpty()}:$updatedAtMs"
             hasPreset -> "preset:${presetId.orEmpty()}"
             !photoPath.isNullOrBlank() -> "file:$photoPath:$updatedAtMs"
             else -> "none"
@@ -361,7 +246,8 @@ data class CustomPhotoTheme(
 }
 
 /**
- * Persists built-in HD combo/static banner presets and user-selected gallery photos
+ * Persists built-in HD combo/static banner presets, on-demand downloaded themes
+ * (`context.filesDir/themes/<id>.jpg`), and user-selected gallery photos
  * (`context.filesDir/custom_bg.jpg`) plus background dim/opacity in SharedPreferences so
  * themes survive restarts and sync live between MainActivity and RgbKeyboardService.
  */
@@ -369,9 +255,15 @@ class CustomBackgroundManager private constructor(
     private val context: Context
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val themesDir: File = File(context.filesDir, THEMES_DIR_NAME).apply {
+        if (!exists()) mkdirs()
+    }
 
     private val _theme = MutableStateFlow(readCurrentState())
     val theme: StateFlow<CustomPhotoTheme> = _theme.asStateFlow()
+
+    private val _downloadedThemeIds = MutableStateFlow(scanDownloadedThemeIds())
+    val downloadedThemeIds: StateFlow<Set<String>> = _downloadedThemeIds.asStateFlow()
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         _theme.value = readCurrentState()
@@ -381,19 +273,51 @@ class CustomBackgroundManager private constructor(
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
     }
 
+    private fun scanDownloadedThemeIds(): Set<String> {
+        if (!themesDir.exists()) return emptySet()
+        return themesDir.listFiles()
+            ?.filter { it.isFile && it.length() > 0L && it.name.endsWith(".jpg") }
+            ?.map { it.name.removeSuffix(".jpg") }
+            ?.toSet()
+            .orEmpty()
+    }
+
+    fun getDownloadedThemeFile(comboId: String): File {
+        val safeId = comboId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+        if (!themesDir.exists()) themesDir.mkdirs()
+        return File(themesDir, "$safeId.jpg")
+    }
+
+    fun isComboDownloaded(comboId: String): Boolean {
+        val f = getDownloadedThemeFile(comboId)
+        return f.exists() && f.length() > 0L
+    }
+
     private fun readCurrentState(): CustomPhotoTheme {
+        val savedDownloadedId = prefs.getString(KEY_DOWNLOADED_THEME_ID, null)?.takeIf { it.isNotBlank() }
         val savedPreset = prefs.getString(KEY_PRESET_ID, null)
             ?.takeIf { BannerPresetCatalog.findById(it) != null }
         val savedPath = prefs.getString(KEY_BG_PATH, null)
         val validPath = savedPath?.takeIf { it.isNotBlank() && File(it).exists() }
         val dim = prefs.getFloat(KEY_BG_DIM, DEFAULT_DIM_ALPHA).coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
         val updatedAt = prefs.getLong(KEY_BG_UPDATED_AT, 0L)
-        return CustomPhotoTheme(
-            photoPath = if (savedPreset != null) null else validPath,
-            presetId = savedPreset,
-            dimAlpha = dim,
-            updatedAtMs = updatedAt
-        )
+        return if (savedDownloadedId != null && validPath != null) {
+            CustomPhotoTheme(
+                photoPath = validPath,
+                presetId = null,
+                downloadedThemeId = savedDownloadedId,
+                dimAlpha = dim,
+                updatedAtMs = updatedAt
+            )
+        } else {
+            CustomPhotoTheme(
+                photoPath = if (savedPreset != null) null else validPath,
+                presetId = savedPreset,
+                downloadedThemeId = null,
+                dimAlpha = dim,
+                updatedAtMs = updatedAt
+            )
+        }
     }
 
     fun getCurrentTheme(): CustomPhotoTheme = readCurrentState()
@@ -403,11 +327,268 @@ class CustomBackgroundManager private constructor(
         val now = System.currentTimeMillis()
         val currentDim = prefs.getFloat(KEY_BG_DIM, DEFAULT_DIM_ALPHA).coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
         prefs.edit()
+            .remove(KEY_DOWNLOADED_THEME_ID)
             .putString(KEY_PRESET_ID, presetId)
             .putFloat(KEY_BG_DIM, currentDim)
             .putLong(KEY_BG_UPDATED_AT, now)
             .apply()
         _theme.value = readCurrentState()
+    }
+
+    fun selectDownloadedCombo(comboId: String): Boolean {
+        val file = getDownloadedThemeFile(comboId)
+        if (!file.exists() || file.length() <= 0L) return false
+        val now = System.currentTimeMillis()
+        val currentDim = prefs.getFloat(KEY_BG_DIM, DEFAULT_DIM_ALPHA).coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
+        prefs.edit()
+            .remove(KEY_PRESET_ID)
+            .putString(KEY_DOWNLOADED_THEME_ID, comboId)
+            .putString(KEY_BG_PATH, file.absolutePath)
+            .putFloat(KEY_BG_DIM, currentDim)
+            .putLong(KEY_BG_UPDATED_AT, now)
+            .apply()
+        _theme.value = readCurrentState()
+        return true
+    }
+
+    /**
+     * Downloads or renders a 1-Tap Combo Theme on demand and stores it locally inside
+     * `filesDir/themes/<comboId>.jpg` so it stays offline-ready and lightweight.
+     */
+    suspend fun downloadComboTheme(combo: ComboThemePreset): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            val targetFile = getDownloadedThemeFile(combo.id)
+            val tempFile = File(themesDir, "${combo.id}.tmp")
+
+            val remoteBitmap: Bitmap? = combo.remoteImageUrl
+                ?.takeIf { it.isNotBlank() }
+                ?.let { decodeRemoteOrBase64Image(it) }
+
+            val bitmapToSave: Bitmap = remoteBitmap ?: renderComboArtworkBitmap(combo)
+            try {
+                FileOutputStream(tempFile).use { out ->
+                    bitmapToSave.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                    out.flush()
+                }
+            } finally {
+                if (remoteBitmap != null && !remoteBitmap.isRecycled) {
+                    remoteBitmap.recycle()
+                } else if (!bitmapToSave.isRecycled && bitmapToSave !in proceduralBitmapCache.values) {
+                    bitmapToSave.recycle()
+                }
+            }
+
+            if (targetFile.exists()) targetFile.delete()
+            if (!tempFile.renameTo(targetFile)) {
+                tempFile.copyTo(targetFile, overwrite = true)
+                tempFile.delete()
+            }
+
+            _downloadedThemeIds.value = scanDownloadedThemeIds()
+            targetFile
+        }
+    }
+
+    private fun decodeRemoteOrBase64Image(source: String): Bitmap? {
+        return runCatching {
+            val trimmed = source.trim()
+            if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+                val conn = (URL(trimmed).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 9000
+                    readTimeout = 9000
+                    instanceFollowRedirects = true
+                }
+                try {
+                    if (conn.responseCode in 200..299) {
+                        conn.inputStream.use { stream -> BitmapFactory.decodeStream(stream) }
+                    } else null
+                } finally {
+                    conn.disconnect()
+                }
+            } else {
+                val base64Clean = trimmed.substringAfter("base64,", trimmed)
+                val bytes = Base64.decode(base64Clean, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        }.getOrNull()
+    }
+
+    private fun renderComboArtworkBitmap(combo: ComboThemePreset, w: Int = 960, h: Int = 480): Bitmap {
+        val knownPreset = BannerPresetCatalog.findById(combo.bannerPresetId)
+        if (knownPreset != null && knownPreset.drawableRes != null) {
+            val resBmp = runCatching {
+                BitmapFactory.decodeResource(context.resources, knownPreset.drawableRes)
+            }.getOrNull()
+            if (resBmp != null) {
+                val scaled = Bitmap.createScaledBitmap(resBmp, w, h, true)
+                if (scaled != resBmp) resBmp.recycle()
+                return scaled
+            }
+        }
+        if (knownPreset != null && knownPreset.drawableRes == null && combo.bannerPresetId != BannerPresetCatalog.PRESET_EMERALD_MATRIX) {
+            return renderProceduralPresetBitmap(knownPreset.id, w, h)
+        }
+        // Bespoke high-contrast 960x480 procedural canvas tailored to combo.previewColors + combo.category
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val wf = w.toFloat()
+        val hf = h.toFloat()
+        val colors = combo.previewColors.map { it.toInt() }.ifEmpty {
+            listOf(Color.parseColor("#00E5FF"), Color.parseColor("#FF2A85"), Color.parseColor("#090E20"))
+        }
+        val c0 = colors.getOrElse(0) { Color.parseColor("#00E5FF") }
+        val c1 = colors.getOrElse(1) { c0 }
+        val c2 = colors.getOrElse(2) { Color.parseColor("#070B19") }
+        val seed = kotlin.math.abs(combo.id.hashCode())
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = LinearGradient(
+            0f, 0f, wf, hf,
+            intArrayOf(c2, blendColor(c2, c1, 0.45f), blendColor(c2, c0, 0.35f), c2),
+            floatArrayOf(0f, 0.35f, 0.72f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, 0f, wf, hf, paint)
+
+        // Luminous focal nebula glow
+        val fx = wf * (0.25f + (seed % 50) / 100f)
+        val fy = hf * (0.28f + ((seed / 7) % 44) / 100f)
+        paint.shader = RadialGradient(
+            fx, fy, wf * 0.48f,
+            intArrayOf(setAlpha(c0, 195), setAlpha(c1, 105), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.48f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, 0f, wf, hf, paint)
+
+        // Secondary counter-glow
+        paint.shader = RadialGradient(
+            wf - fx, hf - fy, wf * 0.42f,
+            intArrayOf(setAlpha(c1, 160), Color.TRANSPARENT),
+            null, Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, 0f, wf, hf, paint)
+        paint.shader = null
+
+        // Category-specific geometric luxury overlay
+        when (combo.category) {
+            ComboCategory.CYBER_GAMING -> {
+                // Perspective cyber neon grid + laser diagonal slashes
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 2.2f
+                paint.color = setAlpha(c0, 82)
+                var gx = 0f
+                while (gx <= wf) {
+                    canvas.drawLine(gx, 0f, gx, hf, paint)
+                    gx += 64f
+                }
+                var gy = 0f
+                while (gy <= hf) {
+                    canvas.drawLine(0f, gy, wf, gy, paint)
+                    gy += 64f
+                }
+                paint.strokeWidth = 7f
+                paint.color = setAlpha(c0, 175)
+                canvas.drawLine(wf * 0.12f, hf, wf * 0.44f, 0f, paint)
+                paint.strokeWidth = 4f
+                paint.color = setAlpha(c1, 165)
+                canvas.drawLine(wf * 0.62f, hf, wf * 0.92f, 0f, paint)
+            }
+            ComboCategory.ROYAL_LUXURY -> {
+                // Velvet metallic ribbons & diamond lattice
+                paint.style = Paint.Style.STROKE
+                paint.strokeCap = Paint.Cap.ROUND
+                for (i in 0..6) {
+                    val p = Path()
+                    val yBase = hf * (0.12f + i * 0.13f)
+                    p.moveTo(0f, yBase)
+                    p.cubicTo(wf * 0.3f, yBase - 42f, wf * 0.7f, yBase + 42f, wf, yBase - 14f)
+                    paint.strokeWidth = if (i % 2 == 0) 5f else 2.5f
+                    paint.color = setAlpha(if (i % 2 == 0) c0 else c1, 130)
+                    canvas.drawPath(p, paint)
+                }
+                paint.style = Paint.Style.FILL
+                for (s in 0..16) {
+                    val sx = ((s * 173 + seed) % w).toFloat()
+                    val sy = ((s * 97 + seed) % h).toFloat()
+                    paint.color = setAlpha(Color.WHITE, 195)
+                    drawSparkleStar(canvas, sx, sy, 8f + (s % 4) * 3f, paint)
+                }
+            }
+            ComboCategory.SPACE_SCIFI -> {
+                // Orbital rings + dense starfield
+                paint.style = Paint.Style.STROKE
+                for (r in 1..4) {
+                    paint.strokeWidth = (5f - r * 0.7f).coerceAtLeast(1.5f)
+                    paint.color = setAlpha(if (r % 2 == 0) c0 else c1, 115)
+                    canvas.drawOval(
+                        wf * 0.5f - r * 115f, hf * 0.5f - r * 48f,
+                        wf * 0.5f + r * 115f, hf * 0.5f + r * 48f,
+                        paint
+                    )
+                }
+                paint.style = Paint.Style.FILL
+                for (s in 0..55) {
+                    val sx = ((s * 211 + seed * 3) % w).toFloat()
+                    val sy = ((s * 137 + seed) % h).toFloat()
+                    paint.color = setAlpha(if (s % 4 == 0) c0 else Color.WHITE, 210)
+                    canvas.drawCircle(sx, sy, 1.8f + (s % 4) * 1.1f, paint)
+                }
+            }
+            ComboCategory.ELEMENTAL -> {
+                // Swirling energy arcs + rising embers / frost crystals
+                paint.style = Paint.Style.STROKE
+                paint.strokeCap = Paint.Cap.ROUND
+                for (i in 0..7) {
+                    val path = Path()
+                    val yBase = hf * (0.16f + i * 0.1f)
+                    path.moveTo(-20f, yBase)
+                    path.cubicTo(wf * 0.3f, yBase - hf * 0.2f, wf * 0.68f, yBase + hf * 0.22f, wf + 20f, yBase - hf * 0.08f)
+                    paint.strokeWidth = (13f - i * 1.1f).coerceAtLeast(3f)
+                    paint.color = setAlpha(if (i % 2 == 0) c0 else c1, 140)
+                    canvas.drawPath(path, paint)
+                }
+                paint.style = Paint.Style.FILL
+                for (e in 0..34) {
+                    val ex = ((e * 193 + seed) % w).toFloat()
+                    val ey = ((e * 127 + seed) % h).toFloat()
+                    paint.color = setAlpha(c0, 200)
+                    canvas.drawCircle(ex, ey, 2.5f + (e % 5) * 1.5f, paint)
+                }
+            }
+            else -> {
+                // Aesthetic dreamy bokeh orbs & sparkles
+                paint.style = Paint.Style.FILL
+                for (b in 0..16) {
+                    val bx = ((b * 181 + seed) % w).toFloat()
+                    val by = ((b * 109 + seed) % h).toFloat()
+                    val rad = 26f + (b % 5) * 18f
+                    paint.color = setAlpha(if (b % 2 == 0) c0 else c1, 58)
+                    canvas.drawCircle(bx, by, rad, paint)
+                }
+                for (s in 0..18) {
+                    val sx = ((s * 167 + seed) % w).toFloat()
+                    val sy = ((s * 89 + seed) % h).toFloat()
+                    paint.color = setAlpha(Color.WHITE, 210)
+                    drawSparkleStar(canvas, sx, sy, 7f + (s % 4) * 3f, paint)
+                }
+            }
+        }
+        return bmp
+    }
+
+    private fun setAlpha(color: Int, alpha: Int): Int {
+        return Color.argb(alpha.coerceIn(0, 255), Color.red(color), Color.green(color), Color.blue(color))
+    }
+
+    private fun blendColor(a: Int, b: Int, ratio: Float): Int {
+        val inv = 1f - ratio
+        return Color.argb(
+            255,
+            (Color.red(a) * inv + Color.red(b) * ratio).toInt().coerceIn(0, 255),
+            (Color.green(a) * inv + Color.green(b) * ratio).toInt().coerceIn(0, 255),
+            (Color.blue(a) * inv + Color.blue(b) * ratio).toInt().coerceIn(0, 255)
+        )
     }
 
     suspend fun savePhotoFromUri(uri: Uri): Result<CustomPhotoTheme> = withContext(Dispatchers.IO) {
@@ -457,6 +638,7 @@ class CustomBackgroundManager private constructor(
             val currentDim = prefs.getFloat(KEY_BG_DIM, DEFAULT_DIM_ALPHA).coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
             prefs.edit()
                 .remove(KEY_PRESET_ID)
+                .remove(KEY_DOWNLOADED_THEME_ID)
                 .putString(KEY_BG_PATH, targetFile.absolutePath)
                 .putFloat(KEY_BG_DIM, currentDim)
                 .putLong(KEY_BG_UPDATED_AT, now)
@@ -465,6 +647,7 @@ class CustomBackgroundManager private constructor(
             val updated = CustomPhotoTheme(
                 photoPath = targetFile.absolutePath,
                 presetId = null,
+                downloadedThemeId = null,
                 dimAlpha = currentDim,
                 updatedAtMs = now
             )
@@ -487,6 +670,7 @@ class CustomBackgroundManager private constructor(
         prefs.edit()
             .remove(KEY_BG_PATH)
             .remove(KEY_PRESET_ID)
+            .remove(KEY_DOWNLOADED_THEME_ID)
             .putLong(KEY_BG_UPDATED_AT, System.currentTimeMillis())
             .apply()
         _theme.value = readCurrentState()
@@ -973,9 +1157,11 @@ class CustomBackgroundManager private constructor(
         private const val PREFS_NAME = "rakib_custom_theme_prefs"
         private const val KEY_BG_PATH = "custom_bg_path"
         private const val KEY_PRESET_ID = "custom_bg_preset_id"
+        private const val KEY_DOWNLOADED_THEME_ID = "downloaded_theme_id"
         private const val KEY_BG_DIM = "custom_bg_dim"
         private const val KEY_BG_UPDATED_AT = "custom_bg_updated_at"
         private const val BG_FILE_NAME = "custom_bg.jpg"
+        private const val THEMES_DIR_NAME = "themes"
         const val DEFAULT_DIM_ALPHA = 0.44f
         const val MIN_DIM_ALPHA = 0.15f
         const val MAX_DIM_ALPHA = 0.85f

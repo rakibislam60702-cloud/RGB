@@ -35,6 +35,7 @@ import com.example.model.KeyboardSettings
 import com.example.model.KeycapStyle
 import com.example.model.LanguageCatalog
 import com.example.model.RgbEffect
+import com.example.model.TouchTypingEffect
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,8 +43,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * Gboard-styled custom Canvas Keyboard View fused with Samsung Keys Cafe Touch Spark RGB,
@@ -124,7 +127,10 @@ class RgbKeyboardView @JvmOverloads constructor(
     private val particleStateLock = Any()
     private data class ParticleSnapshot(
         val glows: List<ActiveKeyGlow> = emptyList(),
-        val trails: List<TrailPoint> = emptyList()
+        val trails: List<TrailPoint> = emptyList(),
+        val shockwaves: List<ShockwaveRing> = emptyList(),
+        val embers: List<EmberSpark> = emptyList(),
+        val cometPoints: List<CometKeyPoint> = emptyList()
     )
     private val particleSnapshotRef = AtomicReference(ParticleSnapshot())
     @Volatile
@@ -138,6 +144,8 @@ class RgbKeyboardView @JvmOverloads constructor(
         val longPressOutput: String?,
         val rect: RectF,
         val neonColor: Int,
+        val rowIndex: Int,
+        val colIndex: Int,
         val isKarBarKey: Boolean = false
     )
 
@@ -148,6 +156,8 @@ class RgbKeyboardView @JvmOverloads constructor(
         var displayLabel: String,
         val rect: RectF,
         val neonColor: Int,
+        val rowIndex: Int,
+        val colIndex: Int,
         val pressedAtMs: Long,
         var releasedAtMs: Long? = null,
         val showPopup: Boolean
@@ -157,6 +167,30 @@ class RgbKeyboardView @JvmOverloads constructor(
         val x: Float,
         val y: Float,
         val timeMs: Long,
+        val color: Int
+    )
+
+    private data class ShockwaveRing(
+        val x: Float,
+        val y: Float,
+        val createdAtMs: Long,
+        val color: Int
+    )
+
+    private data class EmberSpark(
+        val x: Float,
+        val y: Float,
+        val vx: Float,
+        val vy: Float,
+        val sizePx: Float,
+        val createdAtMs: Long,
+        val color: Int
+    )
+
+    private data class CometKeyPoint(
+        val x: Float,
+        val y: Float,
+        val createdAtMs: Long,
         val color: Int
     )
 
@@ -250,10 +284,15 @@ class RgbKeyboardView @JvmOverloads constructor(
     private val emojiBoxes = mutableListOf<EmojiBox>()
     private val activeGlows = mutableListOf<ActiveKeyGlow>()
     private val trailPoints = mutableListOf<TrailPoint>()
+    private val shockwaves = mutableListOf<ShockwaveRing>()
+    private val embers = mutableListOf<EmberSpark>()
+    private val cometPoints = mutableListOf<CometKeyPoint>()
     private var emojiBackRect = RectF()
     private var emojiDelRect = RectF()
     private val tempRect = RectF()
     private val bubbleRect = RectF()
+    private val effectOverlayPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val diamondPath = Path()
 
     init {
         if (!isInEditMode) {
@@ -273,18 +312,16 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
             val idleMs = nowMs - lastInteractionMs
             val activeTouchOrEffects = pressedKeyBox != null || isDeleting || hasActiveVisualEffects()
-            // Pause animation loop after 1.5s of idle time to keep CPU/GPU cool and prevent IME stalls
-            if (idleMs >= IDLE_PAUSE_MS && !activeTouchOrEffects) {
+            val needsContinuousRgb = vipVisualsEnabled && settings.effect != RgbEffect.NORMAL_DEFAULT
+            // Pause animation loop after idle timeout when no continuous ambient RGB or touch effect is running
+            if (idleMs >= IDLE_PAUSE_MS && !activeTouchOrEffects && !needsContinuousRgb) {
                 if (isRunning) pause()
                 return@addUpdateListener
             }
             rgbPhase = it.animatedValue as Float
-            if (activeTouchOrEffects && nowMs - lastParticlePruneMs >= 32L) {
+            if (activeTouchOrEffects && nowMs - lastParticlePruneMs >= 28L) {
                 scheduleParticlePrune(nowMs)
             }
-            val needsContinuousRgb = vipVisualsEnabled &&
-                settings.effect != RgbEffect.NORMAL_DEFAULT &&
-                settings.effect != RgbEffect.TOUCH_SPARK
             if (needsContinuousRgb || activeTouchOrEffects) {
                 postInvalidateOnAnimation()
             }
@@ -533,7 +570,12 @@ class RgbKeyboardView @JvmOverloads constructor(
 
     private fun hasActiveVisualEffects(): Boolean {
         val snap = particleSnapshotRef.get()
-        return pressedKeyBox != null || snap.glows.isNotEmpty() || snap.trails.isNotEmpty()
+        return pressedKeyBox != null ||
+            snap.glows.isNotEmpty() ||
+            snap.trails.isNotEmpty() ||
+            snap.shockwaves.isNotEmpty() ||
+            snap.embers.isNotEmpty() ||
+            snap.cometPoints.isNotEmpty()
     }
 
     private val isShifted: Boolean
@@ -698,6 +740,8 @@ class RgbKeyboardView @JvmOverloads constructor(
                         longPressOutput = longPressOut,
                         rect = rect,
                         neonColor = neonArgb,
+                        rowIndex = rIndex,
+                        colIndex = cIndex,
                         isKarBarKey = isRowKarBar
                     )
                 )
@@ -738,9 +782,13 @@ class RgbKeyboardView @JvmOverloads constructor(
         if (width <= 0 || height <= 0) return
 
         val nowMs = SystemClock.uptimeMillis()
+        val timeSec = nowMs / 1000f
         val snapshot = particleSnapshotRef.get()
         val renderGlows = snapshot.glows
         val renderTrails = snapshot.trails
+        val renderShockwaves = snapshot.shockwaves
+        val renderEmbers = snapshot.embers
+        val renderCometPoints = snapshot.cometPoints
 
         if (isEmojiMode) {
             drawEmojiGrid(canvas)
@@ -751,12 +799,14 @@ class RgbKeyboardView @JvmOverloads constructor(
             rebuildKeyBoxes()
         }
 
-        val isNormalClassicBlack = !vipVisualsEnabled || settings.effect == RgbEffect.NORMAL_DEFAULT
-        val isTouchSparkMode = isNormalClassicBlack || settings.effect == RgbEffect.TOUCH_SPARK
-        val allowRgbGlow = vipVisualsEnabled && settings.effect != RgbEffect.NORMAL_DEFAULT
+        val hasAmbientRgb = vipVisualsEnabled && settings.effect != RgbEffect.NORMAL_DEFAULT
+        val allowTouchLayer = vipVisualsEnabled
+        val isNormalClassicBlack = !vipVisualsEnabled || (!hasAmbientRgb && !photoTheme.hasPhoto)
         val cornerRadius = (settings.keyCornerRadiusDp * density * 0.82f).coerceIn(5.5f * density, 13f * density)
 
-        // 0. Draw Persistent Custom Photo / Banner Theme Background ONLY when VIP visuals are active
+        // =========================================================================
+        // LAYER 1A: Persistent Custom / Downloaded Theme Photo Background (VIP only)
+        // =========================================================================
         val hasCustomPhoto = if (vipVisualsEnabled) {
             reloadPhotoBitmapIfNeeded()
             drawCustomPhotoBackground(canvas)
@@ -764,40 +814,10 @@ class RgbKeyboardView @JvmOverloads constructor(
             false
         }
 
-        val continuousShader: SweepGradient? = if (allowRgbGlow && !isTouchSparkMode) {
+        val continuousShader: SweepGradient? = if (hasAmbientRgb) {
             val shader = ensureSweepShader()
-            val angle = when (settings.effect) {
-                RgbEffect.STATIC_NEON -> 0f
-                RgbEffect.AI_PLASMA_VORTEX -> rgbPhase * 1.85f
-                RgbEffect.AURORA_FLOW -> (kotlin.math.sin(Math.toRadians(rgbPhase.toDouble())) * 95.0).toFloat()
-                else -> rgbPhase
-            }
-            shaderMatrix.setRotate(angle, width / 2f, height / 2f)
+            shaderMatrix.setRotate(rgbPhase, width / 2f, height / 2f)
             shader.setLocalMatrix(shaderMatrix)
-            val alphaFactor = when (settings.effect) {
-                RgbEffect.CYBER_BREATHING -> {
-                    val breath = ((kotlin.math.sin(Math.toRadians(rgbPhase * 2.0)) + 1.0) * 0.5).toFloat()
-                    (0.35f + 0.65f * breath) * settings.glowIntensity
-                }
-                RgbEffect.NEON_HEARTBEAT -> {
-                    val beat = ((rgbPhase * 0.015f) % 1f)
-                    val pulse = if (beat < 0.18f || (beat in 0.25f..0.40f)) 1f else 0.42f
-                    pulse * settings.glowIntensity
-                }
-                RgbEffect.LIGHTNING_ARC -> {
-                    val flash = ((rgbPhase * 0.03f) % 1f)
-                    (if (flash < 0.16f) 1.0f else 0.46f) * settings.glowIntensity
-                }
-                RgbEffect.FIREFLY_SPARKS -> {
-                    val glimmer = ((kotlin.math.sin(Math.toRadians(rgbPhase * 3.1)) + 1.0) * 0.5).toFloat()
-                    (0.45f + 0.55f * glimmer) * settings.glowIntensity
-                }
-                else -> settings.glowIntensity
-            }.coerceIn(0.25f, 1.0f)
-            rgbBorderPaint.shader = shader
-            rgbBorderPaint.alpha = (255 * alphaFactor).toInt()
-            rgbFillPaint.shader = shader
-            rgbFillPaint.alpha = (if (hasCustomPhoto) 135 else 175 * alphaFactor).toInt().coerceIn(50, 220)
             shader
         } else {
             null
@@ -807,7 +827,12 @@ class RgbKeyboardView @JvmOverloads constructor(
         val activeLegendTypeface = if (useBengaliFont) bengaliTypeface else normalTypeface
         subLabelPaint.typeface = activeLegendTypeface
 
-        // 1. Draw Gboard Keycaps (pure matte-black in Normal Classic Black, or Touch Spark / RGB when VIP)
+        val invW = 1f / width.coerceAtLeast(1).toFloat()
+        val invH = 1f / height.coerceAtLeast(1).toFloat()
+
+        // =========================================================================
+        // LAYER 1B + LAYER 2 PER-KEY: Ambient Physics RGB + Simultaneous Touch Effect
+        // =========================================================================
         for (i in keyBoxes.indices) {
             val box = keyBoxes[i]
             val rect = box.rect
@@ -820,8 +845,8 @@ class RgbKeyboardView @JvmOverloads constructor(
                     break
                 }
             }
-            val glowIntensity = when {
-                !allowRgbGlow -> 0f
+            val directGlow = when {
+                !allowTouchLayer -> 0f
                 isPressed -> 1f
                 else -> computeGlowFactor(glowEntry, nowMs)
             }
@@ -829,14 +854,13 @@ class RgbKeyboardView @JvmOverloads constructor(
             val isCapsLocked = box.rawKey == "SHIFT" && shiftMode == ShiftMode.CAPS_LOCK
             val isShiftLit = isShiftOnce || isCapsLocked
 
-            // Prominent circular blue Enter / Search button on the bottom-right corner (Gboard signature)
             if (box.rawKey == "ENTER") {
-                drawGboardCircularActionKey(canvas, box, isPressed, glowIntensity)
+                drawGboardCircularActionKey(canvas, box, isPressed, directGlow)
                 continue
             }
 
-            if (isTouchSparkMode) {
-                // Clean matte-black Gboard rounded keycaps (translucent when VIP custom photo is active)
+            // --- LAYER 1B: Base Keycap + 20 Ambient Physics RGB Animation ---
+            if (!hasAmbientRgb) {
                 val letterAlpha = if (hasCustomPhoto) 154 else 242
                 val modAlpha = if (hasCustomPhoto) 138 else 235
                 val isNumberPadSideKey = isNumberPad && !isNumberPadDigit(box.rawKey)
@@ -856,96 +880,178 @@ class RgbKeyboardView @JvmOverloads constructor(
                 }
                 canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
 
-                if (box.isKarBarKey && glowIntensity <= 0.01f) {
+                if (box.isKarBarKey && directGlow <= 0.01f) {
                     sparkBorderPaint.color = Color.argb(120, 0, 245, 212)
                     sparkBorderPaint.strokeWidth = 1.0f * density
                     canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
                 }
-
-                // Touch Spark neon glow ignition ONLY when VIP visuals are enabled AND not Normal Classic Black
-                if (allowRgbGlow) {
-                    val effGlow = when {
-                        isCapsLocked -> maxOf(glowIntensity, 0.92f)
-                        isShiftOnce -> maxOf(glowIntensity, 0.58f)
-                        else -> glowIntensity
-                    }
-                    if (effGlow > 0.01f) {
-                        val neon = if (isCapsLocked) Color.parseColor("#38BDF8") else box.neonColor
-                        sparkFillPaint.color = Color.argb(
-                            (effGlow * 96 * settings.glowIntensity).toInt().coerceIn(0, 145),
-                            Color.red(neon),
-                            Color.green(neon),
-                            Color.blue(neon)
-                        )
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
-
-                        sparkBorderPaint.color = Color.argb(
-                            (effGlow * 255 * settings.glowIntensity).toInt().coerceIn(0, 255),
-                            Color.red(neon),
-                            Color.green(neon),
-                            Color.blue(neon)
-                        )
-                        sparkBorderPaint.strokeWidth = (1.6f + effGlow * 1.4f) * density
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
-                    }
-                }
             } else {
-                // Optional continuous RGB Studio modes
+                // Per-key live physics color from all 20 Next-Gen Ambient Physics Animations!
+                val nx = (rect.centerX() * invW).coerceIn(0f, 1f)
+                val ny = (rect.centerY() * invH).coerceIn(0f, 1f)
+                val physicsColor = RgbLightingEngine.computeKeyColor(
+                    nx = nx,
+                    ny = ny,
+                    keyHash = box.rowIndex * 31 + box.colIndex * 17 + box.rawKey.hashCode(),
+                    timeSec = timeSec,
+                    settings = settings,
+                    ripples = emptyList(),
+                    isPressed = false,
+                    keyLabel = box.rawKey,
+                    touchGlowStrength = 0f
+                )
+                val argb = physicsColor.toArgb()
+                val r = Color.red(argb)
+                val g = Color.green(argb)
+                val b = Color.blue(argb)
+                val a = Color.alpha(argb).coerceIn(36, 255)
+
+                rgbFillPaint.shader = null
+                rgbBorderPaint.shader = null
                 when (settings.keycapStyle) {
                     KeycapStyle.PUDDING -> {
+                        rgbFillPaint.color = Color.argb((a * (if (hasCustomPhoto) 0.72f else 0.92f)).toInt().coerceIn(32, 235), r, g, b)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
-                        puddingInnerPaint.color = Color.argb(if (hasCustomPhoto) 168 else 245, 24, 27, 37)
+                        puddingInnerPaint.color = Color.argb(if (hasCustomPhoto) 162 else 238, 20, 23, 34)
                         tempRect.set(rect.left + 2.2f * density, rect.top + 1.5f * density, rect.right - 2.2f * density, rect.bottom - 4f * density)
                         val innerR = (cornerRadius - 2f * density).coerceAtLeast(3f)
                         canvas.drawRoundRect(tempRect, innerR, innerR, puddingInnerPaint)
                     }
                     KeycapStyle.NEON_WIREFRAME -> {
-                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 128 else 240, 17, 19, 26)
+                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 124 else 235, 15, 18, 26)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                        rgbBorderPaint.color = Color.argb(a, r, g, b)
                         rgbBorderPaint.strokeWidth = 1.9f * density
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
                     }
                     KeycapStyle.SOLID_MECH -> {
-                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 165 else 245, 34, 38, 52)
+                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 160 else 242, 30, 34, 48)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
-                        tempRect.set(rect.centerX() - rect.width() * 0.28f, rect.bottom - 4.5f * density, rect.centerX() + rect.width() * 0.28f, rect.bottom - 2f * density)
+                        rgbFillPaint.color = Color.argb(a, r, g, b)
+                        tempRect.set(rect.centerX() - rect.width() * 0.30f, rect.bottom - 4.5f * density, rect.centerX() + rect.width() * 0.30f, rect.bottom - 1.8f * density)
                         canvas.drawRoundRect(tempRect, 3f * density, 3f * density, rgbFillPaint)
                     }
                     KeycapStyle.FLOATING_GLOW -> {
-                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 152 else 230, 31, 34, 46)
+                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 146 else 224, 26, 30, 42)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                        rgbFillPaint.color = Color.argb((a * 0.28f).toInt().coerceIn(18, 90), r, g, b)
+                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
+                        rgbBorderPaint.color = Color.argb(a, r, g, b)
                         rgbBorderPaint.strokeWidth = 1.6f * density
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
                     }
                 }
+            }
 
-                if (glowIntensity > 0.01f || isShiftLit) {
-                    val neon = if (isCapsLocked) Color.parseColor("#38BDF8") else box.neonColor
-                    val factor = when {
-                        isCapsLocked -> maxOf(glowIntensity, 0.85f)
-                        isShiftOnce -> maxOf(glowIntensity, 0.50f)
-                        else -> glowIntensity
+            // --- LAYER 2: Simultaneous Touch-Reactive Typing Effect ON TOP of Layer 1 ---
+            var effectiveTouchGlow = directGlow
+            if (allowTouchLayer) {
+                val effGlow = when {
+                    isCapsLocked -> maxOf(directGlow, 0.92f)
+                    isShiftOnce -> maxOf(directGlow, 0.56f)
+                    else -> directGlow
+                }
+                when (settings.touchEffect) {
+                    TouchTypingEffect.TOUCH_SPARK -> {
+                        if (effGlow > 0.01f) {
+                            val neon = if (isCapsLocked) Color.parseColor("#38BDF8") else box.neonColor
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, neon, effGlow, fillMaxAlpha = 148)
+                        }
                     }
-                    sparkFillPaint.color = Color.argb(
-                        (factor * 105).toInt().coerceIn(0, 145),
-                        Color.red(neon),
-                        Color.green(neon),
-                        Color.blue(neon)
-                    )
-                    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
+
+                    TouchTypingEffect.TOUCH_ELECTRIC_CROSS -> {
+                        var crossStrength = effGlow
+                        var crossColor = if (isCapsLocked) Color.parseColor("#38BDF8") else Color.parseColor("#00F0FF")
+                        for (gIdx in renderGlows.indices) {
+                            val gItem = renderGlows[gIdx]
+                            val gFade = computeGlowFactor(gItem, nowMs)
+                            if (gFade <= 0.02f) continue
+                            if (box.rowIndex == gItem.rowIndex || box.colIndex == gItem.colIndex) {
+                                val dist = abs(box.rowIndex - gItem.rowIndex) + abs(box.colIndex - gItem.colIndex)
+                                val falloff = if (dist == 0) 1f else (0.78f - dist * 0.09f).coerceAtLeast(0.22f)
+                                val energy = gFade * falloff
+                                if (energy > crossStrength) {
+                                    crossStrength = energy
+                                    crossColor = if (dist == 0) Color.WHITE else Color.parseColor("#00E5FF")
+                                }
+                            }
+                        }
+                        effectiveTouchGlow = maxOf(effectiveTouchGlow, crossStrength)
+                        if (crossStrength > 0.02f) {
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, crossColor, crossStrength, fillMaxAlpha = 155)
+                        }
+                    }
+
+                    TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> {
+                        if (effGlow > 0.01f) {
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, box.neonColor, effGlow, fillMaxAlpha = 145)
+                        }
+                    }
+
+                    TouchTypingEffect.TOUCH_MAGMA_EMBER -> {
+                        if (effGlow > 0.01f) {
+                            val magmaCol = blendColor(Color.parseColor("#FF3D00"), Color.parseColor("#FFD600"), effGlow)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, magmaCol, effGlow, fillMaxAlpha = 175)
+                        }
+                    }
+
+                    TouchTypingEffect.TOUCH_FROST_FREEZE -> {
+                        var frostStrength = effGlow
+                        var isFrostCenter = effGlow > 0.25f
+                        for (gIdx in renderGlows.indices) {
+                            val gItem = renderGlows[gIdx]
+                            val gFade = computeGlowFactor(gItem, nowMs)
+                            if (gFade <= 0.02f) continue
+                            val dr = abs(box.rowIndex - gItem.rowIndex)
+                            val dc = abs(box.colIndex - gItem.colIndex)
+                            if (dr <= 1 && dc <= 1) {
+                                val energy = if (dr == 0 && dc == 0) gFade else gFade * 0.72f
+                                if (energy > frostStrength) {
+                                    frostStrength = energy
+                                    isFrostCenter = dr == 0 && dc == 0
+                                }
+                            }
+                        }
+                        effectiveTouchGlow = maxOf(effectiveTouchGlow, frostStrength)
+                        if (frostStrength > 0.02f) {
+                            val frostCol = if (isFrostCenter) Color.parseColor("#E0FBFC") else Color.parseColor("#38BDF8")
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, frostCol, frostStrength, fillMaxAlpha = 165)
+                            // Crisp crystalline frost corner accents
+                            effectOverlayPaint.style = Paint.Style.STROKE
+                            effectOverlayPaint.strokeWidth = 1.4f * density
+                            effectOverlayPaint.color = Color.argb((frostStrength * 220).toInt().coerceIn(0, 220), 224, 251, 252)
+                            val tick = 5.5f * density
+                            canvas.drawLine(rect.left + 3f * density, rect.top + tick, rect.left + tick, rect.top + 3f * density, effectOverlayPaint)
+                            canvas.drawLine(rect.right - tick, rect.bottom - 3f * density, rect.right - 3f * density, rect.bottom - tick, effectOverlayPaint)
+                        }
+                    }
+
+                    TouchTypingEffect.TOUCH_COMET_TRAIL -> {
+                        if (effGlow > 0.01f) {
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, box.neonColor, effGlow, fillMaxAlpha = 140)
+                        }
+                    }
+
+                    TouchTypingEffect.TOUCH_DIAMOND_FLASH -> {
+                        if (effGlow > 0.01f) {
+                            val prismCol = blendColor(Color.parseColor("#00E5FF"), Color.WHITE, 0.55f)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, prismCol, effGlow, fillMaxAlpha = 150)
+                            drawDiamondStarGlint(canvas, rect, effGlow)
+                        }
+                    }
                 }
             }
 
-            // Draw crisp Shift / Caps Lock arrow icon (with underline bar when Caps Lock is ON)
+            // Draw crisp Shift / Caps Lock arrow icon
             if (box.rawKey == "SHIFT") {
-                drawShiftArrowIcon(canvas, rect, shiftMode, glowIntensity, box.neonColor, isTouchSparkMode)
+                drawShiftArrowIcon(canvas, rect, shiftMode, effectiveTouchGlow, box.neonColor, !hasAmbientRgb)
                 continue
             }
 
             // Draw Globe icon cleanly for the language switch key
             if (box.rawKey == "GLOBE") {
-                val iconColor = if (glowIntensity > 0.08f && isTouchSparkMode) {
-                    blendColor(Color.parseColor("#D5DCEF"), box.neonColor, glowIntensity)
+                val iconColor = if (effectiveTouchGlow > 0.08f) {
+                    blendColor(Color.parseColor("#D5DCEF"), box.neonColor, effectiveTouchGlow)
                 } else {
                     Color.parseColor("#D5DCEF")
                 }
@@ -953,10 +1059,10 @@ class RgbKeyboardView @JvmOverloads constructor(
                 continue
             }
 
-            // Subtle Gboard top-right sub-label hint (1-0 on top row, etc.)
+            // Subtle Gboard top-right sub-label hint
             if (box.subLabel != null) {
-                subLabelPaint.color = if (glowIntensity > 0.1f && isTouchSparkMode) {
-                    blendColor(Color.parseColor("#8C95AD"), box.neonColor, glowIntensity)
+                subLabelPaint.color = if (effectiveTouchGlow > 0.1f) {
+                    blendColor(Color.parseColor("#8C95AD"), box.neonColor, effectiveTouchGlow)
                 } else {
                     Color.parseColor("#8891A8")
                 }
@@ -969,7 +1075,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                 )
             }
 
-            // Crisp centered keycap letter / label (cached Typeface — zero allocations per frame)
+            // Crisp centered keycap letter / label
             val rowH = rect.height()
             val isNumDigit = isNumberPad && isNumberPadDigit(box.rawKey)
             textPaint.typeface = when {
@@ -988,18 +1094,18 @@ class RgbKeyboardView @JvmOverloads constructor(
                 else -> (rowH * 0.45f).coerceIn(14f * scaledDensity, 21f * scaledDensity)
             }
 
-            if (isTouchSparkMode) {
+            if (!hasAmbientRgb) {
                 textPaint.shader = null
                 textPaint.color = when {
                     isPressed -> Color.WHITE
-                    glowIntensity > 0.08f -> blendColor(Color.parseColor("#EEF2FC"), box.neonColor, glowIntensity)
+                    effectiveTouchGlow > 0.08f -> blendColor(Color.parseColor("#EEF2FC"), box.neonColor, effectiveTouchGlow)
                     isShiftLit -> box.neonColor
                     box.isKarBarKey -> Color.parseColor("#7CEEFF")
                     box.rawKey == "SPACE" -> Color.parseColor("#C2CBE0")
                     else -> Color.parseColor("#EEF2FC")
                 }
             } else {
-                textPaint.shader = if (settings.illuminatedLegends && !isPressed) continuousShader else null
+                textPaint.shader = if (settings.illuminatedLegends && !isPressed && effectiveTouchGlow < 0.25f) continuousShader else null
                 textPaint.color = Color.WHITE
             }
 
@@ -1009,15 +1115,160 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
         textPaint.shader = null
 
-        // 2. Smooth fading multicolor Glide / Swipe trail (VIP + non-Normal mode only)
-        if (allowRgbGlow && renderTrails.size >= 2) {
-            drawGlideTrail(canvas, renderTrails, nowMs)
+        // =========================================================================
+        // LAYER 2 OVERLAYS: Simultaneous Canvas Touch Effects (Laser Cross, Shockwave Ring,
+        // Magma Rising Embers, Comet Tail, Glide Trail, Rising Key Bubbles)
+        // =========================================================================
+        if (allowTouchLayer) {
+            when (settings.touchEffect) {
+                TouchTypingEffect.TOUCH_ELECTRIC_CROSS -> drawElectricCrossBeams(canvas, renderGlows, nowMs)
+                TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> drawShockwaveRings(canvas, renderShockwaves, nowMs)
+                TouchTypingEffect.TOUCH_MAGMA_EMBER -> drawMagmaEmberSparks(canvas, renderEmbers, nowMs)
+                TouchTypingEffect.TOUCH_COMET_TRAIL -> drawCometKeyTrail(canvas, renderCometPoints, nowMs)
+                else -> Unit
+            }
+            if (renderTrails.size >= 2) {
+                drawGlideTrail(canvas, renderTrails, nowMs)
+            }
         }
 
-        // 3. Key pop-up bubbles (glowing multicolor rising bubbles when VIP RGB, clean matte dark popup when Normal/Free)
         if (renderGlows.isNotEmpty()) {
             drawRisingSparkBubbles(canvas, renderGlows, nowMs, useBengaliFont)
         }
+    }
+
+    private fun drawTouchKeyHighlight(
+        canvas: Canvas,
+        rect: RectF,
+        cornerRadius: Float,
+        colorInt: Int,
+        strength: Float,
+        fillMaxAlpha: Int
+    ) {
+        val r = Color.red(colorInt)
+        val g = Color.green(colorInt)
+        val b = Color.blue(colorInt)
+        sparkFillPaint.color = Color.argb(
+            (strength * fillMaxAlpha * settings.glowIntensity).toInt().coerceIn(0, 210),
+            r, g, b
+        )
+        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
+
+        sparkBorderPaint.color = Color.argb(
+            (strength * 255 * settings.glowIntensity).toInt().coerceIn(0, 255),
+            r, g, b
+        )
+        sparkBorderPaint.strokeWidth = (1.6f + strength * 1.5f) * density
+        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
+    }
+
+    private fun drawElectricCrossBeams(canvas: Canvas, renderGlows: List<ActiveKeyGlow>, nowMs: Long) {
+        if (renderGlows.isEmpty()) return
+        effectOverlayPaint.style = Paint.Style.STROKE
+        effectOverlayPaint.strokeCap = Paint.Cap.ROUND
+        for (i in renderGlows.indices) {
+            val g = renderGlows[i]
+            val fade = computeGlowFactor(g, nowMs)
+            if (fade <= 0.04f) continue
+            val cx = g.rect.centerX()
+            val cy = g.rect.centerY()
+            val alphaOuter = (fade * 105 * settings.glowIntensity).toInt().coerceIn(0, 140)
+            val alphaCore = (fade * 235 * settings.glowIntensity).toInt().coerceIn(0, 255)
+            effectOverlayPaint.color = Color.argb(alphaOuter, 0, 229, 255)
+            effectOverlayPaint.strokeWidth = 6.5f * density * fade
+            canvas.drawLine(0f, cy, width.toFloat(), cy, effectOverlayPaint)
+            canvas.drawLine(cx, 0f, cx, height.toFloat(), effectOverlayPaint)
+
+            effectOverlayPaint.color = Color.argb(alphaCore, 210, 252, 255)
+            effectOverlayPaint.strokeWidth = 1.8f * density * fade
+            canvas.drawLine(0f, cy, width.toFloat(), cy, effectOverlayPaint)
+            canvas.drawLine(cx, 0f, cx, height.toFloat(), effectOverlayPaint)
+        }
+    }
+
+    private fun drawShockwaveRings(canvas: Canvas, rings: List<ShockwaveRing>, nowMs: Long) {
+        if (rings.isEmpty()) return
+        effectOverlayPaint.style = Paint.Style.STROKE
+        val maxR = width.toFloat() * 0.44f
+        for (i in rings.indices) {
+            val ring = rings[i]
+            val age = (nowMs - ring.createdAtMs).toFloat()
+            val progress = (age / SHOCKWAVE_LIFETIME_MS).coerceIn(0f, 1f)
+            if (progress >= 1f) continue
+            val eased = 1f - (1f - progress) * (1f - progress)
+            val radius = 14f * density + eased * maxR
+            val fade = (1f - progress)
+            val r = Color.red(ring.color)
+            val g = Color.green(ring.color)
+            val b = Color.blue(ring.color)
+
+            effectOverlayPaint.color = Color.argb((fade * 120 * settings.glowIntensity).toInt().coerceIn(0, 160), r, g, b)
+            effectOverlayPaint.strokeWidth = (8.5f * fade + 2f) * density
+            canvas.drawCircle(ring.x, ring.y, radius, effectOverlayPaint)
+
+            effectOverlayPaint.color = Color.argb((fade * 240 * settings.glowIntensity).toInt().coerceIn(0, 255), minOf(255, r + 70), minOf(255, g + 70), minOf(255, b + 70))
+            effectOverlayPaint.strokeWidth = (2.4f * fade + 0.8f) * density
+            canvas.drawCircle(ring.x, ring.y, radius, effectOverlayPaint)
+        }
+    }
+
+    private fun drawMagmaEmberSparks(canvas: Canvas, sparks: List<EmberSpark>, nowMs: Long) {
+        if (sparks.isEmpty()) return
+        effectOverlayPaint.style = Paint.Style.FILL
+        for (i in sparks.indices) {
+            val s = sparks[i]
+            val ageSec = (nowMs - s.createdAtMs).toFloat() / 1000f
+            val life = (1f - (nowMs - s.createdAtMs).toFloat() / EMBER_LIFETIME_MS).coerceIn(0f, 1f)
+            if (life <= 0.02f) continue
+            val px = s.x + s.vx * ageSec * density
+            val py = s.y + s.vy * ageSec * density
+            val r = Color.red(s.color)
+            val g = Color.green(s.color)
+            val b = Color.blue(s.color)
+            effectOverlayPaint.color = Color.argb((life * 120 * settings.glowIntensity).toInt().coerceIn(0, 165), r, g, b)
+            canvas.drawCircle(px, py, s.sizePx * 1.9f * life, effectOverlayPaint)
+            effectOverlayPaint.color = Color.argb((life * 255).toInt().coerceIn(0, 255), 255, 245, 200)
+            canvas.drawCircle(px, py, s.sizePx * 0.85f * life, effectOverlayPaint)
+        }
+    }
+
+    private fun drawCometKeyTrail(canvas: Canvas, points: List<CometKeyPoint>, nowMs: Long) {
+        if (points.size < 2) return
+        for (i in 1 until points.size) {
+            val p0 = points[i - 1]
+            val p1 = points[i]
+            val age = (nowMs - p1.createdAtMs).toFloat()
+            val life = (1f - age / COMET_LIFETIME_MS).coerceIn(0f, 1f)
+            if (life <= 0.03f) continue
+            val ratio = i.toFloat() / (points.size - 1).coerceAtLeast(1)
+            val r = Color.red(p1.color)
+            val g = Color.green(p1.color)
+            val b = Color.blue(p1.color)
+            trailOuterPaint.color = Color.argb((life * ratio * 155 * settings.glowIntensity).toInt().coerceIn(0, 195), r, g, b)
+            trailOuterPaint.strokeWidth = (4f + 10f * ratio) * life * density
+            canvas.drawLine(p0.x, p0.y, p1.x, p1.y, trailOuterPaint)
+
+            trailCorePaint.color = Color.argb((life * ratio * 255).toInt().coerceIn(0, 255), 255, 255, 255)
+            trailCorePaint.strokeWidth = (1.6f + 3.2f * ratio) * life * density
+            canvas.drawLine(p0.x, p0.y, p1.x, p1.y, trailCorePaint)
+        }
+    }
+
+    private fun drawDiamondStarGlint(canvas: Canvas, rect: RectF, strength: Float) {
+        val cx = rect.right - 6f * density
+        val cy = rect.top + 6f * density
+        val arm = (9f + 7f * strength) * density
+        diamondPath.reset()
+        diamondPath.moveTo(cx, cy - arm)
+        diamondPath.quadTo(cx, cy, cx + arm, cy)
+        diamondPath.quadTo(cx, cy, cx, cy + arm)
+        diamondPath.quadTo(cx, cy, cx - arm, cy)
+        diamondPath.quadTo(cx, cy, cx, cy - arm)
+        diamondPath.close()
+
+        effectOverlayPaint.style = Paint.Style.FILL
+        effectOverlayPaint.color = Color.argb((strength * 245).toInt().coerceIn(0, 255), 255, 255, 255)
+        canvas.drawPath(diamondPath, effectOverlayPaint)
     }
 
     private fun drawGboardCircularActionKey(
@@ -1189,8 +1440,8 @@ class RgbKeyboardView @JvmOverloads constructor(
             val glow = renderGlows[i]
             if (!glow.showPopup) continue
 
-            // In Free Standard Mode or explicit Normal / Classic Black mode, show clean matte-dark popup only while pressed
-            if (!vipVisualsEnabled || settings.effect == RgbEffect.NORMAL_DEFAULT) {
+            // In Free Standard Mode, show clean matte-dark popup only while pressed
+            if (!vipVisualsEnabled) {
                 if (glow.releasedAtMs != null) continue
                 val bubbleW = maxOf(glow.rect.width() * 1.38f, 40f * density)
                 val bubbleH = maxOf(glow.rect.height() * 1.12f, 44f * density)
@@ -1623,10 +1874,17 @@ class RgbKeyboardView @JvmOverloads constructor(
             displayLabel = box.displayLabel,
             rect = RectF(box.rect),
             neonColor = box.neonColor,
+            rowIndex = box.rowIndex,
+            colIndex = box.colIndex,
             pressedAtMs = nowMs,
             releasedAtMs = null,
             showPopup = showPopup
         )
+        val cx = box.rect.centerX()
+        val cy = box.rect.centerY()
+        val activeTouchMode = settings.touchEffect
+        val allowTouchFx = vipVisualsEnabled
+
         particleScope.launch {
             synchronized(particleStateLock) {
                 for (i in activeGlows.lastIndex downTo 0) {
@@ -1635,6 +1893,40 @@ class RgbKeyboardView @JvmOverloads constructor(
                     }
                 }
                 activeGlows.add(newGlow)
+
+                if (allowTouchFx) {
+                    when (activeTouchMode) {
+                        TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> {
+                            shockwaves.add(ShockwaveRing(cx, cy, nowMs, box.neonColor))
+                        }
+                        TouchTypingEffect.TOUCH_MAGMA_EMBER -> {
+                            for (e in 0 until 6) {
+                                val angle = (-Math.PI * 0.15) - (Math.PI * 0.70) * (e / 5.0)
+                                val speed = 42f + (e % 3) * 26f
+                                val col = if (e % 2 == 0) Color.parseColor("#FFD600") else Color.parseColor("#FF4500")
+                                embers.add(
+                                    EmberSpark(
+                                        x = cx + ((e - 2.5f) * 4.5f * density),
+                                        y = box.rect.top + 4f * density,
+                                        vx = (cos(angle) * speed * 0.55).toFloat(),
+                                        vy = (sin(angle) * speed * 1.45).toFloat(),
+                                        sizePx = (2.4f + (e % 3) * 1.1f) * density,
+                                        createdAtMs = nowMs,
+                                        color = col
+                                    )
+                                )
+                            }
+                        }
+                        TouchTypingEffect.TOUCH_COMET_TRAIL -> {
+                            cometPoints.add(CometKeyPoint(cx, cy, nowMs, box.neonColor))
+                            while (cometPoints.size > 4) {
+                                cometPoints.removeAt(0)
+                            }
+                        }
+                        else -> Unit
+                    }
+                }
+
                 pruneAndCapLocked(nowMs)
                 publishParticleSnapshotLocked()
             }
@@ -1687,6 +1979,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         particleScope.launch {
             synchronized(particleStateLock) {
                 trailPoints.clear()
+                cometPoints.clear()
                 publishParticleSnapshotLocked()
             }
         }
@@ -1697,15 +1990,14 @@ class RgbKeyboardView @JvmOverloads constructor(
             synchronized(particleStateLock) {
                 activeGlows.clear()
                 trailPoints.clear()
+                shockwaves.clear()
+                embers.clear()
+                cometPoints.clear()
                 publishParticleSnapshotLocked()
             }
         }
     }
 
-    /**
-     * Runs strictly off the UI thread on Dispatchers.Default under [particleStateLock].
-     * Hard-caps live RGB particles to <= 25 items and prunes expired animations with zero lambdas.
-     */
     private fun pruneAndCapLocked(nowMs: Long): Boolean {
         var mutated = false
         for (i in activeGlows.lastIndex downTo 0) {
@@ -1721,6 +2013,24 @@ class RgbKeyboardView @JvmOverloads constructor(
                 mutated = true
             }
         }
+        for (i in shockwaves.lastIndex downTo 0) {
+            if (nowMs - shockwaves[i].createdAtMs > SHOCKWAVE_LIFETIME_MS) {
+                shockwaves.removeAt(i)
+                mutated = true
+            }
+        }
+        for (i in embers.lastIndex downTo 0) {
+            if (nowMs - embers[i].createdAtMs > EMBER_LIFETIME_MS) {
+                embers.removeAt(i)
+                mutated = true
+            }
+        }
+        for (i in cometPoints.lastIndex downTo 0) {
+            if (nowMs - cometPoints[i].createdAtMs > COMET_LIFETIME_MS) {
+                cometPoints.removeAt(i)
+                mutated = true
+            }
+        }
         while (activeGlows.size > MAX_ACTIVE_GLOWS) {
             activeGlows.removeAt(0)
             mutated = true
@@ -1729,14 +2039,16 @@ class RgbKeyboardView @JvmOverloads constructor(
             trailPoints.removeAt(0)
             mutated = true
         }
-        while (activeGlows.size + trailPoints.size > MAX_RGB_PARTICLES) {
-            if (trailPoints.isNotEmpty()) {
-                trailPoints.removeAt(0)
-            } else if (activeGlows.isNotEmpty()) {
-                activeGlows.removeAt(0)
-            } else {
-                break
-            }
+        while (shockwaves.size > 6) {
+            shockwaves.removeAt(0)
+            mutated = true
+        }
+        while (embers.size > 24) {
+            embers.removeAt(0)
+            mutated = true
+        }
+        while (cometPoints.size > 4) {
+            cometPoints.removeAt(0)
             mutated = true
         }
         return mutated
@@ -1746,7 +2058,10 @@ class RgbKeyboardView @JvmOverloads constructor(
         particleSnapshotRef.set(
             ParticleSnapshot(
                 glows = ArrayList(activeGlows),
-                trails = ArrayList(trailPoints)
+                trails = ArrayList(trailPoints),
+                shockwaves = ArrayList(shockwaves),
+                embers = ArrayList(embers),
+                cometPoints = ArrayList(cometPoints)
             )
         )
     }
@@ -1943,10 +2258,12 @@ class RgbKeyboardView @JvmOverloads constructor(
     companion object {
         private const val SPARK_FADE_MS = 460L
         private const val TRAIL_LIFETIME_MS = 380L
+        private const val SHOCKWAVE_LIFETIME_MS = 520L
+        private const val EMBER_LIFETIME_MS = 620L
+        private const val COMET_LIFETIME_MS = 780L
         private const val LONG_PRESS_DELAY_MS = 350L
         private const val DOUBLE_TAP_SHIFT_MS = 380L
         private const val IDLE_PAUSE_MS = 1500L
-        private const val MAX_RGB_PARTICLES = 25
         private const val MAX_ACTIVE_GLOWS = 10
         private const val MAX_TRAIL_POINTS = 15
         private const val DELETE_INITIAL_DELAY_MS = 300L

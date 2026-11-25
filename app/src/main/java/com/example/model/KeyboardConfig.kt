@@ -3,82 +3,246 @@ package com.example.model
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
+/**
+ * 7 Next-Gen Touch-Reactive Typing Effects that layer SIMULTANEOUSLY on top of any
+ * active Background Theme or Ambient Physics RGB Animation.
+ */
+enum class TouchTypingEffect(
+    val id: String,
+    val displayName: String,
+    val shortLabel: String,
+    val badge: String,
+    val description: String,
+    val isVipEffect: Boolean = true
+) {
+    TOUCH_SPARK(
+        id = "touch_spark",
+        displayName = "✨ Touch Spark",
+        shortLabel = "Touch Spark",
+        badge = "✨ Spark",
+        description = "Stealth matte keys at rest; pressed key rises in vivid neon glow"
+    ),
+    TOUCH_ELECTRIC_CROSS(
+        id = "touch_electric_cross",
+        displayName = "⚡ Touch Electric Cross",
+        shortLabel = "Electric Cross",
+        badge = "⚡ Cross",
+        description = "Pressing a key illuminates its horizontal row & vertical column in a neon laser cross"
+    ),
+    TOUCH_SHOCKWAVE_RING(
+        id = "touch_shockwave_ring",
+        displayName = "💥 Touch Shockwave Ring",
+        shortLabel = "Shockwave Ring",
+        badge = "💥 Ring",
+        description = "Tapping any key expands a glowing radial neon shockwave ring outward"
+    ),
+    TOUCH_MAGMA_EMBER(
+        id = "touch_magma_ember",
+        displayName = "🔥 Touch Magma Ember",
+        shortLabel = "Magma Ember",
+        badge = "🔥 Ember",
+        description = "Tapped keys ignite in molten gold-crimson glow and launch rising micro-sparks"
+    ),
+    TOUCH_FROST_FREEZE(
+        id = "touch_frost_freeze",
+        displayName = "❄️ Touch Frost Freeze",
+        shortLabel = "Frost Freeze",
+        badge = "❄️ Frost",
+        description = "Tapping a key freezes it and immediate neighbors in icy cyan-white crystal light"
+    ),
+    TOUCH_COMET_TRAIL(
+        id = "touch_comet_trail",
+        displayName = "🌠 Touch Comet Trail",
+        shortLabel = "Comet Trail",
+        badge = "🌠 Comet",
+        description = "Rapid typing draws a luminous neon comet tail connecting the last 4 pressed keys"
+    ),
+    TOUCH_DIAMOND_FLASH(
+        id = "touch_diamond_flash",
+        displayName = "💎 Touch Diamond Flash",
+        shortLabel = "Diamond Flash",
+        badge = "💎 Glint",
+        description = "Every keypress triggers a crisp 4-point diamond star glint across beveled key edges"
+    );
+
+    companion object {
+        fun fromSavedName(name: String?): TouchTypingEffect {
+            if (name.isNullOrBlank()) return TOUCH_SPARK
+            return entries.firstOrNull {
+                it.name.equals(name, ignoreCase = true) || it.id.equals(name, ignoreCase = true)
+            } ?: TOUCH_SPARK
+        }
+    }
+}
+
+/**
+ * Classic Black (ONLY permanently FREE default) + 20 Next-Gen Ambient Physics RGB Animations.
+ * All 20 Ambient Physics Animations are marked VIP (free during the 7-day new-device trial,
+ * or unlocked via VIP pass / Firebase `/admin_config/freeThemeIds` / `globalAllFree` / device overrides).
+ */
 enum class RgbEffect(
+    val id: String,
     val displayName: String,
     val shortLabel: String,
     val description: String,
     val isVipEffect: Boolean = true
 ) {
     NORMAL_DEFAULT(
-        displayName = "Normal / Classic Black (No RGB)",
-        shortLabel = "Normal Black",
-        description = "Pure matte-black keys with zero RGB lights — clean, calm & battery friendly",
+        id = "normal_default",
+        displayName = "Normal / Classic Black",
+        shortLabel = "Classic Black",
+        description = "Pure matte-black keys with zero RGB lights — 100% FREE forever & battery friendly",
         isVipEffect = false
     ),
-    TOUCH_SPARK(
-        displayName = "Touch Spark",
-        shortLabel = "Touch Spark",
-        description = "Stealth matte keys at rest; each key rises in its own vibrant neon color on touch"
+    LIGHTNING_ARC(
+        id = "lightning_arc",
+        displayName = "⚡ Lightning Arc Chain",
+        shortLabel = "Lightning Arc",
+        description = "High-voltage electric cyan lightning arcs branching across the key matrix"
     ),
-    RAINBOW_WAVE(
-        displayName = "Spectrum Wave",
-        shortLabel = "Spectrum Wave",
-        description = "Smooth diagonal neon flow sweeping across every keycap"
+    LIQUID_MERCURY(
+        id = "liquid_mercury",
+        displayName = "🌊 Liquid Mercury Shockwave",
+        shortLabel = "Liquid Mercury",
+        description = "Fluid chrome-neon ripples undulating across keys like molten liquid metal"
     ),
-    REACTIVE_RIPPLE(
-        displayName = "Reactive Ripple",
-        shortLabel = "Ripple",
-        description = "Every keypress launches a radial neon shockwave outward"
+    COMET_TRAIL(
+        id = "comet_trail",
+        displayName = "☄️ Comet Trail",
+        shortLabel = "Comet Trail",
+        description = "Blazing shooting-star comets streaking diagonally with glowing stardust tails"
     ),
-    AI_PLASMA_VORTEX(
-        displayName = "AI Plasma Vortex",
-        shortLabel = "Plasma Vortex",
-        description = "Swirling holographic plasma currents pulsing across the keyboard deck"
+    NEON_LAVA_ORBS(
+        id = "neon_lava_orbs",
+        displayName = "🌋 Neon Lava Orbs",
+        shortLabel = "Lava Orbs",
+        description = "Buoyant glowing plasma blobs merging and drifting smoothly like a lava lamp"
     ),
-    CYBER_BREATHING(
-        displayName = "Cyber Breathing",
-        shortLabel = "Cyber Breath",
-        description = "Harmonic dual-tone neon glow pulsing smoothly across every key"
+    PHOENIX_EMBER(
+        id = "phoenix_ember",
+        displayName = "🔥 Phoenix Ember Sparks",
+        shortLabel = "Phoenix Ember",
+        description = "Rising golden-crimson embers floating upward across dark volcanic keys"
+    ),
+    DIAMOND_PRISM(
+        id = "diamond_prism",
+        displayName = "💎 Diamond Prism",
+        shortLabel = "Diamond Prism",
+        description = "Refracted crystalline rainbow light facets glinting sharply across every key"
+    ),
+    BLACK_HOLE_GRAVITY(
+        id = "black_hole_gravity",
+        displayName = "🕳️ Black Hole Gravity",
+        shortLabel = "Black Hole",
+        description = "Accretion-disk spiral pulling violet-gold energy inward toward a dark singularity"
+    ),
+    DNA_HELIX(
+        id = "dna_helix",
+        displayName = "🧬 DNA Helix",
+        shortLabel = "DNA Helix",
+        description = "Twin intertwined cyan and magenta sine-wave strands pulsing across rows"
+    ),
+    SUB_ZERO_FROST(
+        id = "sub_zero_frost",
+        displayName = "❄️ Sub-Zero Frost",
+        shortLabel = "Sub-Zero Frost",
+        description = "Shimmering arctic glacial waves and crystalline frost glimmers"
+    ),
+    CYBER_BASS_EQ(
+        id = "cyber_bass_eq",
+        displayName = "🎵 Cyber Bass Equalizer",
+        shortLabel = "Bass EQ",
+        description = "Rhythmic multi-band neon equalizer bars bouncing upward from the bottom row"
+    ),
+    LASER_SPIDER_WEB(
+        id = "laser_spider_web",
+        displayName = "🕸️ Laser Spider-Web",
+        shortLabel = "Laser Web",
+        description = "Radial neon laser filaments weaving outward from center in cyber-grid pulses"
+    ),
+    PLASMA_REACTOR(
+        id = "plasma_reactor",
+        displayName = "⚛️ Plasma Reactor",
+        shortLabel = "Plasma Reactor",
+        description = "High-energy fusion core rings expanding and pulsing with electric harmonics"
+    ),
+    SAKURA_DRIFT(
+        id = "sakura_drift",
+        displayName = "🌸 Sakura Drift",
+        shortLabel = "Sakura Drift",
+        description = "Soft neon cherry-blossom petals drifting diagonally in moonlit breeze"
+    ),
+    NEON_CYBER_SNAKE(
+        id = "neon_cyber_snake",
+        displayName = "🐍 Neon Cyber Snake",
+        shortLabel = "Cyber Snake",
+        description = "Luminous arcade light-snake weaving smoothly row by row across the entire deck"
+    ),
+    CYBERPUNK_FIREWORKS(
+        id = "cyberpunk_fireworks",
+        displayName = "🎆 Cyberpunk Fireworks",
+        shortLabel = "Fireworks",
+        description = "Periodic multi-color neon firework bursts blooming in radiant stardust rings"
+    ),
+    QUANTUM_VORTEX(
+        id = "quantum_vortex",
+        displayName = "🌀 Quantum Vortex",
+        shortLabel = "Quantum Vortex",
+        description = "Swirling holographic wormhole spiral warping spectrum energy across every key"
+    ),
+    HEARTBEAT_ECG(
+        id = "heartbeat_ecg",
+        displayName = "💓 Heartbeat ECG",
+        shortLabel = "Heartbeat ECG",
+        description = "Neon rose-cyan ECG pulse wave sweeping left to right with twin heartbeat spikes"
     ),
     MATRIX_RAIN(
-        displayName = "Matrix Cascade",
-        shortLabel = "Matrix",
-        description = "Digital emerald light streams cascading vertically down key columns"
-    ),
-    FIREFLY_SPARKS(
-        displayName = "Firefly Sparks",
-        shortLabel = "Firefly",
-        description = "Warm enchanted firefly glimmers drifting organically across the keys"
+        id = "matrix_rain",
+        displayName = "💚 Matrix Waterfall",
+        shortLabel = "Matrix Fall",
+        description = "Digital emerald phosphor streams cascading vertically down key columns"
     ),
     AURORA_FLOW(
-        displayName = "Aurora Flow",
-        shortLabel = "Aurora",
-        description = "Northern lights silk ribbons undulating smoothly across the deck"
+        id = "aurora_flow",
+        displayName = "🌌 Aurora Ribbon",
+        shortLabel = "Aurora Ribbon",
+        description = "Northern lights silk ribbons undulating fluidly across the keyboard deck"
     ),
-    STARLIGHT(
-        displayName = "Starlight Embers",
-        shortLabel = "Starlight",
-        description = "Sparkling per-key cosmic constellations shimmering organically"
-    ),
-    LIGHTNING_ARC(
-        displayName = "Thunder Lightning",
-        shortLabel = "Lightning",
-        description = "High-voltage electric cyan bolts cracking across the key matrix"
-    ),
-    NEON_HEARTBEAT(
-        displayName = "Love Heart Glow",
-        shortLabel = "Heart Glow",
-        description = "Romantic rose-magenta dual heartbeat waves radiating from center"
-    ),
-    STATIC_NEON(
-        displayName = "Static Prism",
-        shortLabel = "Static Prism",
-        description = "Crisp locked multi-zone studio lighting with zero motion"
+    KATANA_SLASH(
+        id = "katana_slash",
+        displayName = "⚔️ Katana Slash",
+        shortLabel = "Katana Slash",
+        description = "Razor-sharp neon blade arcs slicing diagonally with trailing afterglow"
     );
 
     fun next(): RgbEffect {
         val all = entries
         return all[(ordinal + 1) % all.size]
+    }
+
+    companion object {
+        val ambientPhysicsEffects: List<RgbEffect>
+            get() = entries.filter { it != NORMAL_DEFAULT }
+
+        /** Clean migration mapper so previously saved effect names never break. */
+        fun fromSavedName(name: String?): RgbEffect {
+            if (name.isNullOrBlank()) return QUANTUM_VORTEX
+            entries.firstOrNull {
+                it.name.equals(name, ignoreCase = true) || it.id.equals(name, ignoreCase = true)
+            }?.let { return it }
+            return when (name.uppercase()) {
+                "TOUCH_SPARK" -> NORMAL_DEFAULT
+                "RAINBOW_WAVE" -> AURORA_FLOW
+                "REACTIVE_RIPPLE" -> LIQUID_MERCURY
+                "AI_PLASMA_VORTEX" -> QUANTUM_VORTEX
+                "CYBER_BREATHING" -> PLASMA_REACTOR
+                "FIREFLY_SPARKS" -> PHOENIX_EMBER
+                "STARLIGHT" -> CYBERPUNK_FIREWORKS
+                "NEON_HEARTBEAT" -> HEARTBEAT_ECG
+                "STATIC_NEON" -> DIAMOND_PRISM
+                else -> QUANTUM_VORTEX
+            }
+        }
     }
 }
 
@@ -268,8 +432,9 @@ enum class KeyboardLanguage(
 data class KeyboardSettings(
     val language: KeyboardLanguage = KeyboardLanguage.ENGLISH,
     val activeLanguageId: String = LanguageCatalog.ENGLISH_ID,
-    val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID, LanguageCatalog.BANGLISH_ID, "bn", "hi"),
-    val effect: RgbEffect = RgbEffect.TOUCH_SPARK,
+    val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID),
+    val effect: RgbEffect = RgbEffect.QUANTUM_VORTEX,
+    val touchEffect: TouchTypingEffect = TouchTypingEffect.TOUCH_SPARK,
     val palette: RgbPalette = RgbPalette.VICE_CITY_NEON,
     val keycapStyle: KeycapStyle = KeycapStyle.PUDDING,
     val switchSound: SwitchSoundProfile = SwitchSoundProfile.SAMSUNG_SOFT,
