@@ -97,6 +97,7 @@ import com.example.ui.theme.GlassNavSurface
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NotoSansBengaliFamily
 import androidx.compose.ui.graphics.Color as ComposeColor
+import com.example.security.AntiTamperGuard
 import com.example.ui.theme.ProRgbKeyboardTheme
 import com.example.ui.theme.midnightNavyIndigoWallpaper
 import com.example.viewmodel.StudioViewModel
@@ -156,6 +157,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AntiTamperGuard.verifyOrTerminate(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
@@ -242,6 +244,7 @@ fun ProRgbKeyboardApp(
     val languagePacks by viewModel.languagePacks.collectAsStateWithLifecycle()
     val playgroundText by viewModel.playgroundText.collectAsStateWithLifecycle()
     val clipboardClips by viewModel.clipboardClips.collectAsStateWithLifecycle()
+    val hasFreshTextClip by viewModel.hasFreshTextClip.collectAsStateWithLifecycle()
     val downloadedThemeIds by viewModel.downloadedThemeIds.collectAsStateWithLifecycle()
     val downloadingThemeIds by viewModel.downloadingThemeIds.collectAsStateWithLifecycle()
     val showStartupStepper by viewModel.showStartupStepper.collectAsStateWithLifecycle()
@@ -407,6 +410,7 @@ fun ProRgbKeyboardApp(
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
+                            hasFreshTextClip = hasFreshTextClip,
                             downloadedThemeIds = downloadedThemeIds,
                             downloadingThemeIds = downloadingThemeIds,
                             viewModel = viewModel,
@@ -500,6 +504,7 @@ fun ProRgbKeyboardApp(
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
+                            hasFreshTextClip = hasFreshTextClip,
                             downloadedThemeIds = downloadedThemeIds,
                             downloadingThemeIds = downloadingThemeIds,
                             viewModel = viewModel,
@@ -583,6 +588,7 @@ private fun TabContent(
     languagePacks: List<LanguagePackUiState>,
     playgroundText: String,
     clipboardClips: List<String>,
+    hasFreshTextClip: Boolean,
     downloadedThemeIds: Set<String>,
     downloadingThemeIds: Set<String>,
     viewModel: StudioViewModel,
@@ -611,6 +617,7 @@ private fun TabContent(
                 languagePacks = languagePacks,
                 playgroundText = playgroundText,
                 clipboardClips = clipboardClips,
+                hasFreshTextClip = hasFreshTextClip,
                 onOpenImeSettings = onOpenImeSettings,
                 onShowImePicker = onShowImePicker,
                 onOpenUnlockScreen = onOpenUnlockScreen,
@@ -640,10 +647,17 @@ private fun TabContent(
                 onRefreshClipboard = viewModel::refreshClipboard,
                 onRemoveClipboardItem = viewModel::removeClipboardItem,
                 onClearClipboard = viewModel::clearClipboard,
+                onMarkClipboardPasted = viewModel::markClipboardPasted,
                 onKeyFeedback = viewModel::triggerKeyFeedback,
                 onOpenHardwareSettings = onOpenHardwareSettings,
                 onOpenLanguagesTab = onOpenLanguagesTab,
                 onOpenEffectsCategory = onOpenEffectsCategoryFromHome,
+                downloadedThemeIds = downloadedThemeIds,
+                downloadingThemeIds = downloadingThemeIds,
+                onSelectTouchEffect = viewModel::setTouchEffect,
+                onApplyDefaultBlack = viewModel::applyDefaultBlackBackdropPreservingTouch,
+                onApplyComboTheme = viewModel::applyComboTheme,
+                onDownloadComboTheme = { combo -> viewModel.downloadComboTheme(combo, applyAfterDownload = true) },
                 isFeatureTourActive = isFeatureTourActive,
                 activeTourTarget = activeTourTarget,
                 featureTourCoordinates = featureTourCoordinates

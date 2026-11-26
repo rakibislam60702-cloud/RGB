@@ -53,6 +53,7 @@ class KeyboardPreferencesRepository private constructor(
         val AUTO_CAPITALIZE = booleanPreferencesKey("auto_capitalize")
         val DOUBLE_SPACE_PERIOD = booleanPreferencesKey("double_space_period")
         val SMART_SUGGESTIONS = booleanPreferencesKey("smart_suggestions_enabled")
+        val SOUND_MIGRATION_V1 = booleanPreferencesKey("sound_default_migrated_v1")
     }
 
     val settingsFlow: Flow<KeyboardSettings> = context.rgbKeyboardDataStore.data
@@ -68,6 +69,14 @@ class KeyboardPreferencesRepository private constructor(
             val activeId = prefs[Keys.ACTIVE_LANGUAGE_ID]?.takeIf { it.isNotBlank() }
                 ?: LanguageCatalog.ENGLISH_ID
             val legacyLang = if (activeId == "bn") KeyboardLanguage.BENGALI else KeyboardLanguage.ENGLISH
+            val soundMigrated = prefs[Keys.SOUND_MIGRATION_V1] == true
+            val resolvedSound = if (soundMigrated) {
+                prefs[Keys.SWITCH_SOUND]?.let { name ->
+                    SwitchSoundProfile.entries.find { it.name == name }
+                } ?: SwitchSoundProfile.SILENT
+            } else {
+                SwitchSoundProfile.SILENT
+            }
 
             KeyboardSettings(
                 language = legacyLang,
@@ -81,9 +90,7 @@ class KeyboardPreferencesRepository private constructor(
                 keycapStyle = prefs[Keys.KEYCAP_STYLE]?.let { name ->
                     KeycapStyle.entries.find { it.name == name }
                 } ?: KeycapStyle.PUDDING,
-                switchSound = prefs[Keys.SWITCH_SOUND]?.let { name ->
-                    SwitchSoundProfile.entries.find { it.name == name }
-                } ?: SwitchSoundProfile.SAMSUNG_SOFT,
+                switchSound = resolvedSound,
                 animationSpeed = (prefs[Keys.ANIMATION_SPEED] ?: 1.0f).coerceIn(0.2f, 2.5f),
                 glowIntensity = (prefs[Keys.GLOW_INTENSITY] ?: 0.90f).coerceIn(0.2f, 1.0f),
                 keyCornerRadiusDp = (prefs[Keys.CORNER_RADIUS] ?: 6f).coerceIn(2f, 16f),
@@ -210,7 +217,19 @@ class KeyboardPreferencesRepository private constructor(
     }
 
     suspend fun updateSwitchSound(profile: SwitchSoundProfile) {
-        context.rgbKeyboardDataStore.edit { it[Keys.SWITCH_SOUND] = profile.name }
+        context.rgbKeyboardDataStore.edit { prefs ->
+            prefs[Keys.SWITCH_SOUND] = profile.name
+            prefs[Keys.SOUND_MIGRATION_V1] = true
+        }
+    }
+
+    suspend fun ensureSoundDefaultMigrated() {
+        context.rgbKeyboardDataStore.edit { prefs ->
+            if (prefs[Keys.SOUND_MIGRATION_V1] != true) {
+                prefs[Keys.SWITCH_SOUND] = SwitchSoundProfile.SILENT.name
+                prefs[Keys.SOUND_MIGRATION_V1] = true
+            }
+        }
     }
 
     suspend fun updateAnimationSpeed(speed: Float) {
@@ -270,7 +289,11 @@ class KeyboardPreferencesRepository private constructor(
     }
 
     suspend fun resetDefaults() {
-        context.rgbKeyboardDataStore.edit { it.clear() }
+        context.rgbKeyboardDataStore.edit { prefs ->
+            prefs.clear()
+            prefs[Keys.SWITCH_SOUND] = SwitchSoundProfile.SILENT.name
+            prefs[Keys.SOUND_MIGRATION_V1] = true
+        }
     }
 
     companion object {

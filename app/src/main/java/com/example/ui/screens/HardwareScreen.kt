@@ -67,6 +67,7 @@ import com.example.model.ImeStatus
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
 import com.example.model.LanguagePackUiState
+import com.example.model.SoundCategory
 import com.example.model.SwitchSoundProfile
 import com.example.ui.theme.FlagshipCyanMagentaBrush
 import com.example.ui.theme.FlagshipGlassRimGoldSubtle
@@ -135,15 +136,62 @@ fun HardwareScreen(
                 )
             }
 
-            // Switch Acoustics Section + Interactive Switch Audition Cap
-            SectionTitle(title = stringResource(R.string.section_switch_acoustics))
+            // Switch Acoustics Section + Interactive Switch Audition Cap (53+ Gaming & Mechanical FX)
+            SectionTitle(title = "${stringResource(R.string.section_switch_acoustics)} · ${SwitchSoundProfile.playableEntries.size} FX")
             SwitchAuditionDeck(
                 activeProfile = settings.switchSound,
                 onAudition = { onAuditionSwitch(settings.switchSound) }
             )
 
+            var selectedCategory by remember { mutableStateOf(SoundCategory.ALL) }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(end = 4.dp)
+            ) {
+                items(SoundCategory.entries, key = { it.name }) { cat ->
+                    val isSelected = selectedCategory == cat
+                    val count = if (cat == SoundCategory.ALL) {
+                        SwitchSoundProfile.playableEntries.size
+                    } else {
+                        SwitchSoundProfile.playableEntries.count { it.category == cat }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .heightIn(min = 40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) NeonCyan.copy(alpha = 0.20f) else ObsidianCanvas)
+                            .border(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) NeonCyan else ObsidianBorder,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable { selectedCategory = cat }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .testTag("sound_category_${cat.name.lowercase()}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (cat == SoundCategory.ALL) "All ($count)" else "${cat.displayName} ($count)",
+                            fontFamily = JetBrainsMonoFamily,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) NeonCyan else Color.White
+                        )
+                    }
+                }
+            }
+
+            val visibleProfiles = remember(selectedCategory) {
+                if (selectedCategory == SoundCategory.ALL) {
+                    SwitchSoundProfile.entries
+                } else {
+                    listOf(SwitchSoundProfile.SILENT) + SwitchSoundProfile.playableEntries.filter { it.category == selectedCategory }
+                }
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SwitchSoundProfile.entries.forEach { profile ->
+                visibleProfiles.forEach { profile ->
                     val selected = settings.switchSound == profile
                     val accent = Color(profile.accentHex)
                     Row(

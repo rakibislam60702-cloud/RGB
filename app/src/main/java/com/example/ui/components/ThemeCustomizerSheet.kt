@@ -127,6 +127,8 @@ fun FullMiniKeyboardPreview(
     overrideBannerPresetId: String? = null,
     overrideRemoteImageUrl: String? = null,
     overrideGradientColors: List<Long>? = null,
+    overrideCustomBitmap: androidx.compose.ui.graphics.ImageBitmap? = null,
+    overrideDimAlpha: Float? = null,
     overrideEffect: RgbEffect = settings.effect,
     overrideTouchEffect: TouchTypingEffect = settings.touchEffect,
     overridePalette: RgbPalette = settings.palette,
@@ -152,23 +154,26 @@ fun FullMiniKeyboardPreview(
 
     val resolvedPresetId = when {
         forceDefaultBlack -> null
+        overrideCustomBitmap != null -> null
         !overrideBannerPresetId.isNullOrBlank() -> overrideBannerPresetId
         customPhotoTheme?.hasPreset == true -> customPhotoTheme.presetId
         else -> null
     }
     val bannerPreset = remember(resolvedPresetId) { BannerPresetCatalog.findById(resolvedPresetId) }
 
-    val customFileBitmap = remember(customPhotoTheme?.cacheKey, resolvedPresetId, forceDefaultBlack) {
-        if (forceDefaultBlack || resolvedPresetId != null) {
-            null
-        } else {
-            val path = customPhotoTheme?.photoPath
-            if (!path.isNullOrBlank() && File(path).exists()) {
-                runCatching {
-                    val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-                    BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
-                }.getOrNull()
-            } else null
+    val customFileBitmap = remember(customPhotoTheme?.cacheKey, resolvedPresetId, forceDefaultBlack, overrideCustomBitmap) {
+        when {
+            forceDefaultBlack || resolvedPresetId != null -> null
+            overrideCustomBitmap != null -> overrideCustomBitmap
+            else -> {
+                val path = customPhotoTheme?.photoPath
+                if (!path.isNullOrBlank() && File(path).exists()) {
+                    runCatching {
+                        val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                        BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+                    }.getOrNull()
+                } else null
+            }
         }
     }
 
@@ -187,7 +192,8 @@ fun FullMiniKeyboardPreview(
             !overrideRemoteImageUrl.isNullOrBlank() ||
             !overrideGradientColors.isNullOrEmpty()
         )
-    val dimAlpha = (customPhotoTheme?.dimAlpha ?: CustomBackgroundManager.DEFAULT_DIM_ALPHA).coerceIn(0.05f, 0.80f)
+    val dimAlpha = (overrideDimAlpha ?: customPhotoTheme?.dimAlpha ?: CustomBackgroundManager.DEFAULT_DIM_ALPHA)
+        .coerceIn(CustomBackgroundManager.MIN_DIM_ALPHA, CustomBackgroundManager.MAX_DIM_ALPHA)
 
     val gradientBrush = remember(overrideGradientColors, bannerPreset) {
         val cols = overrideGradientColors?.takeIf { it.size >= 2 }

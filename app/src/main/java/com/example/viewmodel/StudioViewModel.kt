@@ -105,6 +105,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     val clipboardClips: StateFlow<List<String>> = clipboardManager.clips
+    val hasFreshTextClip: StateFlow<Boolean> = clipboardManager.hasFreshTextClip
 
     private val _imeStatus = MutableStateFlow(ImeStatus())
     val imeStatus: StateFlow<ImeStatus> = _imeStatus.asStateFlow()
@@ -146,6 +147,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         SmartWordPredictor.init(application)
+        viewModelScope.launch { repository.ensureSoundDefaultMigrated() }
         trialLicenseManager.syncStorageInBackground(forcePersistToDocuments = false)
         refreshImeStatus()
         startTrialCountdownTicker()
@@ -581,6 +583,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         clipboardManager.clearAll()
     }
 
+    fun markClipboardPasted(text: String) {
+        clipboardManager.markClipboardPasted(text)
+    }
+
     // Dynamic Language Pack & Switching Actions
     fun setLanguage(language: KeyboardLanguage) {
         val id = if (language == KeyboardLanguage.BENGALI) "bn" else LanguageCatalog.ENGLISH_ID
@@ -770,6 +776,16 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
      * Clean Isolation Rule: keeps Package Themes crisp without turning on Touch Effects unless the user enables one!
      */
     fun downloadComboTheme(combo: ComboThemePreset, applyAfterDownload: Boolean = true) {
+        if (applyAfterDownload) {
+            if (!combo.bannerPresetId.isNullOrBlank() && combo.remoteImageUrl.isNullOrBlank()) {
+                customBackgroundManager.selectPreset(combo.bannerPresetId)
+            }
+            viewModelScope.launch {
+                repository.updateEffect(combo.effect)
+                repository.updateTouchEffect(TouchTypingEffect.NONE)
+                repository.updatePalette(combo.palette)
+            }
+        }
         if (combo.id in _downloadingThemeIds.value) return
         viewModelScope.launch {
             _downloadingThemeIds.update { it + combo.id }
@@ -784,7 +800,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 1-Tap Combo apply: applies locally cached `filesDir/themes/` artwork or downloads on demand cleanly. */
+    /** 1-Tap Combo apply: activates live immediately and caches `filesDir/themes/` artwork cleanly. */
     fun applyComboTheme(combo: ComboThemePreset) {
         if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
             viewModelScope.launch {
@@ -938,6 +954,36 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun saveCustomPhoto(uri: Uri) {
         viewModelScope.launch {
             customBackgroundManager.savePhotoFromUri(uri)
+        }
+    }
+
+    fun saveCroppedPhotoBitmap(bitmap: android.graphics.Bitmap, dimAlpha: Float, showKeyBorders: Boolean) {
+        viewModelScope.launch {
+            customBackgroundManager.saveCroppedPhotoBitmap(bitmap, dimAlpha)
+            repository.updateShowKeyBorders(showKeyBorders)
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
+        }
+    }
+
+    fun applyBannerWithDim(presetId: String, dimAlpha: Float, showKeyBorders: Boolean) {
+        customBackgroundManager.selectPresetWithDim(presetId, dimAlpha)
+        viewModelScope.launch {
+            repository.updateShowKeyBorders(showKeyBorders)
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
+        }
+    }
+
+    fun applyRemoteBannerWithDim(imageSource: String, dimAlpha: Float, showKeyBorders: Boolean) {
+        viewModelScope.launch {
+            customBackgroundManager.saveRemoteBannerImage(imageSource, dimAlpha)
+            repository.updateShowKeyBorders(showKeyBorders)
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
         }
     }
 

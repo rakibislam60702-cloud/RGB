@@ -147,9 +147,9 @@
     <!-- Instant RGB Neon Text Stickers & Smart Suggestions -->
     <string name="chip_rgb_sticker">✨ RGB Sticker</string>
     <string name="chip_rgb_sticker_vip_locked">🔒 VIP • RGB Sticker</string>
-    <string name="chip_bangla_to_banglish">বাংলা → বাংলিশ</string>
-    <string name="chip_bangla_to_banglish_preview">বাংলা → বাংলিশ: %1$s</string>
-    <string name="chip_bangla_to_banglish_paste">বাংলা → বাংলিশ (Paste)</string>
+    <string name="chip_bangla_to_banglish">✨ Special Features</string>
+    <string name="chip_bangla_to_banglish_preview">Special Features: %1$s</string>
+    <string name="chip_bangla_to_banglish_paste">Special Features (Paste)</string>
     <string name="sticker_selector_title">✨ RGB Sticker Style</string>
     <string name="sticker_selector_tap_hint">যেকোনো স্টাইলে ট্যাপ করলেই স্টিকার সেন্ড হবে</string>
     <string name="sticker_preview_title">✨ RGB Neon Text Sticker</string>
@@ -263,14 +263,4 @@
     <string name="bn_unlock_benefit_2">💬 ✨ AI শায়ারি ও স্মার্ট রিপ্লাই হাব (১৬০+ বাংলা ও ইংরেজি লাইন)</string>
     <string name="bn_unlock_benefit_3">🌴 Vice City Sunset ব্যানার, RGB স্টিকার ও কাস্টম গ্যালারি ফটো</string>
     <string name="bn_unlock_benefit_4">✅ English, বাংলা, हिन्दी, ভয়েস টাইপিং ও Classic Black সবসময় ফ্রি!</string>
-    <string name="bn_mobile_number_label">আপনার মোবাইল নম্বর (সিম থেকে ১-ট্যাপে নিন)</string>
-    <string name="bn_mobile_pick_sim_btn">📱 ১-ট্যাপে সিম নম্বর নিন</string>
-    <string name="bn_mobile_change_btn">পরিবর্তন</string>
-    <string name="bn_mobile_input_placeholder">১০ সংখ্যার মোবাইল নম্বর লিখুন</string>
-    <string name="bn_mobile_required_notice">পেমেন্টের আগে ১-ট্যাপে আপনার মোবাইল নম্বর সিলেক্ট করুন (রিইনস্টলে অটো VIP রিস্টোরের জন্য)।</string>
-    <string name="bn_btn_auto_restore_vip">🔄 অটোমেটিক VIP রিস্টোর করুন</string>
-    <string name="bn_restore_success">সফলভাবে আপনার Lifetime VIP অটো-রিস্টোর হয়েছে ✓</string>
-    <string name="bn_restore_not_found">এই ফোনে এই মোবাইল নম্বরের কোনো VIP অ্যাক্টিভেশন পাওয়া যায়নি। নতুন করে ₹20 পেমেন্ট করুন অথবা মালিকের পিন দিন।</string>
-    <string name="bn_restore_wrong_device">এই লাইসেন্সটি অন্য ফোনের জন্য রেজিস্টার্ড। শুধুমাত্র একই ফোনে অটো-রিস্টোর কাজ করবে।</string>
-    <string name="bn_restore_invalid_number">সঠিক ১০ সংখ্যার মোবাইল নম্বর সিলেক্ট বা টাইপ করুন।</string>
 </resources>

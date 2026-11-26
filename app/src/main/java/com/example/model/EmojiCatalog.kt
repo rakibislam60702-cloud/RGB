@@ -11,12 +11,30 @@ data class EmojiCategory(
 )
 
 /**
- * Full categorized Unicode emoji catalog across all 9 standard categories
+ * Full categorized Unicode emoji catalog across 10 categories (starting with Unique AI Emojis)
  * for both the live IME Emoji panel and companion Studio preview.
  */
 object EmojiCatalog {
 
     val categories: List<EmojiCategory> = listOf(
+        EmojiCategory(
+            id = "ai_unique",
+            title = "Unique AI Emojis",
+            icon = "🤖",
+            emojis = listOf(
+                "🤖✨", "🧠⚡", "👑🔥", "🚀🌙", "❤️‍🔥💫", "🇧🇩👑", "🫶✨", "🥳🎉",
+                "💎👑", "⚡🔋", "🛸🌌", "🪄✨", "🌟💖", "🔥💥", "🌈🦄", "🧿✨",
+                "🎭🔥", "🕶️⚡", "🦾🧠", "🕊️💖", "🌸🦋", "🌙⭐", "☀️🌻", "🌊🐚",
+                "💘💌", "🥰🌹", "😍✨", "🤩🔥", "🥹🤍", "😇🌟", "🫡🔥", "🤝💯",
+                "🙌✨", "👏🔥", "💪⚡", "🏆👑", "🥇🔥", "🎯💥", "🎮🕹️", "🎧🎶",
+                "🎤🔥", "📸✨", "🎬🌟", "☕📖", "🍕🔥", "🍔🍟", "🎂🎉", "🍰💖",
+                "🍦🌈", "🍓✨", "🥭💛", "🫖🍵", "💸💰", "💳💎", "📈🚀", "✅💯",
+                "🔔⚡", "🔮💜", "💫🌌", "🪐✨", "☄️🔥", "🎆🎇", "🎀🩷", "💐🌷",
+                "🥀🖤", "🍂🍁", "❄️🩵", "🌧️☕", "⛈️⚡", "🌴🌊", "🏝️☀️", "🕌🌙",
+                "🚗💨", "🏍️🔥", "✈️🌍", "🛰️📡", "🤖💬", "🧬⚡", "🔬💡", "⚙️🔧",
+                "🛡️⚔️", "🐉🔥", "🦅👑", "🦁🔥", "🐺🌙", "🦊✨", "🐼🤍", "🦚💚"
+            )
+        ),
         EmojiCategory(
             id = "smileys",
             title = "Smileys & Emotion",

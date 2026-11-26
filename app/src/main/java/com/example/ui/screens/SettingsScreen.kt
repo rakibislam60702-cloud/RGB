@@ -263,16 +263,30 @@ fun SettingsScreen(
                 )
 
                 val isSilent = settings.switchSound == SwitchSoundProfile.SILENT
+                Text(
+                    text = if (isSilent) {
+                        "OFF by default · 53+ Gaming, Sci-Fi & Mechanical FX available in Feel tab"
+                    } else {
+                        "Active FX: ${settings.switchSound.displayName} (${settings.switchSound.category.displayName})"
+                    },
+                    fontFamily = bodyFont,
+                    fontSize = 11.5.sp,
+                    color = Color.White.copy(alpha = 0.80f)
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     SoundOptionPill(
-                        label = strings.settingsSoundSoftModern,
+                        label = if (isSilent) strings.settingsSoundSoftModern else settings.switchSound.displayName,
                         icon = Icons.Filled.VolumeUp,
                         selected = !isSilent,
                         accent = Color.White,
-                        onClick = { onSelectSwitchSound(SwitchSoundProfile.SAMSUNG_SOFT) },
+                        onClick = {
+                            if (isSilent) {
+                                onSelectSwitchSound(SwitchSoundProfile.ESPORTS_PRO_TRIGGER)
+                            }
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("settings_sound_soft_modern")

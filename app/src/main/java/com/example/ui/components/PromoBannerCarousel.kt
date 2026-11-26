@@ -96,7 +96,7 @@ fun PromoBannerCarousel(
         PromoBannerSlide(
             index = 1,
             imageSource = banners.resolvedBanner2Image,
-            badge = "PRO ENGINE • INDIA",
+            badge = "SPECIAL FEATURES • PRO",
             title = banners.banner2Title.ifBlank { PromoBannerConfig.DEFAULT_BANNER2_TITLE },
             subtitle = banners.banner2Subtitle.ifBlank { PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE },
             accentColors = listOf(Color(0xFF1B0E2A), Color(0xFF3A1228), Color(0xFF261D09)),

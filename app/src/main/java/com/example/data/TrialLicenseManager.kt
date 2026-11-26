@@ -14,6 +14,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Base64
 import androidx.compose.runtime.Immutable
+import com.example.security.AntiTamperGuard
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -338,12 +339,21 @@ class TrialLicenseManager private constructor(
             key?.startsWith("admin_banner") == true ||
             key?.startsWith("device_allow_") == true
         ) {
+            if (!verifyStoredPrivilegeHmac(allowBootstrap = false)) {
+                AntiTamperGuard.enforceTamperTermination(context, "Unauthorized preference modification")
+            }
             _licenseState.value = computeFastStateFromPrefsOnly()
         }
     }
 
     init {
+        AntiTamperGuard.verifyOrTerminate(context)
+        if (!verifyStoredPrivilegeHmac(allowBootstrap = true)) {
+            AntiTamperGuard.enforceTamperTermination(context, "Unverified VIP or subscription state")
+        }
+        migrateLegacyBannerTitleAndCleanState()
         ensureLocalTrialSeededFast()
+        sealPrivilegePrefsHmac()
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         val initial = computeFastStateFromPrefsOnly()
         _licenseState.value = initial
@@ -362,6 +372,10 @@ class TrialLicenseManager private constructor(
      * without blocking on disk/MediaStore, and triggers an asynchronous background storage & Firebase sync.
      */
     fun refreshState(): LicenseUiState {
+        AntiTamperGuard.verifyOrTerminate(context)
+        if (!verifyStoredPrivilegeHmac(allowBootstrap = false)) {
+            AntiTamperGuard.enforceTamperTermination(context, "License integrity check failed")
+        }
         val state = computeFastStateFromPrefsOnly()
         val nowWall = currentServerOrUtcMs()
         if (!state.isPaidOrAdminVip && (state.isTrialExpired || nowWall - lastPrefCheckpointMs >= PREF_CHECKPOINT_INTERVAL_MS)) {
@@ -422,7 +436,12 @@ class TrialLicenseManager private constructor(
             putString(KEY_ADMIN_BANNER1_SUBTITLE, config.banners.banner1Subtitle)
             putString(KEY_ADMIN_BANNER2_URL, config.banners.banner2Url)
             putString(KEY_ADMIN_BANNER2_IMAGE, config.banners.banner2Image)
-            putString(KEY_ADMIN_BANNER2_TITLE, config.banners.banner2Title)
+            val resolvedBanner2Title = if (config.banners.banner2Title.contains("Romanized Bengali", ignoreCase = true)) {
+                PromoBannerConfig.DEFAULT_BANNER2_TITLE
+            } else {
+                config.banners.banner2Title
+            }
+            putString(KEY_ADMIN_BANNER2_TITLE, resolvedBanner2Title)
             putString(KEY_ADMIN_BANNER2_SUBTITLE, config.banners.banner2Subtitle)
         }
         val updated = computeFastStateFromPrefsOnly()
@@ -621,7 +640,8 @@ class TrialLicenseManager private constructor(
                 banner2Url = prefs.getString(KEY_ADMIN_BANNER2_URL, "").orEmpty(),
                 banner2Image = prefs.getString(KEY_ADMIN_BANNER2_IMAGE, "").orEmpty(),
                 banner2Title = prefs.getString(KEY_ADMIN_BANNER2_TITLE, PromoBannerConfig.DEFAULT_BANNER2_TITLE)
-                    ?.takeIf { it.isNotBlank() } ?: PromoBannerConfig.DEFAULT_BANNER2_TITLE,
+                    ?.takeIf { it.isNotBlank() && !it.contains("Romanized Bengali", ignoreCase = true) }
+                    ?: PromoBannerConfig.DEFAULT_BANNER2_TITLE,
                 banner2Subtitle = prefs.getString(KEY_ADMIN_BANNER2_SUBTITLE, PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE)
                     ?.takeIf { it.isNotBlank() } ?: PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE
             )
@@ -656,8 +676,105 @@ class TrialLicenseManager private constructor(
         isInternalPrefWrite.set(true)
         try {
             prefs.edit().apply(block).apply()
+            val sealedHmac = computeCurrentPrefsHmac()
+            prefs.edit().putString(KEY_PREFS_INTEGRITY_HMAC, sealedHmac).apply()
         } finally {
             isInternalPrefWrite.set(false)
+        }
+    }
+
+    private fun computeCurrentPrefsHmac(): String {
+        return AntiTamperGuard.computePrefsIntegrityHmac(
+            deviceId = deviceId,
+            rawAndroidId = rawAndroidId,
+            packageName = context.packageName.orEmpty(),
+            isLifetimeUnlocked = prefs.getBoolean(KEY_IS_LIFETIME_UNLOCKED, false),
+            isBanglishLifetimeUnlocked = prefs.getBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false),
+            banglishExpiryMs = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L),
+            vipExpiryMs = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L),
+            adminGrantedVip = prefs.getBoolean(KEY_ADMIN_GRANTED_VIP, false),
+            adminAllFreeDevice = prefs.getBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false),
+            adminGlobalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
+            deviceCustomExpiryMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L),
+            unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null),
+            unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null)
+        )
+    }
+
+    private fun sealPrivilegePrefsHmac() {
+        editPrefsSafely { /* recomputes and stores KEY_PREFS_INTEGRITY_HMAC */ }
+    }
+
+    private fun verifyStoredPrivilegeHmac(allowBootstrap: Boolean): Boolean {
+        val storedHmac = prefs.getString(KEY_PREFS_INTEGRITY_HMAC, null)
+        if (!storedHmac.isNullOrBlank()) {
+            return AntiTamperGuard.verifyPrefsIntegrityHmac(
+                providedHmac = storedHmac,
+                deviceId = deviceId,
+                rawAndroidId = rawAndroidId,
+                packageName = context.packageName.orEmpty(),
+                isLifetimeUnlocked = prefs.getBoolean(KEY_IS_LIFETIME_UNLOCKED, false),
+                isBanglishLifetimeUnlocked = prefs.getBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false),
+                banglishExpiryMs = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L),
+                vipExpiryMs = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L),
+                adminGrantedVip = prefs.getBoolean(KEY_ADMIN_GRANTED_VIP, false),
+                adminAllFreeDevice = prefs.getBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false),
+                adminGlobalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
+                deviceCustomExpiryMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L),
+                unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null),
+                unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null)
+            )
+        }
+
+        if (!allowBootstrap) return false
+
+        val hasAnyPrivilege = prefs.getBoolean(KEY_IS_LIFETIME_UNLOCKED, false) ||
+            prefs.getBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false) ||
+            prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L) > 0L ||
+            prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L) > 0L ||
+            prefs.getBoolean(KEY_ADMIN_GRANTED_VIP, false) ||
+            prefs.getBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false) ||
+            prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false) ||
+            prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L) > 0L
+
+        if (!hasAnyPrivilege) {
+            return true
+        }
+
+        // First-launch upgrade migration from older pre-HMAC builds:
+        // Trust Lifetime VIP only if backed by a verified device-bound encrypted license file;
+        // otherwise safely reset unverified legacy local privilege flags so genuine Firebase state
+        // can re-sync cleanly without false crash/lockout on app updates.
+        val hardwareLic = readEncryptedLicenseRecord(HIDDEN_LICENSE_FILENAME)
+        val isVerifiedHardwareLicense = hardwareLic != null &&
+            (hardwareLic.deviceId.equals(deviceId, ignoreCase = true) ||
+                hardwareLic.deviceId.equals(legacyModelDeviceId, ignoreCase = true) ||
+                hardwareLic.deviceId.equals(legacySixCharDeviceId, ignoreCase = true)) &&
+            verifyLicenseSignature(hardwareLic.deviceId, hardwareLic.txnId, hardwareLic.signature)
+        if (!isVerifiedHardwareLicense) {
+            editPrefsSafely {
+                putBoolean(KEY_IS_LIFETIME_UNLOCKED, false)
+                putBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false)
+                putLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
+                putLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
+                putBoolean(KEY_ADMIN_GRANTED_VIP, false)
+                putBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false)
+                putBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false)
+                putLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L)
+                remove(KEY_UNLOCK_METHOD)
+                remove(KEY_UNLOCK_TXN_ID)
+            }
+        }
+        return true
+    }
+
+    private fun migrateLegacyBannerTitleAndCleanState() {
+        val currentTitle = prefs.getString(KEY_ADMIN_BANNER2_TITLE, null)
+        if (currentTitle != null && currentTitle.contains("Romanized Bengali", ignoreCase = true)) {
+            editPrefsSafely {
+                putString(KEY_ADMIN_BANNER2_TITLE, PromoBannerConfig.DEFAULT_BANNER2_TITLE)
+                putString(KEY_ADMIN_BANNER2_SUBTITLE, PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE)
+            }
         }
     }
 
@@ -1052,20 +1169,23 @@ class TrialLicenseManager private constructor(
         txnRef: String = "AIKB_${System.currentTimeMillis()}"
     ): String {
         val normalizedScope = normalizePlanScope(planScope)
-        firebaseRemoteManager.submitPendingPayment(
-            deviceId = deviceId,
-            planType = normalizedScope,
-            baseAmount = baseAmountInr.coerceAtLeast(1),
-            uniqueAmountFormatted = uniqueAmountFormatted,
-            durationDays = durationDays.coerceAtLeast(0),
-            txnRef = txnRef
-        )
+        runCatching {
+            firebaseRemoteManager.submitPendingPayment(
+                deviceId = deviceId,
+                planType = normalizedScope,
+                baseAmount = baseAmountInr.coerceAtLeast(1),
+                uniqueAmountFormatted = uniqueAmountFormatted,
+                durationDays = durationDays.coerceAtLeast(0),
+                txnRef = txnRef
+            )
+        }
         return txnRef
     }
 
     /**
-     * Builds the official RBI-compliant Merchant UPI Intent with the customer-safe discounted
-     * unique-paisa amount (`am=${uniqueAmountFormatted}`) and writes `/pending_payments/{deviceId}`.
+     * Builds the clean, bank-compatible Merchant UPI Intent (omitting optional `mc`/`tr`/`tn`
+     * tags that trigger PhonePe/GPay "Something went wrong" blocks on peer/merchant UPI IDs)
+     * with exact unique-paisa amount (`am=${uniqueAmountFormatted}`) and logs `/pending_payments/{deviceId}`.
      */
     fun createOfficialUpiIntent(
         planScope: String = PLAN_SCOPE_VIP_FEATURES,
@@ -1082,7 +1202,6 @@ class TrialLicenseManager private constructor(
             ?: generateDiscountedUniqueAmount(baseAmount)
         val fallbackDays = if (normalizedScope == PLAN_SCOPE_BANGLISH) cfg.banglishDurationDays else cfg.vipDurationDays
         val resolvedDays = resolveDurationDays(overrideDurationDays, overridePlanType, fallbackDays)
-        val note = buildTransactionNote(normalizedScope, resolvedDays)
         val txnRef = "AIKB_${System.currentTimeMillis()}"
 
         registerPendingPayment(
@@ -1093,22 +1212,13 @@ class TrialLicenseManager private constructor(
             txnRef = txnRef
         )
 
-        val uriString = "upi://pay" +
-            "?pa=${Uri.encode(MERCHANT_UPI_ID)}" +
-            "&pn=${Uri.encode(MERCHANT_NAME)}" +
-            "&mc=$MERCHANT_MCC" +
-            "&tr=${Uri.encode(txnRef)}" +
-            "&am=$amountFormatted" +
-            "&cu=INR" +
-            "&tn=${Uri.encode(note)}"
-
+        val uriString = buildCleanUpiUri(amountFormatted)
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString))
         return txnRef to intent
     }
 
     /**
-     * Builds the scannable official UPI QR code URI for `6296603748@okbizaxis` using the exact
-     * discounted unique-paisa amount (`am=${uniqueAmountFormatted}`).
+     * Builds the scannable clean UPI QR code URI using the exact discounted unique-paisa amount.
      */
     fun buildUpiQrPayload(
         planScope: String = PLAN_SCOPE_VIP_FEATURES,
@@ -1123,16 +1233,15 @@ class TrialLicenseManager private constructor(
             .coerceAtLeast(1)
         val amountFormatted = uniqueAmountFormatted?.takeIf { it.isNotBlank() }
             ?: "$baseAmount.00"
-        val fallbackDays = if (normalizedScope == PLAN_SCOPE_BANGLISH) cfg.banglishDurationDays else cfg.vipDurationDays
-        val resolvedDays = resolveDurationDays(overrideDurationDays, overridePlanType, fallbackDays)
-        val note = buildTransactionNote(normalizedScope, resolvedDays)
+        return buildCleanUpiUri(amountFormatted)
+    }
+
+    private fun buildCleanUpiUri(amountFormatted: String): String {
         return "upi://pay" +
             "?pa=${Uri.encode(MERCHANT_UPI_ID)}" +
             "&pn=${Uri.encode(MERCHANT_NAME)}" +
-            "&mc=$MERCHANT_MCC" +
             "&am=$amountFormatted" +
-            "&cu=INR" +
-            "&tn=${Uri.encode(note)}"
+            "&cu=INR"
     }
 
     private fun buildTransactionNote(planScope: String, resolvedDays: Int): String {
@@ -1772,6 +1881,7 @@ class TrialLicenseManager private constructor(
         private const val KEY_DEVICE_ALLOW_RGB_STICKER = "device_allow_rgb_sticker"
         private const val KEY_DEVICE_ALLOW_STYLISH_FONTS = "device_allow_stylish_fonts"
         private const val KEY_DEVICE_ALLOW_AI_HUB = "device_allow_ai_hub"
+        private const val KEY_PREFS_INTEGRITY_HMAC = "prefs_integrity_hmac"
 
         @Volatile
         private var instance: TrialLicenseManager? = null

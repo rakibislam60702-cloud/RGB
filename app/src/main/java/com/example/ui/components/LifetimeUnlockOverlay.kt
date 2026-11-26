@@ -216,25 +216,43 @@ fun LifetimeUnlockScreen(
         pendingPlanScope = scope
         pendingDurationDays = durationDays
         val chooserTitle = context.getString(R.string.bn_upi_chooser_title)
-        try {
+        val pm = context.packageManager
+
+        val launched = runCatching {
             if (!targetPackage.isNullOrBlank()) {
                 val targeted = Intent(upiIntent).setPackage(targetPackage)
-                try {
+                if (targeted.resolveActivity(pm) != null) {
                     upiLauncher.launch(targeted)
-                } catch (_: ActivityNotFoundException) {
-                    upiLauncher.launch(Intent.createChooser(upiIntent, chooserTitle))
+                    true
+                } else {
+                    val hasAnyUpi = pm.queryIntentActivities(upiIntent, 0).isNotEmpty()
+                    if (hasAnyUpi) {
+                        upiLauncher.launch(Intent.createChooser(upiIntent, chooserTitle))
+                        true
+                    } else {
+                        false
+                    }
                 }
             } else {
-                upiLauncher.launch(Intent.createChooser(upiIntent, chooserTitle))
+                val hasAnyUpi = pm.queryIntentActivities(upiIntent, 0).isNotEmpty()
+                if (hasAnyUpi) {
+                    upiLauncher.launch(Intent.createChooser(upiIntent, chooserTitle))
+                    true
+                } else {
+                    false
+                }
             }
-        } catch (_: ActivityNotFoundException) {
+        }.getOrDefault(false)
+
+        if (!launched) {
             pendingTxnRef = null
             pendingDurationDays = null
-            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
-        } catch (_: Exception) {
-            pendingTxnRef = null
-            pendingDurationDays = null
-            paymentStatusMessage = context.getString(R.string.bn_upi_no_app_error)
+            if (scope == TrialLicenseManager.PLAN_SCOPE_BANGLISH) {
+                showBanglishQr = true
+            } else {
+                showVipQr = true
+            }
+            paymentStatusMessage = "কোনো UPI অ্যাপ সরাসরি পাওয়া যায়নি — নিচের QR কোড স্ক্যান করে ₹$uniqueAmount পেমেন্ট করুন।"
         }
     }
 
@@ -283,7 +301,7 @@ fun LifetimeUnlockScreen(
                             )
                         )
                         Text(
-                            text = "VIP & Romanized Bengali Store",
+                            text = "VIP & Special Features Store",
                             fontFamily = JetBrainsMonoFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -688,6 +706,13 @@ private fun IndependentVipFeaturesCard(
             }
         }
 
+        if (!licenseState.isLifetimeUnlocked && !licenseState.isGlobalOrAdminAllFree) {
+            QuickUpiAppsRow(
+                onPhonePeClick = { onPayWithPackage(PKG_PHONEPE) },
+                onGPayClick = { onPayWithPackage(PKG_GPAY) }
+            )
+        }
+
         if (showQr && !licenseState.isLifetimeUnlocked && !licenseState.isGlobalOrAdminAllFree) {
             UpiQrCodeCard(
                 upiPayload = qrPayload,
@@ -912,12 +937,72 @@ private fun IndependentBanglishCard(
             }
         }
 
+        if (!isPermanent) {
+            QuickUpiAppsRow(
+                onPhonePeClick = { onPayWithPackage(PKG_PHONEPE) },
+                onGPayClick = { onPayWithPackage(PKG_GPAY) }
+            )
+        }
+
         if (showQr && !isPermanent) {
             UpiQrCodeCard(
                 upiPayload = qrPayload,
                 uniqueAmountStr = discountedUniqueAmount,
                 onPhonePeClick = { onPayWithPackage(PKG_PHONEPE) },
                 onGPayClick = { onPayWithPackage(PKG_GPAY) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickUpiAppsRow(
+    onPhonePeClick: () -> Unit,
+    onGPayClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Button(
+            onClick = onPhonePeClick,
+            shape = RoundedCornerShape(11.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF5F259F),
+                contentColor = Color.White
+            ),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 48.dp)
+        ) {
+            Text(
+                text = "1-Tap PhonePe",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1
+            )
+        }
+        Button(
+            onClick = onGPayClick,
+            shape = RoundedCornerShape(11.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF1A73E8),
+                contentColor = Color.White
+            ),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 48.dp)
+        ) {
+            Text(
+                text = "1-Tap GPay",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1
             )
         }
     }

@@ -335,6 +335,19 @@ class CustomBackgroundManager private constructor(
         _theme.value = readCurrentState()
     }
 
+    fun selectPresetWithDim(presetId: String, dimAlpha: Float) {
+        if (BannerPresetCatalog.findById(presetId) == null) return
+        val now = System.currentTimeMillis()
+        val clampedDim = dimAlpha.coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
+        prefs.edit()
+            .remove(KEY_DOWNLOADED_THEME_ID)
+            .putString(KEY_PRESET_ID, presetId)
+            .putFloat(KEY_BG_DIM, clampedDim)
+            .putLong(KEY_BG_UPDATED_AT, now)
+            .apply()
+        _theme.value = readCurrentState()
+    }
+
     fun selectDownloadedCombo(comboId: String): Boolean {
         val file = getDownloadedThemeFile(comboId)
         if (!file.exists() || file.length() <= 0L) return false
@@ -653,6 +666,64 @@ class CustomBackgroundManager private constructor(
             )
             _theme.value = updated
             updated
+        }
+    }
+
+    suspend fun saveCroppedPhotoBitmap(bitmap: Bitmap, dimAlpha: Float): Result<CustomPhotoTheme> = withContext(Dispatchers.IO) {
+        runCatching {
+            val targetFile = File(context.filesDir, BG_FILE_NAME)
+            val tempFile = File(context.filesDir, "$BG_FILE_NAME.tmp")
+            FileOutputStream(tempFile).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                out.flush()
+            }
+            if (targetFile.exists()) targetFile.delete()
+            if (!tempFile.renameTo(targetFile)) {
+                tempFile.copyTo(targetFile, overwrite = true)
+                tempFile.delete()
+            }
+
+            val now = System.currentTimeMillis()
+            val clampedDim = dimAlpha.coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
+            prefs.edit()
+                .remove(KEY_PRESET_ID)
+                .remove(KEY_DOWNLOADED_THEME_ID)
+                .putString(KEY_BG_PATH, targetFile.absolutePath)
+                .putFloat(KEY_BG_DIM, clampedDim)
+                .putLong(KEY_BG_UPDATED_AT, now)
+                .apply()
+
+            val updated = CustomPhotoTheme(
+                photoPath = targetFile.absolutePath,
+                presetId = null,
+                downloadedThemeId = null,
+                dimAlpha = clampedDim,
+                updatedAtMs = now
+            )
+            _theme.value = updated
+            updated
+        }
+    }
+
+    suspend fun saveRemoteBannerImage(imageSource: String, dimAlpha: Float): Result<CustomPhotoTheme> = withContext(Dispatchers.IO) {
+        runCatching {
+            val trimmed = imageSource.trim()
+            val bytes: ByteArray = if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+                val conn = (URL(trimmed).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 8_000
+                    readTimeout = 10_000
+                    instanceFollowRedirects = true
+                }
+                conn.inputStream.use { it.readBytes() }
+            } else {
+                val rawB64 = trimmed.substringAfter("base64,", trimmed)
+                Base64.decode(rawB64, Base64.DEFAULT)
+            }
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: error("Unable to decode banner artwork")
+            val saved = saveCroppedPhotoBitmap(bmp, dimAlpha).getOrThrow()
+            bmp.recycle()
+            saved
         }
     }
 
@@ -1164,7 +1235,19 @@ class CustomBackgroundManager private constructor(
         private const val THEMES_DIR_NAME = "themes"
         const val DEFAULT_DIM_ALPHA = 0.24f
         const val MIN_DIM_ALPHA = 0.05f
-        const val MAX_DIM_ALPHA = 0.80f
+        const val MAX_DIM_ALPHA = 0.85f
+
+        /** Maps user-facing 0%..100% Brightness (`0f..1f`) to dark overlay `dimAlpha` (`0.85f..0.05f`). */
+        fun brightnessToDimAlpha(brightnessFraction: Float): Float {
+            val b = brightnessFraction.coerceIn(0f, 1f)
+            return (MAX_DIM_ALPHA - b * (MAX_DIM_ALPHA - MIN_DIM_ALPHA)).coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
+        }
+
+        /** Maps dark overlay `dimAlpha` (`0.05f..0.85f`) to user-facing Brightness (`0f..1f`). */
+        fun dimAlphaToBrightness(dimAlpha: Float): Float {
+            val d = dimAlpha.coerceIn(MIN_DIM_ALPHA, MAX_DIM_ALPHA)
+            return ((MAX_DIM_ALPHA - d) / (MAX_DIM_ALPHA - MIN_DIM_ALPHA)).coerceIn(0f, 1f)
+        }
 
         @Volatile
         private var instance: CustomBackgroundManager? = null

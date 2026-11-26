@@ -972,42 +972,415 @@ enum class KeycapStyle(
     )
 }
 
+enum class SoundCategory(val displayName: String) {
+    ALL("All (53+)"),
+    MECHANICAL("Mechanical"),
+    GAMING("Gaming"),
+    SCIFI("Sci-Fi"),
+    RETRO("Retro"),
+    ASMR("Soft & ASMR")
+}
+
 enum class SwitchSoundProfile(
     val displayName: String,
     val actuationLabel: String,
     val description: String,
-    val accentHex: Long
+    val accentHex: Long,
+    val category: SoundCategory
 ) {
+    SILENT(
+        displayName = "Silent (OFF)",
+        actuationLabel = "0 dB · Default OFF",
+        description = "Keypress sound disabled for silent typing",
+        accentHex = 0xFF8B95B5,
+        category = SoundCategory.ALL
+    ),
+
+    // Mechanical & Enthusiast Switches (12)
     SAMSUNG_SOFT(
         displayName = "Soft Modern",
-        actuationLabel = "Subtle · Low Volume",
-        description = "Gentle, low-volume modern keypress tap tuned for quiet daily typing",
-        accentHex = 0xFF00F59B
+        actuationLabel = "35g · Subtle Tap",
+        description = "Gentle modern keypress tap tuned for clean daily typing",
+        accentHex = 0xFF00F59B,
+        category = SoundCategory.MECHANICAL
     ),
     CLICKY_BLUE(
         displayName = "Clicky Blue",
         actuationLabel = "60g · Crisp Snap",
         description = "Audible tactile jacket click with bright high-frequency snap",
-        accentHex = 0xFF00E5FF
+        accentHex = 0xFF00E5FF,
+        category = SoundCategory.MECHANICAL
     ),
     TACTILE_BROWN(
         displayName = "Tactile Brown",
         actuationLabel = "55g · Warm Bump",
         description = "Balanced tactile feedback with a refined mid-tone thock",
-        accentHex = 0xFFFFB703
+        accentHex = 0xFFFFB703,
+        category = SoundCategory.MECHANICAL
     ),
     LINEAR_RED(
         displayName = "Linear Red",
         actuationLabel = "45g · Deep Thock",
-        description = "Smooth fast travel with a muted, low-pitched PBT bottom-out",
-        accentHex = 0xFFFF2E93
+        description = "Smooth fast travel with a deep PBT bottom-out thock",
+        accentHex = 0xFFFF2E93,
+        category = SoundCategory.MECHANICAL
     ),
-    SILENT(
-        displayName = "Silent Dampened",
-        actuationLabel = "0 dB · Stealth",
-        description = "Zero keystroke audio for quiet spaces and late-night typing",
-        accentHex = 0xFF8B95B5
-    )
+    HOLY_PANDA_THOCK(
+        displayName = "Holy Panda Thock",
+        actuationLabel = "62g · Creamy Bump",
+        description = "Cult-favorite deep resonant polycarb tactile thock",
+        accentHex = 0xFFFF8800,
+        category = SoundCategory.MECHANICAL
+    ),
+    BLACK_INK_V2(
+        displayName = "Black Ink V2",
+        actuationLabel = "60g · Heavy Linear",
+        description = "Thick lubed smoky nylon bottom-out punch",
+        accentHex = 0xFF60A5FA,
+        category = SoundCategory.MECHANICAL
+    ),
+    GATERON_MILKY_YELLOW(
+        displayName = "Milky Yellow",
+        actuationLabel = "50g · Creamy Smooth",
+        description = "Silky milky-housing linear pop for rapid bursts",
+        accentHex = 0xFFFDE047,
+        category = SoundCategory.MECHANICAL
+    ),
+    BOX_JADE_CRYSTAL(
+        displayName = "Box Jade Clickbar",
+        actuationLabel = "55g · Thick Click",
+        description = "Razor-sharp dual-stage clickbar snap",
+        accentHex = 0xFF10B981,
+        category = SoundCategory.MECHANICAL
+    ),
+    TOPRE_EC_THOCK(
+        displayName = "Topre EC Cup",
+        actuationLabel = "45g · Electro-Capacitive",
+        description = "Signature Japanese electrostatic rain-on-drum thock",
+        accentHex = 0xFFA78BFA,
+        category = SoundCategory.MECHANICAL
+    ),
+    CHERRY_SILVER_SPEED(
+        displayName = "Silver Speed",
+        actuationLabel = "40g · Rapid Trigger",
+        description = "Ultra-short actuation snap built for fast combos",
+        accentHex = 0xFFE2E8F0,
+        category = SoundCategory.MECHANICAL
+    ),
+    IBM_BUCKLING_SPRING(
+        displayName = "Buckling Spring",
+        actuationLabel = "70g · Metallic Ping",
+        description = "Classic Model-M heavy spring ring and mechanical clack",
+        accentHex = 0xFFF59E0B,
+        category = SoundCategory.MECHANICAL
+    ),
+    OIL_KING_DEEP(
+        displayName = "Oil King Deep",
+        actuationLabel = "55g · Sub-Bass",
+        description = "Factory-lubed deep low-end thock with zero rattle",
+        accentHex = 0xFF38BDF8,
+        category = SoundCategory.MECHANICAL
+    ),
+
+    // Gaming & Esports FX (12)
+    ESPORTS_PRO_TRIGGER(
+        displayName = "Esports Trigger",
+        actuationLabel = "0.1ms · Optical Snap",
+        description = "Crisp tournament optical switch actuation punch",
+        accentHex = 0xFF00E5FF,
+        category = SoundCategory.GAMING
+    ),
+    RAZOR_OPTO_PURPLE(
+        displayName = "Opto Clicky Pro",
+        actuationLabel = "48g · Purple Beam",
+        description = "Sharp high-velocity optical click engineered for FPS",
+        accentHex = 0xFFC084FC,
+        category = SoundCategory.GAMING
+    ),
+    RAPID_FIRE_FPS(
+        displayName = "Rapid Fire Burst",
+        actuationLabel = "SMG · Micro Snap",
+        description = "Tight, punchy tactical rifle trigger impulse",
+        accentHex = 0xFFFB7185,
+        category = SoundCategory.GAMING
+    ),
+    SNIPER_BOLT_LOCK(
+        displayName = "Sniper Bolt Lock",
+        actuationLabel = "Precision · Metallic",
+        description = "Clean crisp chamber lock snap on every key hit",
+        accentHex = 0xFFFACC15,
+        category = SoundCategory.GAMING
+    ),
+    SHOTGUN_RELOAD_SNAP(
+        displayName = "Tactical Pump",
+        actuationLabel = "Heavy · Impact",
+        description = "Heavy dual-transient mechanical pump impact",
+        accentHex = 0xFFEF4444,
+        category = SoundCategory.GAMING
+    ),
+    HEADSHOT_PING(
+        displayName = "Headshot Ping",
+        actuationLabel = "Crit · Crisp Ring",
+        description = "Bright competitive armor-break dink chime",
+        accentHex = 0xFFFFD600,
+        category = SoundCategory.GAMING
+    ),
+    KILLSTREAK_COMBO(
+        displayName = "Combo Surge",
+        actuationLabel = "Dual Pitch · Hype",
+        description = "Dual-tone rising streak confirmation click",
+        accentHex = 0xFFFF2A85,
+        category = SoundCategory.GAMING
+    ),
+    APEX_SHIELD_POP(
+        displayName = "Shield Battery Pop",
+        actuationLabel = "BR · Crisp Pulse",
+        description = "Bright shield-cell charge click with clean tail",
+        accentHex = 0xFF38BDF8,
+        category = SoundCategory.GAMING
+    ),
+    VALO_TAP_CRISP(
+        displayName = "Valo One-Tap",
+        actuationLabel = "Clutch · Glassy",
+        description = "Glassy high-clarity confirmation tap for crisp aim typing",
+        accentHex = 0xFF2DD4BF,
+        category = SoundCategory.GAMING
+    ),
+    NITRO_BOOST_TURBO(
+        displayName = "Nitro Turbo Pop",
+        actuationLabel = "Racing · Whoosh",
+        description = "Compressed turbo wastegate chirp on fast inputs",
+        accentHex = 0xFFFB923C,
+        category = SoundCategory.GAMING
+    ),
+    MECHANICAL_PARRY(
+        displayName = "Blade Parry Clang",
+        actuationLabel = "Action · Steel",
+        description = "Compact metallic katana parry shimmer",
+        accentHex = 0xFF93C5FD,
+        category = SoundCategory.GAMING
+    ),
+    CRITICAL_HIT_DING(
+        displayName = "Critical Hit Ding",
+        actuationLabel = "RPG · Precision",
+        description = "Bright crystal chime for critical combo strikes",
+        accentHex = 0xFFF472B6,
+        category = SoundCategory.GAMING
+    ),
+
+    // Sci-Fi & Cyber FX (11)
+    CYBER_LASER_PULSE(
+        displayName = "Cyber Laser Pulse",
+        actuationLabel = "Synth · Downsweep",
+        description = "Futuristic neon laser beam downward frequency sweep",
+        accentHex = 0xFF00F0FF,
+        category = SoundCategory.SCIFI
+    ),
+    QUANTUM_BLASTER(
+        displayName = "Quantum Blaster",
+        actuationLabel = "Sci-Fi · Bolt",
+        description = "Punchy starfighter plasma blaster pulse",
+        accentHex = 0xFFFF007F,
+        category = SoundCategory.SCIFI
+    ),
+    PLASMA_SPARK(
+        displayName = "Plasma Arc Spark",
+        actuationLabel = "Arc · Electric",
+        description = "High-voltage micro plasma discharge crackle",
+        accentHex = 0xFF3B82F6,
+        category = SoundCategory.SCIFI
+    ),
+    HOLOGRAM_TAP(
+        displayName = "Hologram Glass Tap",
+        actuationLabel = "HUD · Pure Tone",
+        description = "Clean sci-fi holographic interface confirmation tone",
+        accentHex = 0xFF22D3EE,
+        category = SoundCategory.SCIFI
+    ),
+    NEURAL_SYNAPSE(
+        displayName = "AI Neural Synapse",
+        actuationLabel = "Neural · Shimmer",
+        description = "Subtle cybernetic impulse tuned for AI keyboards",
+        accentHex = 0xFFA855F7,
+        category = SoundCategory.SCIFI
+    ),
+    MECH_SERVO_MICRO(
+        displayName = "Mech Exo Servo",
+        actuationLabel = "Robotics · Actuator",
+        description = "Compact titanium exo-suit micro-servo click",
+        accentHex = 0xFF94A3B8,
+        category = SoundCategory.SCIFI
+    ),
+    STARSHIP_CONSOLE(
+        displayName = "Starship Bridge",
+        actuationLabel = "LCARS · Chirp",
+        description = "Iconic command-deck tactile touch-panel beep",
+        accentHex = 0xFFF59E0B,
+        category = SoundCategory.SCIFI
+    ),
+    ION_CANNON_CLICK(
+        displayName = "Ion Capacitor",
+        actuationLabel = "Energy · Discharge",
+        description = "Deep sub-harmonic ion charge release thump",
+        accentHex = 0xFF06B6D4,
+        category = SoundCategory.SCIFI
+    ),
+    MATRIX_DECRYPT(
+        displayName = "Matrix Decrypt Bit",
+        actuationLabel = "Cyber · Bitstream",
+        description = "Tight digital cipher tick for hacker-style typing",
+        accentHex = 0xFF00FF66,
+        category = SoundCategory.SCIFI
+    ),
+    CYBER_SONAR_PING(
+        displayName = "Deep Sonar Ping",
+        actuationLabel = "Radar · Echo",
+        description = "Pure resonant submarine tactical radar ping",
+        accentHex = 0xFF34D399,
+        category = SoundCategory.SCIFI
+    ),
+    TRON_LIGHT_DISC(
+        displayName = "Light Disc Snap",
+        actuationLabel = "Neon · Ring",
+        description = "Glassy neon grid disc ricochet impulse",
+        accentHex = 0xFF60A5FA,
+        category = SoundCategory.SCIFI
+    ),
+
+    // Retro Arcade & Vintage (9)
+    RETRO_8BIT_BLIP(
+        displayName = "8-Bit Pixel Blip",
+        actuationLabel = "Square · Chiptune",
+        description = "Authentic 8-bit handheld console square wave blip",
+        accentHex = 0xFF4ADE80,
+        category = SoundCategory.RETRO
+    ),
+    ARCADE_COIN_PING(
+        displayName = "Arcade Coin Ping",
+        actuationLabel = "Cabinet · Classic",
+        description = "Crisp retro arcade token chime micro-hit",
+        accentHex = 0xFFFACC15,
+        category = SoundCategory.RETRO
+    ),
+    PIXEL_JUMP_TAP(
+        displayName = "Pixel Power Jump",
+        actuationLabel = "Platformer · Up",
+        description = "Bouncy upward pitch chirp inspired by 90s classics",
+        accentHex = 0xFFFF6B6B,
+        category = SoundCategory.RETRO
+    ),
+    NES_MENU_TICK(
+        displayName = "Console Menu Tick",
+        actuationLabel = "8-Bit · Cursor",
+        description = "Ultra-short crisp inventory selection blip",
+        accentHex = 0xFF38BDF8,
+        category = SoundCategory.RETRO
+    ),
+    CHIPTUNE_PLUCK(
+        displayName = "Chiptune Synth Pluck",
+        actuationLabel = "FM · Retro",
+        description = "Warm FM-synthesis arcade bass pluck",
+        accentHex = 0xFFE879F9,
+        category = SoundCategory.RETRO
+    ),
+    GAMEBOY_DPAD(
+        displayName = "Pocket D-Pad Snap",
+        actuationLabel = "Handheld · Membrane",
+        description = "Nostalgic pocket handheld rubber-dome thump",
+        accentHex = 0xFFA3E635,
+        category = SoundCategory.RETRO
+    ),
+    SYNTHWAVE_TOM(
+        displayName = "80s Synthwave Tom",
+        actuationLabel = "Retrowave · Drum",
+        description = "Gated 80s electronic drum tom drop",
+        accentHex = 0xFFFF2E93,
+        category = SoundCategory.RETRO
+    ),
+    TYPEWRITER_VINTAGE(
+        displayName = "Vintage Typewriter",
+        actuationLabel = "Steel · Hammer",
+        description = "Mechanical ribbon strike & carriage clack",
+        accentHex = 0xFFD97706,
+        category = SoundCategory.RETRO
+    ),
+    TELETYPE_TERMINAL(
+        displayName = "CRT Terminal Key",
+        actuationLabel = "1980s · Phosphor",
+        description = "Crisp green-screen mainframe terminal click",
+        accentHex = 0xFF22C55E,
+        category = SoundCategory.RETRO
+    ),
+
+    // Soft, Organic & ASMR (9)
+    GLASS_WATER_DROP(
+        displayName = "Water Droplet Pop",
+        actuationLabel = "Liquid · Up-Chirp",
+        description = "Smooth rising bubble waterdrop pop for relaxing typing",
+        accentHex = 0xFF38BDF8,
+        category = SoundCategory.ASMR
+    ),
+    CRYSTAL_ICE_CHIME(
+        displayName = "Crystal Ice Chime",
+        actuationLabel = "Glass · Pure",
+        description = "Delicate frozen crystal micro-bell resonance",
+        accentHex = 0xFFBAE6FD,
+        category = SoundCategory.ASMR
+    ),
+    WOOD_MARIMBA_TAP(
+        displayName = "Rosewood Marimba",
+        actuationLabel = "Organic · Warm",
+        description = "Warm acoustic rosewood mallet tap",
+        accentHex = 0xFFF59E0B,
+        category = SoundCategory.ASMR
+    ),
+    CREAMY_PEBBLE_POP(
+        displayName = "Creamy Pebble Pop",
+        actuationLabel = "ASMR · Mahjong",
+        description = "Satisfying rounded creamy ceramic tile click",
+        accentHex = 0xFFF9A8D4,
+        category = SoundCategory.ASMR
+    ),
+    BAMBOO_SHISHI_TAP(
+        displayName = "Zen Bamboo Knock",
+        actuationLabel = "Hollow · Calm",
+        description = "Peaceful hollow bamboo garden water knock",
+        accentHex = 0xFF86EFAC,
+        category = SoundCategory.ASMR
+    ),
+    SILK_CLOUD_THOCK(
+        displayName = "Silk Cloud Thock",
+        actuationLabel = "Feather · Muted",
+        description = "Airy ultra-soft cushioned low-frequency thock",
+        accentHex = 0xFFE2E8F0,
+        category = SoundCategory.ASMR
+    ),
+    VELVET_RUBBER_DOME(
+        displayName = "Velvet Dome",
+        actuationLabel = "Quiet · Plush",
+        description = "Muted studio silicone dome press",
+        accentHex = 0xFFC4B5FD,
+        category = SoundCategory.ASMR
+    ),
+    RAINDROP_RIPPLE(
+        displayName = "Raindrop Leaf Tap",
+        actuationLabel = "Lo-Fi · Soft",
+        description = "Gentle lo-fi raindrop splash micro-transient",
+        accentHex = 0xFF67E8F9,
+        category = SoundCategory.ASMR
+    ),
+    KALIMBA_THUMB_PLUCK(
+        displayName = "Kalimba Thumb Tine",
+        actuationLabel = "Acoustic · Tine",
+        description = "Soft African thumb-piano steel tine pluck",
+        accentHex = 0xFFFDBA74,
+        category = SoundCategory.ASMR
+    );
+
+    companion object {
+        val playableEntries: List<SwitchSoundProfile>
+            get() = entries.filter { it != SILENT }
+    }
 }
 
 enum class KeyboardHeightPreset(
@@ -1063,7 +1436,7 @@ data class KeyboardSettings(
     val touchEffect: TouchTypingEffect = TouchTypingEffect.AI_NEURAL_PULSE,
     val palette: RgbPalette = RgbPalette.VICE_CITY_NEON,
     val keycapStyle: KeycapStyle = KeycapStyle.PUDDING,
-    val switchSound: SwitchSoundProfile = SwitchSoundProfile.SAMSUNG_SOFT,
+    val switchSound: SwitchSoundProfile = SwitchSoundProfile.SILENT,
     val animationSpeed: Float = 1.0f,
     val glowIntensity: Float = 0.90f,
     val keyCornerRadiusDp: Float = 6f,

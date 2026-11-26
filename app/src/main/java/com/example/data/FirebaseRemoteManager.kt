@@ -42,8 +42,8 @@ data class PromoBannerConfig(
     companion object {
         const val DEFAULT_BANNER1_TITLE = "AI Keyboard — Rakib official"
         const val DEFAULT_BANNER1_SUBTITLE = "Touch Spark RGB • 170+ AI Shayari • Voice Lock"
-        const val DEFAULT_BANNER2_TITLE = "🇮🇳 Romanized Bengali & RGB Studio"
-        const val DEFAULT_BANNER2_SUBTITLE = "বাংলা → English অক্ষর ইঞ্জিন • Custom Photo & 3D Keycaps"
+        const val DEFAULT_BANNER2_TITLE = "✨ Special Features"
+        const val DEFAULT_BANNER2_SUBTITLE = "Custom Photo Themes, 56 Touch FX, Stylish Fonts & AI Hub"
     }
 }
 
@@ -351,6 +351,7 @@ class FirebaseRemoteManager private constructor(context: Context) {
         database?.let { return it }
         return synchronized(this) {
             database?.let { return it }
+            com.example.security.AntiTamperGuard.verifyOrTerminate(appContext)
             runCatching {
                 if (FirebaseApp.getApps(appContext).isEmpty()) {
                     FirebaseApp.initializeApp(appContext)

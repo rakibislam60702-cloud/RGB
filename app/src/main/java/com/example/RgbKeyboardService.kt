@@ -3,6 +3,7 @@ package com.example
 import android.Manifest
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.content.ClipDescription
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -44,12 +45,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.view.inputmethod.EditorInfoCompat
+import androidx.core.view.inputmethod.InputConnectionCompat
+import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.example.data.ClipboardHistoryManager
 import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.KeyboardPreferencesRepository
 import com.example.data.LanguagePackManager
 import com.example.data.LicenseUiState
+import com.example.data.ScreenshotClip
 import com.example.data.TrialLicenseManager
 import com.example.engine.BengaliTransliterator
 import com.example.engine.GeneratedShayariResult
@@ -67,6 +72,7 @@ import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
 import com.example.model.LanguageCatalog
 import com.example.rgbkeyboard.RgbKeyboardView
+import com.example.security.AntiTamperGuard
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -196,6 +202,9 @@ class RgbKeyboardService : InputMethodService() {
     private var lastRenderedSmartEnabled: Boolean? = null
     private var lastRenderedBanglaChipLabel: String = ""
     private var lastRenderedLangId: String = ""
+    private var lastRenderedScreenshotUri: String = ""
+    private var lastRenderedFreshPasteClip: String = ""
+    private var lastRenderedSuggestedEmojis: List<String> = emptyList()
 
     private enum class OverlayMode { NONE, CLIPBOARD, FONTS, EMOJI, STICKER_SELECTOR, AI_HUB }
 
@@ -240,6 +249,7 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        AntiTamperGuard.verifyOrTerminate(this)
         preferencesRepository = KeyboardPreferencesRepository.getInstance(applicationContext)
         languagePackManager = LanguagePackManager.getInstance(applicationContext)
         customBackgroundManager = CustomBackgroundManager.getInstance(applicationContext)
@@ -304,6 +314,10 @@ class RgbKeyboardService : InputMethodService() {
         )
 
         serviceScope.launch {
+            preferencesRepository.ensureSoundDefaultMigrated()
+        }
+
+        serviceScope.launch {
             preferencesRepository.settingsFlow.collect { latest ->
                 currentSettings = latest
                 applySettingsToViews(latest)
@@ -333,6 +347,18 @@ class RgbKeyboardService : InputMethodService() {
         serviceScope.launch {
             clipboardManager.clips.collect { snippets ->
                 renderClipboardSnippets(snippets)
+            }
+        }
+
+        serviceScope.launch {
+            clipboardManager.hasFreshTextClip.collect {
+                refreshSuggestions(immediate = true)
+            }
+        }
+
+        serviceScope.launch {
+            clipboardManager.latestScreenshotClip.collect {
+                refreshSuggestions(immediate = true)
             }
         }
 
@@ -1031,6 +1057,7 @@ class RgbKeyboardService : InputMethodService() {
         selectedEmojiCategoryIndex = safeIdx
         val category = EmojiCatalog.categories[safeIdx]
         tvEmojiCategoryTitle?.text = "${category.title} (${category.emojis.size})"
+        emojiGridView?.numColumns = if (category.id == "ai_unique") 5 else 8
         emojiGridAdapter?.updateEmojis(category.emojis)
         emojiGridView?.smoothScrollToPosition(0)
         renderEmojiCategoryTabs()
@@ -1053,13 +1080,18 @@ class RgbKeyboardService : InputMethodService() {
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val tv = (convertView as? TextView) ?: TextView(this@RgbKeyboardService).apply {
-                textSize = 23f
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
+                maxLines = 1
                 minHeight = (38 * density).toInt()
-                setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+                setPadding((1 * density).toInt(), (4 * density).toInt(), (1 * density).toInt(), (4 * density).toInt())
             }
             val emoji = items[position]
+            tv.textSize = when {
+                emoji.length > 4 -> 15f
+                emoji.length > 2 -> 17f
+                else -> 23f
+            }
             tv.text = emoji
             tv.setOnClickListener { onEmojiTap(emoji) }
             return tv
@@ -1172,6 +1204,14 @@ class RgbKeyboardService : InputMethodService() {
         } else {
             ""
         }
+        val freshPasteClip = if (clipboardManager.hasFreshTextClip.value) {
+            clipboardManager.clips.value.firstOrNull().orEmpty()
+        } else {
+            ""
+        }
+        val activeScreenshot = clipboardManager.latestScreenshotClip.value?.takeIf {
+            (System.currentTimeMillis() - it.timestampMs) <= ClipboardHistoryManager.SCREENSHOT_FRESH_WINDOW_MS
+        }
 
         suggestionJob?.cancel()
         suggestionJob = serviceScope.launch(Dispatchers.Default) {
@@ -1206,7 +1246,9 @@ class RgbKeyboardService : InputMethodService() {
                     smartEnabled = smartEnabled,
                     isVip = isVip,
                     selectedBanglaConverted = selectedConverted,
-                    clipBanglaConverted = clipConverted
+                    clipBanglaConverted = clipConverted,
+                    freshPasteClip = freshPasteClip,
+                    screenshotClip = activeScreenshot
                 )
             }
         }
@@ -1218,7 +1260,9 @@ class RgbKeyboardService : InputMethodService() {
         smartEnabled: Boolean,
         isVip: Boolean,
         selectedBanglaConverted: String,
-        clipBanglaConverted: String
+        clipBanglaConverted: String,
+        freshPasteClip: String,
+        screenshotClip: ScreenshotClip?
     ) {
         val container = suggestionContainer ?: return
         val effectiveSuggestions = if (smartEnabled) prediction.suggestions else emptyList()
@@ -1242,13 +1286,17 @@ class RgbKeyboardService : InputMethodService() {
             clipBanglaConverted.isNotEmpty() -> getString(R.string.chip_bangla_to_banglish_paste)
             else -> getString(R.string.chip_bangla_to_banglish)
         }
+        val screenshotUriStr = screenshotClip?.uri?.toString().orEmpty()
 
         if (effectiveSuggestions == lastRenderedSuggestions &&
             prediction.stickerPhrase == lastRenderedStickerPhrase &&
             isVip == lastRenderedVipState &&
             smartEnabled == lastRenderedSmartEnabled &&
             banglaChipLabel == lastRenderedBanglaChipLabel &&
-            langId == lastRenderedLangId
+            langId == lastRenderedLangId &&
+            screenshotUriStr == lastRenderedScreenshotUri &&
+            freshPasteClip == lastRenderedFreshPasteClip &&
+            prediction.suggestedEmojis == lastRenderedSuggestedEmojis
         ) {
             return
         }
@@ -1258,9 +1306,101 @@ class RgbKeyboardService : InputMethodService() {
         lastRenderedSmartEnabled = smartEnabled
         lastRenderedBanglaChipLabel = banglaChipLabel
         lastRenderedLangId = langId
+        lastRenderedScreenshotUri = screenshotUriStr
+        lastRenderedFreshPasteClip = freshPasteClip
+        lastRenderedSuggestedEmojis = prediction.suggestedEmojis
 
         val density = resources.displayMetrics.density
         container.removeAllViews()
+
+        // -2. One-Tap Screenshot Quick-Paste Chip (zero-permission MediaStore / Clipboard URI)
+        if (screenshotClip != null) {
+            val screenshotChip = TextView(this).apply {
+                text = "📸 Screenshot"
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#00FF9D"))
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding(
+                    (11 * density).toInt(),
+                    (4 * density).toInt(),
+                    (11 * density).toInt(),
+                    (4 * density).toInt()
+                )
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(Color.parseColor("#0C2B26"), Color.parseColor("#102238"))
+                ).apply {
+                    cornerRadius = 999f * density
+                    setStroke((1.3f * density).toInt(), Color.parseColor("#00FF9D"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (28 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+                    handleScreenshotQuickPaste(screenshotClip)
+                }
+                setOnLongClickListener {
+                    clipboardManager.dismissScreenshotClip()
+                    refreshSuggestions(immediate = true)
+                    true
+                }
+            }
+            container.addView(screenshotChip)
+        }
+
+        // -1. One-Tap Clipboard Auto-Paste Chip when fresh copied text exists
+        if (freshPasteClip.isNotEmpty()) {
+            val preview = if (freshPasteClip.length > 16) {
+                freshPasteClip.take(16).trimEnd() + "…"
+            } else {
+                freshPasteClip
+            }
+            val pasteChip = TextView(this).apply {
+                text = "📋 Paste: $preview"
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#6CF3FF"))
+                gravity = Gravity.CENTER
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(
+                    (11 * density).toInt(),
+                    (4 * density).toInt(),
+                    (11 * density).toInt(),
+                    (4 * density).toInt()
+                )
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#102938"))
+                    cornerRadius = 999f * density
+                    setStroke((1.2f * density).toInt(), Color.parseColor("#00E5FF"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (28 * density).toInt()
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                    val outClip = if (isBanglishMode &&
+                        BengaliTransliterator.containsBengaliScript(freshPasteClip)
+                    ) {
+                        BengaliTransliterator.transliterate(freshPasteClip, capitalizeSentences = true)
+                    } else {
+                        freshPasteClip
+                    }
+                    clipboardManager.markClipboardPasted(freshPasteClip)
+                    handleCommitText(outClip)
+                }
+            }
+            container.addView(pasteChip)
+        }
 
         // 0. Strict One-Way "বাংলা → বাংলিশ" Converter Chip (active in Banglish BN-EN mode)
         if (isBanglishMode && banglaChipLabel.isNotEmpty()) {
@@ -1361,6 +1501,40 @@ class RgbKeyboardService : InputMethodService() {
             container.addView(stickerChip)
         }
 
+        // 1.5 Contextual Emoji Suggestion Chips
+        if (prediction.suggestedEmojis.isNotEmpty()) {
+            prediction.suggestedEmojis.forEach { emoji ->
+                val emojiChip = TextView(this).apply {
+                    text = emoji
+                    textSize = 15f
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    setPadding(
+                        (10 * density).toInt(),
+                        (2 * density).toInt(),
+                        (10 * density).toInt(),
+                        (2 * density).toInt()
+                    )
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#231738"))
+                        cornerRadius = 999f * density
+                        setStroke((1f * density).toInt(), Color.parseColor("#88FF2A85"))
+                    }
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        (28 * density).toInt()
+                    ).apply {
+                        marginEnd = (6 * density).toInt()
+                    }
+                    setOnClickListener {
+                        feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = false)
+                        handleCommitText("$emoji ")
+                    }
+                }
+                container.addView(emojiChip)
+            }
+        }
+
         // 2. Smart Word Prediction & Next-Word Suggestion Chips (only when Smart Auto-Suggestions enabled)
         if (smartEnabled) {
             effectiveSuggestions.forEach { suggestion ->
@@ -1396,6 +1570,62 @@ class RgbKeyboardService : InputMethodService() {
                 container.addView(wordChip)
             }
         }
+    }
+
+    private fun handleScreenshotQuickPaste(clip: ScreenshotClip) {
+        val ic = currentInputConnection
+        val editorInfo = currentInputEditorInfo
+        val mimeTypes = if (editorInfo != null) {
+            EditorInfoCompat.getContentMimeTypes(editorInfo)
+        } else {
+            emptyArray()
+        }
+        val acceptsImage = mimeTypes.any { mime ->
+            ClipDescription.compareMimeTypes(mime, clip.mimeType) ||
+                ClipDescription.compareMimeTypes(mime, "image/png") ||
+                ClipDescription.compareMimeTypes(mime, "image/jpeg") ||
+                ClipDescription.compareMimeTypes(mime, "image/*")
+        }
+
+        var committedDirectly = false
+        if (acceptsImage && ic != null && editorInfo != null) {
+            val targetPackage = editorInfo.packageName
+            if (!targetPackage.isNullOrBlank()) {
+                runCatching {
+                    grantUriPermission(
+                        targetPackage,
+                        clip.uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
+            val description = ClipDescription("Screenshot", arrayOf(clip.mimeType))
+            val contentInfo = InputContentInfoCompat(clip.uri, description, null)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+                InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION
+            } else {
+                0
+            }
+            committedDirectly = runCatching {
+                InputConnectionCompat.commitContent(ic, editorInfo, contentInfo, flags, null)
+            }.getOrDefault(false)
+        }
+
+        if (!committedDirectly) {
+            runCatching {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = clip.mimeType
+                    putExtra(Intent.EXTRA_STREAM, clip.uri)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(shareIntent, "Paste Screenshot").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(chooser)
+            }
+        }
+        clipboardManager.dismissScreenshotClip()
+        refreshSuggestions(immediate = true)
     }
 
     /**

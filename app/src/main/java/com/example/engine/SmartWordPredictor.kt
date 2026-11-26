@@ -32,7 +32,8 @@ object SmartWordPredictor {
         val currentTokenLength: Int,
         val stickerPhrase: String,
         val banglaConvertSource: String = "",
-        val banglaConvertPreview: String = ""
+        val banglaConvertPreview: String = "",
+        val suggestedEmojis: List<String> = emptyList()
     )
 
     fun init(context: Context) {
@@ -101,6 +102,7 @@ object SmartWordPredictor {
 
         val stickerPhrase = extractStickerPhrase(textBeforeCursor)
         val endedWithSpace = textBeforeCursor.isNotEmpty() && textBeforeCursor.last().isWhitespace()
+        val emojiHints = suggestContextualEmojis(textBeforeCursor)
 
         // In Banglish (BN-EN) mode, detect any Bengali Unicode text before cursor for 1-tap বাংলা -> বাংলিশ conversion
         val banglaSource = if (lang == "bn_en") {
@@ -120,7 +122,8 @@ object SmartWordPredictor {
                 currentTokenLength = 0,
                 stickerPhrase = "",
                 banglaConvertSource = banglaSource,
-                banglaConvertPreview = banglaPreview
+                banglaConvertPreview = banglaPreview,
+                suggestedEmojis = emptyList()
             )
         }
 
@@ -132,7 +135,8 @@ object SmartWordPredictor {
                 currentTokenLength = 0,
                 stickerPhrase = stickerPhrase,
                 banglaConvertSource = banglaSource,
-                banglaConvertPreview = banglaPreview
+                banglaConvertPreview = banglaPreview,
+                suggestedEmojis = emojiHints
             )
         }
 
@@ -143,7 +147,8 @@ object SmartWordPredictor {
                 currentTokenLength = 0,
                 stickerPhrase = stickerPhrase,
                 banglaConvertSource = banglaSource,
-                banglaConvertPreview = banglaPreview
+                banglaConvertPreview = banglaPreview,
+                suggestedEmojis = emojiHints
             )
         }
 
@@ -164,9 +169,136 @@ object SmartWordPredictor {
             currentTokenLength = currentWord.length,
             stickerPhrase = stickerPhrase,
             banglaConvertSource = banglaSource,
-            banglaConvertPreview = banglaPreview
+            banglaConvertPreview = banglaPreview,
+            suggestedEmojis = emojiHints
         )
     }
+
+    /**
+     * Returns up to 3 contextual emojis matching the current typing token or recently typed words
+     * across English, Romanized Bengali (Banglish), Bengali, and Hindi.
+     */
+    fun suggestContextualEmojis(textBeforeCursor: String): List<String> {
+        if (textBeforeCursor.isBlank()) return emptyList()
+        val recentSlice = textBeforeCursor.trimEnd().takeLast(64).lowercase()
+        val words = recentSlice.split(Regex("[\\s.,!?।;:\\n]+")).filter { it.isNotBlank() }
+        val lastWord = words.lastOrNull().orEmpty()
+        val prevWord = if (words.size >= 2) words[words.size - 2] else ""
+
+        val candidates = listOf(lastWord, prevWord).filter { it.isNotBlank() }
+        for (token in candidates) {
+            emojiKeywords[token]?.let { return it }
+            // Prefix match when user has typed at least 3 chars of an emotion/topic word
+            if (token.length >= 3) {
+                emojiKeywords.entries.firstOrNull { (k, _) -> k.startsWith(token) && k.length >= 4 }
+                    ?.let { return it.value }
+            }
+        }
+        return emptyList()
+    }
+
+    private val emojiKeywords: Map<String, List<String>> = mapOf(
+        // Love & Affection
+        "love" to listOf("❤️", "😍", "💖"),
+        "valobasha" to listOf("❤️", "🥰", "💖"),
+        "bhalobasha" to listOf("❤️", "🥰", "💖"),
+        "bhalobashi" to listOf("❤️", "😘", "💞"),
+        "valobashi" to listOf("❤️", "😘", "💞"),
+        "pyar" to listOf("❤️", "😍", "💘"),
+        "jaan" to listOf("❤️", "😘", "🌹"),
+        "baby" to listOf("🥰", "😘", "💕"),
+        "miss" to listOf("🥺", "💔", "💌"),
+        "heart" to listOf("❤️", "❤️‍🔥", "💓"),
+        "kiss" to listOf("😘", "💋", "😍"),
+        "ভালোবাসা" to listOf("❤️", "🥰", "💖"),
+        "ভালোবাসি" to listOf("❤️", "😘", "💞"),
+        "प्यार" to listOf("❤️", "😍", "💘"),
+
+        // Greetings & Wishes
+        "hi" to listOf("👋", "😊", "✨"),
+        "hello" to listOf("👋", "😄", "✨"),
+        "hey" to listOf("👋", "😎", "🔥"),
+        "salam" to listOf("🕌", "🤝", "✨"),
+        "namaste" to listOf("🙏", "✨", "😊"),
+        "morning" to listOf("☀️", "🌅", "☕"),
+        "shokal" to listOf("☀️", "🌅", "😊"),
+        "sokal" to listOf("☀️", "🌅", "😊"),
+        "night" to listOf("🌙", "⭐", "😴"),
+        "rat" to listOf("🌙", "✨", "😴"),
+        "raat" to listOf("🌙", "✨", "😴"),
+        "bye" to listOf("👋", "😊", "💫"),
+        "birthday" to listOf("🎂", "🥳", "🎉"),
+        "congrats" to listOf("🥳", "🎉", "🏆"),
+        "congratulations" to listOf("🎉", "🏆", "✨"),
+        "eid" to listOf("🌙", "🕌", "✨"),
+        "শুভ" to listOf("✨", "🌸", "😊"),
+
+        // Emotions & Reactions
+        "happy" to listOf("😊", "🥳", "✨"),
+        "khushi" to listOf("😄", "🥳", "✨"),
+        "sad" to listOf("😔", "🥺", "💔"),
+        "kosto" to listOf("😔", "💔", "😢"),
+        "dukkho" to listOf("😔", "😢", "🙏"),
+        "sorry" to listOf("🙏", "😔", "🤍"),
+        "maf" to listOf("🙏", "😔", "🤝"),
+        "please" to listOf("🙏", "🥺", "✨"),
+        "thanks" to listOf("🙏", "😊", "✨"),
+        "thank" to listOf("🙏", "💖", "✨"),
+        "dhonnobad" to listOf("🙏", "😊", "✨"),
+        "ধন্যবাদ" to listOf("🙏", "😊", "✨"),
+        "funny" to listOf("😂", "🤣", "💀"),
+        "haha" to listOf("😂", "🤣", "😆"),
+        "lol" to listOf("😂", "🤣", "😭"),
+        "angry" to listOf("😡", "😤", "💢"),
+        "raag" to listOf("😡", "😤", "💢"),
+        "cool" to listOf("😎", "🔥", "⚡"),
+        "wow" to listOf("🤩", "😮", "✨"),
+        "amazing" to listOf("🤩", "🔥", "✨"),
+        "awesome" to listOf("🔥", "😎", "💯"),
+        "nice" to listOf("👌", "😊", "✨"),
+        "good" to listOf("👍", "😊", "✨"),
+        "bhalo" to listOf("👍", "😊", "✨"),
+        "valo" to listOf("👍", "😊", "✨"),
+        "ভালো" to listOf("👍", "😊", "✨"),
+        "best" to listOf("🏆", "👑", "🔥"),
+        "king" to listOf("👑", "🦁", "🔥"),
+        "queen" to listOf("👑", "💖", "✨"),
+        "boss" to listOf("🕶️", "👑", "🔥"),
+
+        // Action / Gaming / Tech / Money / Food
+        "fire" to listOf("🔥", "💥", "⚡"),
+        "agun" to listOf("🔥", "💥", "⚡"),
+        "game" to listOf("🎮", "🕹️", "🔥"),
+        "gaming" to listOf("🎮", "⚡", "🏆"),
+        "win" to listOf("🏆", "🥇", "🔥"),
+        "music" to listOf("🎵", "🎧", "🎶"),
+        "song" to listOf("🎶", "🎤", "✨"),
+        "gaan" to listOf("🎵", "🎧", "🎶"),
+        "photo" to listOf("📸", "✨", "🖼️"),
+        "video" to listOf("🎬", "📹", "🔥"),
+        "coffee" to listOf("☕", "✨", "🤎"),
+        "tea" to listOf("🍵", "🫖", "☕"),
+        "cha" to listOf("☕", "🫖", "😊"),
+        "food" to listOf("🍔", "🍕", "😋"),
+        "biryani" to listOf("🍛", "😋", "🔥"),
+        "pizza" to listOf("🍕", "😋", "🔥"),
+        "money" to listOf("💸", "💰", "💎"),
+        "taka" to listOf("💸", "💰", "✅"),
+        "pay" to listOf("💳", "💸", "✅"),
+        "টাকা" to listOf("💸", "💰", "✅"),
+        "rain" to listOf("🌧️", "☔", "☕"),
+        "brishti" to listOf("🌧️", "☔", "🤍"),
+        "বৃষ্টি" to listOf("🌧️", "☔", "☕"),
+        "bangla" to listOf("🇧🇩", "❤️", "✨"),
+        "bangladesh" to listOf("🇧🇩", "👑", "❤️"),
+        "india" to listOf("🇮🇳", "❤️", "✨"),
+        "ok" to listOf("👌", "✅", "👍"),
+        "yes" to listOf("✅", "👍", "💯"),
+        "done" to listOf("✅", "💯", "🚀"),
+        "call" to listOf("📞", "📱", "💬"),
+        "wait" to listOf("⏳", "🙏", "👀"),
+        "fast" to listOf("⚡", "🚀", "💨")
+    )
 
     /**
      * Extracts the latest active typed phrase (up to 48 chars on the current line)
