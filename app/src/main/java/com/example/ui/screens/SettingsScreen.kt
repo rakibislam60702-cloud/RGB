@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Vibration
@@ -107,6 +108,8 @@ fun SettingsScreen(
     onSelectSwitchSound: (SwitchSoundProfile) -> Unit,
     onHapticEnabledChange: (Boolean) -> Unit,
     onSmartSuggestionsChange: (Boolean) -> Unit,
+    onShowKeyBordersChange: (Boolean) -> Unit,
+    onOpenThemeCustomizer: () -> Unit,
     onReplayFeatureGuide: () -> Unit,
     onOpenUnlockScreen: () -> Unit,
     modifier: Modifier = Modifier
@@ -151,6 +154,47 @@ fun SettingsScreen(
                     fontSize = 13.sp,
                     color = TextSecondary
                 )
+            }
+
+            // Quick Gboard-style Theme Customizer & Key Borders Card
+            SettingsCard(
+                icon = Icons.Filled.Palette,
+                iconTint = NeonCyan,
+                title = "Theme & Key Borders",
+                bodyFont = bodyFont
+            ) {
+                ToggleSettingRow(
+                    title = "Key borders",
+                    subtitle = "Show crisp key outlines around letters & modifiers (Gboard style)",
+                    checked = settings.showKeyBorders,
+                    onCheckedChange = onShowKeyBordersChange,
+                    testTag = "settings_switch_key_borders"
+                )
+                Button(
+                    onClick = onOpenThemeCustomizer,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NeonCyan,
+                        contentColor = Color(0xFF061020)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("settings_btn_theme_customizer")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Palette,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "🎨 Open Theme Customizer (ব্যানার · টাইপিং · প্যাকেজ)",
+                        fontFamily = NotoSansBengaliFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             // 1. App Display Language (বাংলা / English / हिन्दी)

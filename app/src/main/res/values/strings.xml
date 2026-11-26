@@ -101,6 +101,8 @@
     <string name="cd_clipboard">Clipboard &amp; feature menu</string>
     <string name="cd_gif_reactions">GIF &amp; quick reactions</string>
     <string name="cd_voice_mic">Voice typing</string>
+    <string name="cd_keyboard_settings">Keyboard settings</string>
+    <string name="cd_theme_customizer">Theme customizer</string>
     <string name="brand_header_title">Rakib official</string>
     <string name="clipboard_title">Clipboard</string>
     <string name="reactions_title">Quick Reactions &amp; Stickers</string>

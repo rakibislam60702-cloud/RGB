@@ -3,9 +3,32 @@ package com.example.model
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
+enum class TouchEffectCategory(val id: String, val label: String) {
+    ALL("all", "✨ All (56)"),
+    AI_NEURAL("ai", "🧠 AI & Neural"),
+    QUANTUM_SPACE("quantum", "🌌 Quantum & Space"),
+    CYBER_LASER("cyber", "⚡ Cyber & Laser"),
+    PLASMA_ELEMENTAL("plasma", "🔥 Plasma & Cryo"),
+    PRISM_CHRONO("prism", "💎 Prism & Chrono")
+}
+
+enum class TouchEffectVisualStyle {
+    NONE,
+    NEURAL_SYNAPSE,
+    RADIAL_SHOCKWAVE,
+    ELECTRIC_CROSS,
+    PRISM_SHATTER,
+    RISING_EMBER,
+    GRAVITY_IMPLOSION,
+    CHRONO_ORBIT,
+    COMET_STREAK,
+    FROST_CRYSTAL,
+    GLITCH_PULSE
+}
+
 /**
- * 7 Next-Gen Touch-Reactive Typing Effects that layer SIMULTANEOUSLY on top of any
- * active Background Theme or Ambient Physics RGB Animation.
+ * 56 Original AI & Physics Touch-Reactive Typing Effects + NONE (Off/Clean).
+ * Layer cleanly on top of any active Background Theme, Banner, or Ambient RGB Animation.
  */
 enum class TouchTypingEffect(
     val id: String,
@@ -13,64 +36,667 @@ enum class TouchTypingEffect(
     val shortLabel: String,
     val badge: String,
     val description: String,
+    val category: TouchEffectCategory = TouchEffectCategory.AI_NEURAL,
+    val visualStyle: TouchEffectVisualStyle = TouchEffectVisualStyle.NEURAL_SYNAPSE,
+    val primaryHex: Long = 0xFF00F0FF,
+    val secondaryHex: Long = 0xFFFF2A85,
     val isVipEffect: Boolean = true
 ) {
+    NONE(
+        id = "touch_none",
+        displayName = "অফ (Clean Keycaps)",
+        shortLabel = "Off (Clean)",
+        badge = "🖤 Off",
+        description = "Clean keycaps with zero typing glow — keeps Banners & Package Themes crisp",
+        category = TouchEffectCategory.ALL,
+        visualStyle = TouchEffectVisualStyle.NONE,
+        primaryHex = 0xFF000000,
+        secondaryHex = 0xFF000000,
+        isVipEffect = false
+    ),
+
+    // --- Preserved Core 7 Touch Effects (1..7) ---
     TOUCH_SPARK(
         id = "touch_spark",
         displayName = "✨ Touch Spark",
         shortLabel = "Touch Spark",
         badge = "✨ Spark",
-        description = "Stealth matte keys at rest; pressed key rises in vivid neon glow"
+        description = "Stealth matte keys at rest; pressed key rises in vivid neon glow",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.GLITCH_PULSE,
+        primaryHex = 0xFF00F0FF,
+        secondaryHex = 0xFFFF2A85
     ),
     TOUCH_ELECTRIC_CROSS(
         id = "touch_electric_cross",
         displayName = "⚡ Touch Electric Cross",
         shortLabel = "Electric Cross",
         badge = "⚡ Cross",
-        description = "Pressing a key illuminates its horizontal row & vertical column in a neon laser cross"
+        description = "Pressing a key illuminates its horizontal row & vertical column in a neon laser cross",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFF00E5FF,
+        secondaryHex = 0xFFFFFFFF
     ),
     TOUCH_SHOCKWAVE_RING(
         id = "touch_shockwave_ring",
         displayName = "💥 Touch Shockwave Ring",
         shortLabel = "Shockwave Ring",
         badge = "💥 Ring",
-        description = "Tapping any key expands a glowing radial neon shockwave ring outward"
+        description = "Tapping any key expands a glowing radial neon shockwave ring outward",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFF00F5D4,
+        secondaryHex = 0xFFFF2A85
     ),
     TOUCH_MAGMA_EMBER(
         id = "touch_magma_ember",
         displayName = "🔥 Touch Magma Ember",
         shortLabel = "Magma Ember",
         badge = "🔥 Ember",
-        description = "Tapped keys ignite in molten gold-crimson glow and launch rising micro-sparks"
+        description = "Tapped keys ignite in molten gold-crimson glow and launch rising micro-sparks",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.RISING_EMBER,
+        primaryHex = 0xFFFF3D00,
+        secondaryHex = 0xFFFFD600
     ),
     TOUCH_FROST_FREEZE(
         id = "touch_frost_freeze",
         displayName = "❄️ Touch Frost Freeze",
         shortLabel = "Frost Freeze",
         badge = "❄️ Frost",
-        description = "Tapping a key freezes it and immediate neighbors in icy cyan-white crystal light"
+        description = "Tapping a key freezes it and immediate neighbors in icy cyan-white crystal light",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.FROST_CRYSTAL,
+        primaryHex = 0xFFE0FBFC,
+        secondaryHex = 0xFF38BDF8
     ),
     TOUCH_COMET_TRAIL(
         id = "touch_comet_trail",
         displayName = "🌠 Touch Comet Trail",
         shortLabel = "Comet Trail",
         badge = "🌠 Comet",
-        description = "Rapid typing draws a luminous neon comet tail connecting the last 4 pressed keys"
+        description = "Rapid typing draws a luminous neon comet tail connecting the last 4 pressed keys",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.COMET_STREAK,
+        primaryHex = 0xFFFF2A85,
+        secondaryHex = 0xFF00F5D4
     ),
     TOUCH_DIAMOND_FLASH(
         id = "touch_diamond_flash",
         displayName = "💎 Touch Diamond Flash",
         shortLabel = "Diamond Flash",
         badge = "💎 Glint",
-        description = "Every keypress triggers a crisp 4-point diamond star glint across beveled key edges"
+        description = "Every keypress triggers a crisp 4-point diamond star glint across beveled key edges",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFF00E5FF,
+        secondaryHex = 0xFFA855F7
+    ),
+
+    // --- 🧠 AI & NEURAL TOUCH RESPONSES (8..18) ---
+    AI_NEURAL_PULSE(
+        id = "ai_neural_pulse",
+        displayName = "🧠 AI Neural Pulse",
+        shortLabel = "AI Neural",
+        badge = "🧠 Neural",
+        description = "Synaptic cyan-violet neural signal fires from pressed key to neighboring nodes",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.NEURAL_SYNAPSE,
+        primaryHex = 0xFF00F5D4,
+        secondaryHex = 0xFF7B2FFF
+    ),
+    PLASMA_SYNAPSE(
+        id = "plasma_synapse",
+        displayName = "⚡ Plasma Synapse",
+        shortLabel = "Synapse",
+        badge = "⚡ Synapse",
+        description = "Bio-electric neon dendrites arc brightly between keycaps on every strike",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.NEURAL_SYNAPSE,
+        primaryHex = 0xFFA855F7,
+        secondaryHex = 0xFF00E5FF
+    ),
+    SONIC_ECHO(
+        id = "sonic_echo",
+        displayName = "🔊 Sonic Echo",
+        shortLabel = "Sonic Echo",
+        badge = "🔊 Echo",
+        description = "Acoustic neon soundwave rings reverberate outward across the keybed",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFF38BDF8,
+        secondaryHex = 0xFF818CF8
+    ),
+    CORTEX_SURGE(
+        id = "cortex_surge",
+        displayName = "🧬 Cortex Surge",
+        shortLabel = "Cortex Surge",
+        badge = "🧬 Cortex",
+        description = "Smart emerald-teal cortex wave cascades instantaneously across adjacent keys",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.NEURAL_SYNAPSE,
+        primaryHex = 0xFF00F59B,
+        secondaryHex = 0xFF00D4FF
+    ),
+    SYNAPTIC_BLOOM(
+        id = "synaptic_bloom",
+        displayName = "🌺 Synaptic Bloom",
+        shortLabel = "Synapse Bloom",
+        badge = "🌺 Bloom",
+        description = "Rose-gold neural petals expand radially from the pressed key center",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFFFF4D6D,
+        secondaryHex = 0xFFFFB703
+    ),
+    SENTIENT_GLINT(
+        id = "sentient_glint",
+        displayName = "🤖 Sentient Glint",
+        shortLabel = "Sentient",
+        badge = "🤖 AI",
+        description = "Precision cyber-cyan glint sharpens the pressed key and diagonal corners",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFF22D3EE,
+        secondaryHex = 0xFFFFFFFF
+    ),
+    MIND_LINK_BEAM(
+        id = "mind_link_beam",
+        displayName = "🔗 Mind Link Beam",
+        shortLabel = "Mind Link",
+        badge = "🔗 Link",
+        description = "Connects consecutive typed letters with luminous holographic neural threads",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.COMET_STREAK,
+        primaryHex = 0xFF818CF8,
+        secondaryHex = 0xFF00F5D4
+    ),
+    MATRIX_CODE_BURST(
+        id = "matrix_code_burst",
+        displayName = "🟩 Matrix Code Burst",
+        shortLabel = "Matrix Burst",
+        badge = "🟩 Code",
+        description = "Phosphor emerald digital glitch sparks flash across the tapped column",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFF00FF66,
+        secondaryHex = 0xFF70FFBA
+    ),
+    BIOMETRIC_SCAN(
+        id = "biometric_scan",
+        displayName = "👁️ Biometric Scan",
+        shortLabel = "Bio Scan",
+        badge = "👁️ Scan",
+        description = "Crisp sapphire scanner reticle sweeps horizontally and vertically on tap",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFF3B82F6,
+        secondaryHex = 0xFF00F5D4
+    ),
+    AXIOM_FLASH(
+        id = "axiom_flash",
+        displayName = "⚛️ Axiom Flash",
+        shortLabel = "Axiom",
+        badge = "⚛️ Axiom",
+        description = "Twin orbital electrons spin cleanly around every pressed keycap",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.CHRONO_ORBIT,
+        primaryHex = 0xFF00E5FF,
+        secondaryHex = 0xFFFF2E93
+    ),
+    DOPAMINE_DROP(
+        id = "dopamine_drop",
+        displayName = "💧 Dopamine Drop",
+        shortLabel = "Dopamine",
+        badge = "💧 Drop",
+        description = "Liquid neon droplet ripples gently outward with soft ultraviolet shimmer",
+        category = TouchEffectCategory.AI_NEURAL,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFFC084FC,
+        secondaryHex = 0xFF00F5D4
+    ),
+
+    // --- 🌌 QUANTUM & SPACE TOUCH RESPONSES (19..29) ---
+    QUANTUM_GRAVITY_RIPPLE(
+        id = "quantum_gravity_ripple",
+        displayName = "🌌 Quantum Gravity Ripple",
+        shortLabel = "Gravity Ripple",
+        badge = "🌌 Quantum",
+        description = "Spacetime shockwave bends indigo-cyan light around the tapped keycap",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFF7B2FFF,
+        secondaryHex = 0xFF00E5FF
+    ),
+    AURA_SINGULARITY(
+        id = "aura_singularity",
+        displayName = "🕳️ Aura Singularity",
+        shortLabel = "Singularity",
+        badge = "🕳️ Void",
+        description = "Gravitational ring pulls violet-amber glow inward onto the active key",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.GRAVITY_IMPLOSION,
+        primaryHex = 0xFF9D4EDD,
+        secondaryHex = 0xFFFFB703
+    ),
+    NEBULA_FLARE(
+        id = "nebula_flare",
+        displayName = "🌠 Nebula Flare",
+        shortLabel = "Nebula Flare",
+        badge = "🌠 Nebula",
+        description = "Cosmic magenta-cyan stardust cloud erupts upward from every key press",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.RISING_EMBER,
+        primaryHex = 0xFFFF2A85,
+        secondaryHex = 0xFF38BDF8
+    ),
+    VOID_PULL(
+        id = "void_pull",
+        displayName = "🌑 Void Pull",
+        shortLabel = "Void Pull",
+        badge = "🌑 Pull",
+        description = "Dark-violet accretion wave draws energy cleanly toward the key center",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.GRAVITY_IMPLOSION,
+        primaryHex = 0xFF560BAD,
+        secondaryHex = 0xFF00F5D4
+    ),
+    STARLIGHT_DRIFT(
+        id = "starlight_drift",
+        displayName = "✨ Starlight Drift",
+        shortLabel = "Starlight",
+        badge = "✨ Stars",
+        description = "Silvery gold starlight motes float softly above pressed keys",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.RISING_EMBER,
+        primaryHex = 0xFFFACC15,
+        secondaryHex = 0xFFE0F2FE
+    ),
+    NOVA_SPARK(
+        id = "nova_spark",
+        displayName = "💥 Nova Spark",
+        shortLabel = "Nova Spark",
+        badge = "💥 Nova",
+        description = "Supernova white-orange burst fractures outward across surrounding keycaps",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFFFF9E00,
+        secondaryHex = 0xFFFFFFFF
+    ),
+    GRAVITY_WELL(
+        id = "gravity_well",
+        displayName = "🌀 Gravity Well",
+        shortLabel = "Gravity Well",
+        badge = "🌀 Well",
+        description = "Contracting orbital vortex snaps neon energy to the keycap perimeter",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.GRAVITY_IMPLOSION,
+        primaryHex = 0xFF00B4D8,
+        secondaryHex = 0xFF9D4EDD
+    ),
+    ECLIPSE_HALO(
+        id = "eclipse_halo",
+        displayName = "🌘 Eclipse Halo",
+        shortLabel = "Eclipse",
+        badge = "🌘 Eclipse",
+        description = "Solar-corona amber rim glows fiercely around an obsidian key center",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.CHRONO_ORBIT,
+        primaryHex = 0xFFFF8800,
+        secondaryHex = 0xFFFFE600
+    ),
+    PULSAR_BEACON(
+        id = "pulsar_beacon",
+        displayName = "📡 Pulsar Beacon",
+        shortLabel = "Pulsar",
+        badge = "📡 Pulsar",
+        description = "Rapid neutron-star cross beams flash cleanly along row and column axes",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFF38BDF8,
+        secondaryHex = 0xFFE879F9
+    ),
+    ORBITAL_DUST(
+        id = "orbital_dust",
+        displayName = "🪐 Orbital Dust",
+        shortLabel = "Orbital Dust",
+        badge = "🪐 Orbit",
+        description = "Saturn-ring luminous dust sweeps gracefully around typed keys",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.CHRONO_ORBIT,
+        primaryHex = 0xFF00F5D4,
+        secondaryHex = 0xFFFACC15
+    ),
+    WORMHOLE_TRAIL(
+        id = "wormhole_trail",
+        displayName = "🕳️ Wormhole Trail",
+        shortLabel = "Wormhole",
+        badge = "🕳️ Warp",
+        description = "Hyper-violet warp streak links rapid consecutive key taps in space",
+        category = TouchEffectCategory.QUANTUM_SPACE,
+        visualStyle = TouchEffectVisualStyle.COMET_STREAK,
+        primaryHex = 0xFFBC13FE,
+        secondaryHex = 0xFF00F0FF
+    ),
+
+    // --- ⚡ CYBER & LASER TOUCH RESPONSES (30..38) ---
+    PHOTON_LASER_ARC(
+        id = "photon_laser_arc",
+        displayName = "⚡ Photon Laser Arc",
+        shortLabel = "Laser Arc",
+        badge = "⚡ Laser",
+        description = "High-energy crimson-cyan laser lines slice across row and column",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFFFF2A85,
+        secondaryHex = 0xFF00F0FF
+    ),
+    CYBERNETIC_SHOCKWAVE(
+        id = "cybernetic_shockwave",
+        displayName = "🤖 Cybernetic Shockwave",
+        shortLabel = "Cyber Wave",
+        badge = "🤖 Wave",
+        description = "Neon magenta-aqua cyber ring pulses outward across the keycap matrix",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFFFF2E93,
+        secondaryHex = 0xFF00E5FF
+    ),
+    MAGNET_FLUX(
+        id = "magnet_flux",
+        displayName = "🧲 Magnet Flux",
+        shortLabel = "Magnet Flux",
+        badge = "🧲 Flux",
+        description = "Magnetic cobalt-cyan field snaps inward onto adjacent keys",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.GRAVITY_IMPLOSION,
+        primaryHex = 0xFF2563EB,
+        secondaryHex = 0xFF00F5D4
+    ),
+    CYBER_PULSE(
+        id = "cyber_pulse",
+        displayName = "💠 Cyber Pulse",
+        shortLabel = "Cyber Pulse",
+        badge = "💠 Cyber",
+        description = "Crisp electric strobe flickers cleanly over the pressed keycap",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.GLITCH_PULSE,
+        primaryHex = 0xFF00F0FF,
+        secondaryHex = 0xFFBC13FE
+    ),
+    FLUX_WAVE(
+        id = "flux_wave",
+        displayName = "🌊 Flux Wave",
+        shortLabel = "Flux Wave",
+        badge = "🌊 Flux",
+        description = "Liquid neon capacitor wave rolls outward from every tapped letter",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFF00F59B,
+        secondaryHex = 0xFF00E5FF
+    ),
+    VOLT_STRIKE(
+        id = "volt_strike",
+        displayName = "🌩️ Volt Strike",
+        shortLabel = "Volt Strike",
+        badge = "🌩️ Volt",
+        description = "High-voltage electric yellow-white bolt illuminates the active key column",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFFFFE600,
+        secondaryHex = 0xFF00E5FF
+    ),
+    GLITCH_OVERDRIVE(
+        id = "glitch_overdrive",
+        displayName = "👾 Glitch Overdrive",
+        shortLabel = "Glitch",
+        badge = "👾 Glitch",
+        description = "Chromatic RGB pixel jitter flashes sharply around the pressed keycap",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.GLITCH_PULSE,
+        primaryHex = 0xFFFF2A85,
+        secondaryHex = 0xFF39FF14
+    ),
+    RADAR_SWEEP(
+        id = "radar_sweep",
+        displayName = "📡 Radar Sweep",
+        shortLabel = "Radar Sweep",
+        badge = "📡 Radar",
+        description = "Emerald tactical sonar ping expands smoothly across neighboring keys",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFF39FF14,
+        secondaryHex = 0xFF00F5D4
+    ),
+    HYPER_TRACER(
+        id = "hyper_tracer",
+        displayName = "🏎️ Hyper Tracer",
+        shortLabel = "Tracer",
+        badge = "🏎️ Tracer",
+        description = "Outrun turbo streak trails fast typing across the QWERTY deck",
+        category = TouchEffectCategory.CYBER_LASER,
+        visualStyle = TouchEffectVisualStyle.COMET_STREAK,
+        primaryHex = 0xFFFF5E00,
+        secondaryHex = 0xFF00F0FF
+    ),
+
+    // --- 🔥 PLASMA & CRYO TOUCH RESPONSES (39..47) ---
+    SOLAR_FLARE(
+        id = "solar_flare",
+        displayName = "☀️ Solar Flare",
+        shortLabel = "Solar Flare",
+        badge = "☀️ Solar",
+        description = "Blazing amber corona sparks burst skyward above every tapped key",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.RISING_EMBER,
+        primaryHex = 0xFFFF6B00,
+        secondaryHex = 0xFFFFE600
+    ),
+    CRYO_SHARD(
+        id = "cryo_shard",
+        displayName = "🧊 Cryo Shard",
+        shortLabel = "Cryo Shard",
+        badge = "🧊 Cryo",
+        description = "Sub-zero ice crystals lock frost edges onto surrounding keys",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.FROST_CRYSTAL,
+        primaryHex = 0xFF7DD3FC,
+        secondaryHex = 0xFFFFFFFF
+    ),
+    INFERNO_RING(
+        id = "inferno_ring",
+        displayName = "🔥 Inferno Ring",
+        shortLabel = "Inferno",
+        badge = "🔥 Inferno",
+        description = "Molten crimson shockwave ring scorches outward from each strike",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFFE63946,
+        secondaryHex = 0xFFFFB703
+    ),
+    ARCTIC_GLACIER(
+        id = "arctic_glacier",
+        displayName = "❄️ Arctic Glacier",
+        shortLabel = "Glacier",
+        badge = "❄️ Glacier",
+        description = "Cool polar cyan prism glaze sweeps cleanly across adjacent keys",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.FROST_CRYSTAL,
+        primaryHex = 0xFF00F5D4,
+        secondaryHex = 0xFFE0F2FE
+    ),
+    PHOENIX_FEATHER(
+        id = "phoenix_feather",
+        displayName = "🪶 Phoenix Feather",
+        shortLabel = "Phoenix",
+        badge = "🪶 Phoenix",
+        description = "Golden scarlet ash particles drift gently upward on keypress",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.RISING_EMBER,
+        primaryHex = 0xFFFF2E93,
+        secondaryHex = 0xFFFFD60A
+    ),
+    THUNDER_SPARK(
+        id = "thunder_spark",
+        displayName = "⚡ Thunder Spark",
+        shortLabel = "Thunder",
+        badge = "⚡ Thunder",
+        description = "Crackling ice-blue thunder flashes across row and keycap edges",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.ELECTRIC_CROSS,
+        primaryHex = 0xFF60A5FA,
+        secondaryHex = 0xFFFFFFFF
+    ),
+    AURORA_MIST(
+        id = "aurora_mist",
+        displayName = "🌌 Aurora Mist",
+        shortLabel = "Aurora Mist",
+        badge = "🌌 Aurora",
+        description = "Polar emerald-violet shimmer lights up tapped keys cleanly",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.NEURAL_SYNAPSE,
+        primaryHex = 0xFF00F59B,
+        secondaryHex = 0xFFA855F7
+    ),
+    LAVA_CORE(
+        id = "lava_core",
+        displayName = "🌋 Lava Core",
+        shortLabel = "Lava Core",
+        badge = "🌋 Lava",
+        description = "Glowing obsidian magma rim pulses warmly around active letters",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.GLITCH_PULSE,
+        primaryHex = 0xFFFF4500,
+        secondaryHex = 0xFFFFB703
+    ),
+    BIO_TOXIC_GLOW(
+        id = "bio_toxic_glow",
+        displayName = "☣️ Bio Toxic Glow",
+        shortLabel = "Bio Glow",
+        badge = "☣️ Toxic",
+        description = "Acid-lime plasma trail connects swift key taps in neon green",
+        category = TouchEffectCategory.PLASMA_ELEMENTAL,
+        visualStyle = TouchEffectVisualStyle.COMET_STREAK,
+        primaryHex = 0xFF84CC16,
+        secondaryHex = 0xFF00F59B
+    ),
+
+    // --- 💎 PRISM & CHRONO TOUCH RESPONSES (48..56) ---
+    HOLOGRAM_PRISM_BURST(
+        id = "hologram_prism_burst",
+        displayName = "🌈 Hologram Prism Burst",
+        shortLabel = "Hologram",
+        badge = "🌈 Holo",
+        description = "Iridescent hologram facets glint brightly over pressed keycaps",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFF00F5D4,
+        secondaryHex = 0xFFFF2A85
+    ),
+    CHRONO_WARP(
+        id = "chrono_warp",
+        displayName = "⏳ Chrono Warp",
+        shortLabel = "Chrono Warp",
+        badge = "⏳ Chrono",
+        description = "Golden-cyan time ring orbits swiftly around the tapped letter",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.CHRONO_ORBIT,
+        primaryHex = 0xFFFFD60A,
+        secondaryHex = 0xFF00E5FF
+    ),
+    PRISM_SHATTER(
+        id = "prism_shatter",
+        displayName = "💎 Prism Shatter",
+        shortLabel = "Prism Shatter",
+        badge = "💎 Prism",
+        description = "Crystalline diamond shards refract spectrum light on adjacent keys",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFFE879F9,
+        secondaryHex = 0xFF38BDF8
+    ),
+    ROYAL_CROWN_GLINT(
+        id = "royal_crown_glint",
+        displayName = "👑 Royal Crown Glint",
+        shortLabel = "Royal Glint",
+        badge = "👑 Royal",
+        description = "24K gold luxury sparkle illuminates every keycap corner",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFFFFD700,
+        secondaryHex = 0xFFFF9E00
+    ),
+    ROSE_QUARTZ_SHINE(
+        id = "rose_quartz_shine",
+        displayName = "🌸 Rose Quartz Shine",
+        shortLabel = "Rose Quartz",
+        badge = "🌸 Rose",
+        description = "Soft rose-pink crystal glow blooms outward in gentle ripples",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFFFF75A0,
+        secondaryHex = 0xFFF6C2C2
+    ),
+    EMERALD_FACET(
+        id = "emerald_facet",
+        displayName = "✳️ Emerald Facet",
+        shortLabel = "Emerald",
+        badge = "✳️ Emerald",
+        description = "Sharp emerald jewel glint cuts diagonally across pressed keys",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.PRISM_SHATTER,
+        primaryHex = 0xFF00F59B,
+        secondaryHex = 0xFFFFFFFF
+    ),
+    SPECTRUM_RIPPLE(
+        id = "spectrum_ripple",
+        displayName = "🎨 Spectrum Ripple",
+        shortLabel = "Spectrum",
+        badge = "🎨 Spectrum",
+        description = "Full rainbow spectrum wave expands cleanly on every touch",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+        primaryHex = 0xFFFF2E93,
+        secondaryHex = 0xFF00E5FF
+    ),
+    TEMPORAL_ECHO(
+        id = "temporal_echo",
+        displayName = "🕰️ Temporal Echo",
+        shortLabel = "Temporal",
+        badge = "🕰️ Echo",
+        description = "Past 4 keys stay connected in a fading golden-violet time ribbon",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.COMET_STREAK,
+        primaryHex = 0xFFFFB703,
+        secondaryHex = 0xFFA855F7
+    ),
+    CRYSTAL_ORBIT(
+        id = "crystal_orbit",
+        displayName = "🔮 Crystal Orbit",
+        shortLabel = "Crystal Orbit",
+        badge = "🔮 Crystal",
+        description = "Violet-aqua crystal ring orbits smoothly around each pressed key",
+        category = TouchEffectCategory.PRISM_CHRONO,
+        visualStyle = TouchEffectVisualStyle.CHRONO_ORBIT,
+        primaryHex = 0xFFC084FC,
+        secondaryHex = 0xFF22D3EE
     );
 
     companion object {
+        val activeEffects: List<TouchTypingEffect>
+            get() = entries.filter { it != NONE }
+
+        fun byCategory(category: TouchEffectCategory): List<TouchTypingEffect> {
+            return if (category == TouchEffectCategory.ALL) activeEffects
+            else activeEffects.filter { it.category == category }
+        }
+
         fun fromSavedName(name: String?): TouchTypingEffect {
-            if (name.isNullOrBlank()) return TOUCH_SPARK
+            if (name.isNullOrBlank()) return AI_NEURAL_PULSE
             return entries.firstOrNull {
                 it.name.equals(name, ignoreCase = true) || it.id.equals(name, ignoreCase = true)
-            } ?: TOUCH_SPARK
+            } ?: AI_NEURAL_PULSE
         }
     }
 }
@@ -226,7 +852,7 @@ enum class RgbEffect(
 
         /** Clean migration mapper so previously saved effect names never break. */
         fun fromSavedName(name: String?): RgbEffect {
-            if (name.isNullOrBlank()) return QUANTUM_VORTEX
+            if (name.isNullOrBlank()) return NORMAL_DEFAULT
             entries.firstOrNull {
                 it.name.equals(name, ignoreCase = true) || it.id.equals(name, ignoreCase = true)
             }?.let { return it }
@@ -240,7 +866,7 @@ enum class RgbEffect(
                 "STARLIGHT" -> CYBERPUNK_FIREWORKS
                 "NEON_HEARTBEAT" -> HEARTBEAT_ECG
                 "STATIC_NEON" -> DIAMOND_PRISM
-                else -> QUANTUM_VORTEX
+                else -> NORMAL_DEFAULT
             }
         }
     }
@@ -433,14 +1059,15 @@ data class KeyboardSettings(
     val language: KeyboardLanguage = KeyboardLanguage.ENGLISH,
     val activeLanguageId: String = LanguageCatalog.ENGLISH_ID,
     val enabledLanguageIds: List<String> = listOf(LanguageCatalog.ENGLISH_ID),
-    val effect: RgbEffect = RgbEffect.QUANTUM_VORTEX,
-    val touchEffect: TouchTypingEffect = TouchTypingEffect.TOUCH_SPARK,
+    val effect: RgbEffect = RgbEffect.NORMAL_DEFAULT,
+    val touchEffect: TouchTypingEffect = TouchTypingEffect.AI_NEURAL_PULSE,
     val palette: RgbPalette = RgbPalette.VICE_CITY_NEON,
     val keycapStyle: KeycapStyle = KeycapStyle.PUDDING,
     val switchSound: SwitchSoundProfile = SwitchSoundProfile.SAMSUNG_SOFT,
     val animationSpeed: Float = 1.0f,
     val glowIntensity: Float = 0.90f,
-    val keyCornerRadiusDp: Float = 9f,
+    val keyCornerRadiusDp: Float = 6f,
+    val showKeyBorders: Boolean = true,
     val illuminatedLegends: Boolean = true,
     val chassisAura: Boolean = true,
     val hapticEnabled: Boolean = false,

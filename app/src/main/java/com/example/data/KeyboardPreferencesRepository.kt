@@ -42,6 +42,7 @@ class KeyboardPreferencesRepository private constructor(
         val ANIMATION_SPEED = floatPreferencesKey("animation_speed")
         val GLOW_INTENSITY = floatPreferencesKey("glow_intensity")
         val CORNER_RADIUS = floatPreferencesKey("corner_radius")
+        val SHOW_KEY_BORDERS = booleanPreferencesKey("show_key_borders")
         val ILLUMINATED_LEGENDS = booleanPreferencesKey("illuminated_legends")
         val CHASSIS_AURA = booleanPreferencesKey("chassis_aura")
         val HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
@@ -85,7 +86,8 @@ class KeyboardPreferencesRepository private constructor(
                 } ?: SwitchSoundProfile.SAMSUNG_SOFT,
                 animationSpeed = (prefs[Keys.ANIMATION_SPEED] ?: 1.0f).coerceIn(0.2f, 2.5f),
                 glowIntensity = (prefs[Keys.GLOW_INTENSITY] ?: 0.90f).coerceIn(0.2f, 1.0f),
-                keyCornerRadiusDp = (prefs[Keys.CORNER_RADIUS] ?: 9f).coerceIn(2f, 16f),
+                keyCornerRadiusDp = (prefs[Keys.CORNER_RADIUS] ?: 6f).coerceIn(2f, 16f),
+                showKeyBorders = prefs[Keys.SHOW_KEY_BORDERS] ?: true,
                 illuminatedLegends = prefs[Keys.ILLUMINATED_LEGENDS] ?: true,
                 chassisAura = prefs[Keys.CHASSIS_AURA] ?: true,
                 hapticEnabled = prefs[Keys.HAPTIC_ENABLED] ?: false,
@@ -221,6 +223,10 @@ class KeyboardPreferencesRepository private constructor(
 
     suspend fun updateCornerRadius(radiusDp: Float) {
         context.rgbKeyboardDataStore.edit { it[Keys.CORNER_RADIUS] = radiusDp.coerceIn(2f, 16f) }
+    }
+
+    suspend fun updateShowKeyBorders(show: Boolean) {
+        context.rgbKeyboardDataStore.edit { it[Keys.SHOW_KEY_BORDERS] = show }
     }
 
     suspend fun updateIlluminatedLegends(enabled: Boolean) {

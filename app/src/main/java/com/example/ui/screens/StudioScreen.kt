@@ -130,8 +130,10 @@ import com.example.model.RgbPalette
 import com.example.rgbkeyboard.RgbKeyboardView as NativeRgbKeyboardView
 import com.example.ui.components.FeatureTourCoordinates
 import com.example.ui.components.FeatureTourTarget
+import com.example.ui.components.LuxuryStudioCategoryGrid
 import com.example.ui.components.PromoBannerCarousel
 import com.example.ui.components.StudioAiHubPanel
+import com.example.ui.components.StudioEffectsCategory
 import com.example.ui.components.StudioStylishFontPanel
 import com.example.ui.theme.BrandObsidianPill
 import com.example.ui.theme.FlagshipCyanMagentaBrush
@@ -207,6 +209,7 @@ fun StudioScreen(
     onKeyFeedback: (Boolean) -> Unit,
     onOpenHardwareSettings: () -> Unit,
     onOpenLanguagesTab: () -> Unit,
+    onOpenEffectsCategory: (StudioEffectsCategory) -> Unit = {},
     isFeatureTourActive: Boolean = false,
     activeTourTarget: FeatureTourTarget? = null,
     featureTourCoordinates: FeatureTourCoordinates? = null,
@@ -435,12 +438,12 @@ fun StudioScreen(
 
             // Quick Active Language Strip (Built-in English + Downloaded JSON Packs + Download Shortcut)
             val enabledLanguages = languagePacks.filter { it.isEnabled }
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = appStrings.quickLanguageLabel,
                     fontFamily = uiBodyFont,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color.White
                 )
                 LazyRow(
@@ -562,12 +565,12 @@ fun StudioScreen(
             }
 
             // Quick Lighting Mode Cards (Luminous Dark-Glass + Cyan-to-Magenta Gradient Rim)
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = appStrings.quickEffectsLabel,
                     fontFamily = uiBodyFont,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color.White
                 )
                 LazyRow(
@@ -707,14 +710,14 @@ fun StudioScreen(
                 .widthIn(max = 680.dp)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF101218),
-            tonalElevation = 4.dp
+            color = Color(0xFF121418),
+            tonalElevation = 0.dp
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(18.dp))
-                    .padding(4.dp)
+                    .border(1.dp, Color(0xFF282C34), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
             ) {
                 // Ultra-Clean Single-Button Top Toolbar: Rakib official (Permanent Free) | 😊 | 📋 | Aa | 🎙 | ✨ AI
                 if (settings.showToolbar) {
@@ -1410,7 +1413,50 @@ fun StudioScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Luxury Studio Collections (5 Large English Category Cards with Direct Tap Navigation)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 680.dp)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "Luxury Studio Collections",
+                    fontFamily = OrbitronFamily,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
+                )
+                Text(
+                    text = "Explore Photos, Banners, Live RGB Animations, 56 Touch FX & 52 Themes",
+                    fontFamily = FontFamily.Default,
+                    fontSize = 12.5.sp,
+                    color = Color.White.copy(alpha = 0.80f)
+                )
+            }
+
+            val homeBannersCount = com.example.data.BannerPresetCatalog.staticBannerPresets.size +
+                listOf(
+                    licenseState.adminConfig.banners.resolvedBanner1Image,
+                    licenseState.adminConfig.banners.resolvedBanner2Image
+                ).count { it.isNotBlank() }
+
+            LuxuryStudioCategoryGrid(
+                selectedCategory = null,
+                photosBadge = "Gallery + ${com.example.data.BannerPresetCatalog.staticBannerPresets.size} HD",
+                bannersBadge = "$homeBannersCount Featured",
+                animationsBadge = "${RgbEffect.ambientPhysicsEffects.size} Live RGB",
+                touchResponsesBadge = "${com.example.model.TouchTypingEffect.byCategory(com.example.model.TouchEffectCategory.ALL).size} AI FX",
+                themesBadge = "${com.example.data.ComboThemeCatalog.byCategory(com.example.data.ComboCategory.ALL, licenseState.adminConfig.cloudThemes).size} Packs",
+                onSelectCategory = onOpenEffectsCategory
+            )
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
     }
 }
 

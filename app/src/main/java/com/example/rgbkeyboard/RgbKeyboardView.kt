@@ -35,6 +35,7 @@ import com.example.model.KeyboardSettings
 import com.example.model.KeycapStyle
 import com.example.model.LanguageCatalog
 import com.example.model.RgbEffect
+import com.example.model.TouchEffectVisualStyle
 import com.example.model.TouchTypingEffect
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
@@ -199,7 +200,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         listOf("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"),
         listOf("A", "S", "D", "F", "G", "H", "J", "K", "L"),
         listOf("SHIFT", "Z", "X", "C", "V", "B", "N", "M", "DEL"),
-        listOf("?123", ",", "GLOBE", "SPACE", "1234", ".", "ENTER")
+        listOf("?123", ",", "GLOBE", "SPACE", ".", "ENTER")
     )
     private val enTopRowHints = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
 
@@ -207,13 +208,15 @@ class RgbKeyboardView @JvmOverloads constructor(
         listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0"),
         listOf("@", "#", "৳", "_", "&", "-", "+", "(", ")", "/"),
         listOf("=\\<", "*", "\"", "'", ":", ";", "!", "?", "DEL"),
-        listOf("ABC", ",", "GLOBE", "SPACE", "1234", ".", "ENTER")
+        listOf("ABC", ",", "GLOBE", "SPACE", ".", "ENTER")
     )
 
     private val density = resources.displayMetrics.density
     private val scaledDensity = resources.displayMetrics.scaledDensity
 
     private val keyBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val keyShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val keyShadowRect = RectF()
     private val puddingInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#181B25")
         style = Paint.Style.FILL
@@ -226,7 +229,7 @@ class RgbKeyboardView @JvmOverloads constructor(
     private val sparkFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val sparkBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2.0f * density
+        strokeWidth = 0.8f * density
     }
     private val blueActionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -439,7 +442,7 @@ class RgbKeyboardView @JvmOverloads constructor(
 
     /**
      * Switches between the dedicated Gboard-style 3x4 Number Pad (auto-opened for
-     * `TYPE_CLASS_NUMBER` / `TYPE_CLASS_PHONE` fields or `1234` key tap) and normal keyboard.
+     * `TYPE_CLASS_NUMBER` / `TYPE_CLASS_PHONE` / `TYPE_CLASS_DATETIME` fields) and normal keyboard.
      */
     fun setNumberPadMode(enabled: Boolean) {
         if (isNumberPad != enabled || (enabled && (isSymbols || isEmojiMode))) {
@@ -602,24 +605,11 @@ class RgbKeyboardView @JvmOverloads constructor(
         )
     }
 
-    private fun injectNumberPadKeyIntoBottomRow(rows: List<List<String>>): List<List<String>> {
-        if (rows.isEmpty()) return rows
-        val lastRow = rows.last()
-        val spaceIdx = lastRow.indexOf("SPACE")
-        if (spaceIdx < 0 || lastRow.contains("1234")) return rows
-        val updatedLastRow = ArrayList<String>(lastRow.size + 1).apply {
-            addAll(lastRow.subList(0, spaceIdx + 1))
-            add("1234")
-            addAll(lastRow.subList(spaceIdx + 1, lastRow.size))
-        }
-        return rows.dropLast(1) + listOf(updatedLastRow)
-    }
-
     private fun currentRows(): List<List<String>> {
         if (isNumberPad) return numberPadRows()
         if (isSymbols) return symRows
         val dyn = activeDynamicLayout ?: return enRows
-        val baseRows = when {
+        return when {
             isShifted -> dyn.shiftRows
             isKarBarActive && dyn.karBar.isNotEmpty() && dyn.rows.isNotEmpty() -> {
                 // Dynamic Kar / Matra vowel-bar morphs Row 0 right after typing a consonant!
@@ -627,7 +617,6 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
             else -> dyn.rows
         }
-        return injectNumberPadKeyIntoBottomRow(baseRows)
     }
 
     private fun rebuildKeyBoxes() {
@@ -683,7 +672,6 @@ class RgbKeyboardView @JvmOverloads constructor(
                     rawKey == "NUM_SPACE" -> "␣"
                     rawKey == "NUM_ALPHA" -> if (activeLanguageId == "bn") "কখগ" else "ABC"
                     rawKey == "NUM_SYM" -> "!?#"
-                    rawKey == "1234" -> "1234"
                     rawKey == "।" && activeLanguageId == LanguageCatalog.BANGLISH_ID -> "."
                     rawKey == "DEL" -> "⌫"
                     rawKey == "SHIFT" -> ""
@@ -800,9 +788,10 @@ class RgbKeyboardView @JvmOverloads constructor(
         }
 
         val hasAmbientRgb = vipVisualsEnabled && settings.effect != RgbEffect.NORMAL_DEFAULT
-        val allowTouchLayer = vipVisualsEnabled
+        val allowTouchLayer = vipVisualsEnabled && settings.touchEffect != TouchTypingEffect.NONE
+        val showKeyBorders = settings.showKeyBorders
         val isNormalClassicBlack = !vipVisualsEnabled || (!hasAmbientRgb && !photoTheme.hasPhoto)
-        val cornerRadius = (settings.keyCornerRadiusDp * density * 0.82f).coerceIn(5.5f * density, 13f * density)
+        val cornerRadius = (settings.keyCornerRadiusDp * density).coerceIn(3.5f * density, 14f * density)
 
         // =========================================================================
         // LAYER 1A: Persistent Custom / Downloaded Theme Photo Background (VIP only)
@@ -812,6 +801,9 @@ class RgbKeyboardView @JvmOverloads constructor(
             drawCustomPhotoBackground(canvas)
         } else {
             false
+        }
+        if (!hasCustomPhoto && !hasAmbientRgb) {
+            canvas.drawColor(Color.parseColor("#121418"))
         }
 
         val continuousShader: SweepGradient? = if (hasAmbientRgb) {
@@ -825,13 +817,13 @@ class RgbKeyboardView @JvmOverloads constructor(
 
         val useBengaliFont = activeLanguageId == "bn" || activeLanguageId == LanguageCatalog.BANGLISH_ID
         val activeLegendTypeface = if (useBengaliFont) bengaliTypeface else normalTypeface
-        subLabelPaint.typeface = activeLegendTypeface
+        subLabelPaint.typeface = if (!isSymbols && !isNumberPad && activeLanguageId == LanguageCatalog.ENGLISH_ID) normalTypeface else activeLegendTypeface
 
         val invW = 1f / width.coerceAtLeast(1).toFloat()
         val invH = 1f / height.coerceAtLeast(1).toFloat()
 
         // =========================================================================
-        // LAYER 1B + LAYER 2 PER-KEY: Ambient Physics RGB + Simultaneous Touch Effect
+        // LAYER 1B + LAYER 2 PER-KEY: Authentic Gboard Keycaps / Ambient RGB + Touch FX
         // =========================================================================
         for (i in keyBoxes.indices) {
             val box = keyBoxes[i]
@@ -855,34 +847,80 @@ class RgbKeyboardView @JvmOverloads constructor(
             val isShiftLit = isShiftOnce || isCapsLocked
 
             if (box.rawKey == "ENTER") {
-                drawGboardCircularActionKey(canvas, box, isPressed, directGlow)
+                drawGboardCircularActionKey(canvas, box, isPressed, directGlow, hasCustomPhoto)
                 continue
             }
 
-            // --- LAYER 1B: Base Keycap + 20 Ambient Physics RGB Animation ---
+            // --- LAYER 1B: Authentic Gboard Keycaps (Frosted 0.22f over Photos / #22252A Charcoal on Default Black) ---
             if (!hasAmbientRgb) {
-                val letterAlpha = if (hasCustomPhoto) 154 else 242
-                val modAlpha = if (hasCustomPhoto) 138 else 235
                 val isNumberPadSideKey = isNumberPad && !isNumberPadDigit(box.rawKey)
-                keyBgPaint.color = when {
-                    isNormalClassicBlack && isPressed -> Color.argb(245, 42, 45, 58)
-                    isCapsLocked -> Color.argb(225, 24, 62, 118)
-                    isShiftOnce -> Color.argb(215, 36, 48, 72)
-                    box.isKarBarKey -> Color.argb(if (hasCustomPhoto) 185 else 235, 22, 42, 58)
-                    isNormalClassicBlack && box.rawKey == "SPACE" -> Color.argb(letterAlpha, 24, 25, 32)
-                    isNormalClassicBlack && (isNumberPadSideKey || isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey)) ->
-                        Color.argb(modAlpha, 16, 17, 23)
-                    isNormalClassicBlack -> Color.argb(letterAlpha, 26, 28, 36)
-                    box.rawKey == "SPACE" -> Color.argb(letterAlpha, 34, 37, 49)
-                    isNumberPadSideKey || isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey) ->
-                        Color.argb(modAlpha, 25, 28, 39)
-                    else -> Color.argb(letterAlpha, 35, 39, 52)
-                }
-                canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                val isModifier = isNumberPadSideKey || isModifierKey(box.rawKey) || box.rawKey == "GLOBE" || isPunctuationKey(box.rawKey)
 
-                if (box.isKarBarKey && directGlow <= 0.01f) {
-                    sparkBorderPaint.color = Color.argb(120, 0, 245, 212)
-                    sparkBorderPaint.strokeWidth = 1.0f * density
+                // Soft bottom drop shadow (2dp elevation) under floating Gboard keycaps
+                val shouldDrawShadow = when {
+                    hasCustomPhoto -> showKeyBorders || box.rawKey == "SPACE"
+                    showKeyBorders -> true
+                    else -> box.rawKey == "SPACE" || isPressed
+                }
+                if (shouldDrawShadow) {
+                    keyShadowRect.set(
+                        rect.left,
+                        rect.top + 1.0f * density,
+                        rect.right,
+                        rect.bottom + 2.0f * density
+                    )
+                    keyShadowPaint.color = if (hasCustomPhoto) {
+                        Color.argb(68, 0, 0, 0)
+                    } else {
+                        Color.argb(145, 0, 0, 0)
+                    }
+                    canvas.drawRoundRect(keyShadowRect, cornerRadius, cornerRadius, keyShadowPaint)
+                }
+
+                keyBgPaint.color = if (hasCustomPhoto) {
+                    // Translucent frosted glass key fill (alpha ~0.22f over photo themes)
+                    when {
+                        isPressed -> Color.argb(108, 255, 255, 255)
+                        isCapsLocked -> Color.argb(168, 30, 88, 165)
+                        isShiftOnce -> Color.argb(142, 48, 66, 98)
+                        box.isKarBarKey -> Color.argb(122, 24, 52, 74)
+                        !showKeyBorders && box.rawKey == "SPACE" -> Color.argb(56, 255, 255, 255)
+                        !showKeyBorders -> Color.TRANSPARENT
+                        box.rawKey == "SPACE" -> Color.argb(58, 28, 32, 44)
+                        isModifier -> Color.argb(72, 16, 19, 27)
+                        else -> Color.argb(56, 24, 28, 38)
+                    }
+                } else {
+                    // Authentic Gboard Default Black: sleek dark charcoal #22252A with #1A1D22 modifiers
+                    when {
+                        isPressed -> Color.rgb(52, 57, 66)
+                        isCapsLocked -> Color.rgb(30, 78, 148)
+                        isShiftOnce -> Color.rgb(46, 56, 74)
+                        box.isKarBarKey -> Color.rgb(26, 44, 62)
+                        !showKeyBorders && box.rawKey == "SPACE" -> Color.rgb(34, 37, 42)
+                        !showKeyBorders -> Color.TRANSPARENT
+                        box.rawKey == "SPACE" -> Color.rgb(34, 37, 42)
+                        isModifier -> Color.rgb(26, 29, 34)
+                        else -> Color.rgb(34, 37, 42)
+                    }
+                }
+
+                if (Color.alpha(keyBgPaint.color) > 0) {
+                    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                }
+
+                // Subtle, clean thin key border (0.8dp soft white/gray outline) when Key borders is ON
+                if (box.isKarBarKey && directGlow <= 0.01f && showKeyBorders) {
+                    sparkBorderPaint.color = Color.argb(115, 110, 195, 255)
+                    sparkBorderPaint.strokeWidth = 0.8f * density
+                    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
+                } else if (showKeyBorders && directGlow <= 0.01f) {
+                    sparkBorderPaint.color = if (hasCustomPhoto) {
+                        Color.argb(82, 255, 255, 255)
+                    } else {
+                        Color.argb(46, 210, 218, 232)
+                    }
+                    sparkBorderPaint.strokeWidth = 0.8f * density
                     canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
                 }
             } else {
@@ -912,33 +950,47 @@ class RgbKeyboardView @JvmOverloads constructor(
                     KeycapStyle.PUDDING -> {
                         rgbFillPaint.color = Color.argb((a * (if (hasCustomPhoto) 0.72f else 0.92f)).toInt().coerceIn(32, 235), r, g, b)
                         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
-                        puddingInnerPaint.color = Color.argb(if (hasCustomPhoto) 162 else 238, 20, 23, 34)
-                        tempRect.set(rect.left + 2.2f * density, rect.top + 1.5f * density, rect.right - 2.2f * density, rect.bottom - 4f * density)
-                        val innerR = (cornerRadius - 2f * density).coerceAtLeast(3f)
-                        canvas.drawRoundRect(tempRect, innerR, innerR, puddingInnerPaint)
+                        if (showKeyBorders) {
+                            puddingInnerPaint.color = Color.argb(if (hasCustomPhoto) 162 else 238, 20, 23, 34)
+                            tempRect.set(rect.left + 2.2f * density, rect.top + 1.5f * density, rect.right - 2.2f * density, rect.bottom - 4f * density)
+                            val innerR = (cornerRadius - 2f * density).coerceAtLeast(3f)
+                            canvas.drawRoundRect(tempRect, innerR, innerR, puddingInnerPaint)
+                        }
                     }
                     KeycapStyle.NEON_WIREFRAME -> {
-                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 124 else 235, 15, 18, 26)
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
-                        rgbBorderPaint.color = Color.argb(a, r, g, b)
-                        rgbBorderPaint.strokeWidth = 1.9f * density
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
+                        if (showKeyBorders) {
+                            keyBgPaint.color = Color.argb(if (hasCustomPhoto) 124 else 235, 15, 18, 26)
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                            rgbBorderPaint.color = Color.argb(a, r, g, b)
+                            rgbBorderPaint.strokeWidth = 1.9f * density
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
+                        } else {
+                            rgbFillPaint.color = Color.argb((a * 0.45f).toInt().coerceIn(24, 128), r, g, b)
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
+                        }
                     }
                     KeycapStyle.SOLID_MECH -> {
-                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 160 else 242, 30, 34, 48)
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                        if (showKeyBorders) {
+                            keyBgPaint.color = Color.argb(if (hasCustomPhoto) 160 else 242, 30, 34, 48)
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                        }
                         rgbFillPaint.color = Color.argb(a, r, g, b)
                         tempRect.set(rect.centerX() - rect.width() * 0.30f, rect.bottom - 4.5f * density, rect.centerX() + rect.width() * 0.30f, rect.bottom - 1.8f * density)
                         canvas.drawRoundRect(tempRect, 3f * density, 3f * density, rgbFillPaint)
                     }
                     KeycapStyle.FLOATING_GLOW -> {
-                        keyBgPaint.color = Color.argb(if (hasCustomPhoto) 146 else 224, 26, 30, 42)
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
-                        rgbFillPaint.color = Color.argb((a * 0.28f).toInt().coerceIn(18, 90), r, g, b)
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
-                        rgbBorderPaint.color = Color.argb(a, r, g, b)
-                        rgbBorderPaint.strokeWidth = 1.6f * density
-                        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
+                        if (showKeyBorders) {
+                            keyBgPaint.color = Color.argb(if (hasCustomPhoto) 146 else 224, 26, 30, 42)
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, keyBgPaint)
+                            rgbFillPaint.color = Color.argb((a * 0.28f).toInt().coerceIn(18, 90), r, g, b)
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
+                            rgbBorderPaint.color = Color.argb(a, r, g, b)
+                            rgbBorderPaint.strokeWidth = 1.6f * density
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbBorderPaint)
+                        } else {
+                            rgbFillPaint.color = Color.argb((a * 0.52f).toInt().coerceIn(28, 140), r, g, b)
+                            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rgbFillPaint)
+                        }
                     }
                 }
             }
@@ -951,17 +1003,52 @@ class RgbKeyboardView @JvmOverloads constructor(
                     isShiftOnce -> maxOf(directGlow, 0.56f)
                     else -> directGlow
                 }
-                when (settings.touchEffect) {
-                    TouchTypingEffect.TOUCH_SPARK -> {
+                val fxPrimary = androidx.compose.ui.graphics.Color(settings.touchEffect.primaryHex).toArgb()
+                val fxSecondary = androidx.compose.ui.graphics.Color(settings.touchEffect.secondaryHex).toArgb()
+                when (settings.touchEffect.visualStyle) {
+                    TouchEffectVisualStyle.NONE -> Unit
+
+                    TouchEffectVisualStyle.GLITCH_PULSE -> {
                         if (effGlow > 0.01f) {
-                            val neon = if (isCapsLocked) Color.parseColor("#38BDF8") else box.neonColor
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, neon, effGlow, fillMaxAlpha = 148)
+                            val neon = when {
+                                isCapsLocked -> Color.parseColor("#38BDF8")
+                                settings.touchEffect == TouchTypingEffect.TOUCH_SPARK -> box.neonColor
+                                else -> blendColor(fxPrimary, fxSecondary, ((sin(timeSec * 20f) + 1f) * 0.5f))
+                            }
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, neon, effGlow, fillMaxAlpha = 152)
                         }
                     }
 
-                    TouchTypingEffect.TOUCH_ELECTRIC_CROSS -> {
+                    TouchEffectVisualStyle.NEURAL_SYNAPSE -> {
+                        var synStrength = effGlow
+                        var synColor = fxPrimary
+                        for (gIdx in renderGlows.indices) {
+                            val gItem = renderGlows[gIdx]
+                            val gFade = computeGlowFactor(gItem, nowMs)
+                            if (gFade <= 0.02f) continue
+                            val d = abs(box.rowIndex - gItem.rowIndex) + abs(box.colIndex - gItem.colIndex)
+                            if (d <= 2) {
+                                val weight = when (d) {
+                                    0 -> 1.0f
+                                    1 -> 0.75f
+                                    else -> 0.45f
+                                }
+                                val energy = gFade * weight
+                                if (energy > synStrength) {
+                                    synStrength = energy
+                                    synColor = if (d <= 1) fxPrimary else fxSecondary
+                                }
+                            }
+                        }
+                        effectiveTouchGlow = maxOf(effectiveTouchGlow, synStrength)
+                        if (synStrength > 0.02f) {
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, synColor, synStrength, fillMaxAlpha = 156)
+                        }
+                    }
+
+                    TouchEffectVisualStyle.ELECTRIC_CROSS -> {
                         var crossStrength = effGlow
-                        var crossColor = if (isCapsLocked) Color.parseColor("#38BDF8") else Color.parseColor("#00F0FF")
+                        var crossColor = if (isCapsLocked) Color.parseColor("#38BDF8") else fxPrimary
                         for (gIdx in renderGlows.indices) {
                             val gItem = renderGlows[gIdx]
                             val gFade = computeGlowFactor(gItem, nowMs)
@@ -972,7 +1059,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                                 val energy = gFade * falloff
                                 if (energy > crossStrength) {
                                     crossStrength = energy
-                                    crossColor = if (dist == 0) Color.WHITE else Color.parseColor("#00E5FF")
+                                    crossColor = if (dist == 0) fxSecondary else fxPrimary
                                 }
                             }
                         }
@@ -982,20 +1069,22 @@ class RgbKeyboardView @JvmOverloads constructor(
                         }
                     }
 
-                    TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> {
+                    TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+                    TouchEffectVisualStyle.GRAVITY_IMPLOSION -> {
                         if (effGlow > 0.01f) {
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, box.neonColor, effGlow, fillMaxAlpha = 145)
+                            val col = blendColor(fxPrimary, fxSecondary, effGlow * 0.5f)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, col, effGlow, fillMaxAlpha = 152)
                         }
                     }
 
-                    TouchTypingEffect.TOUCH_MAGMA_EMBER -> {
+                    TouchEffectVisualStyle.RISING_EMBER -> {
                         if (effGlow > 0.01f) {
-                            val magmaCol = blendColor(Color.parseColor("#FF3D00"), Color.parseColor("#FFD600"), effGlow)
+                            val magmaCol = blendColor(fxPrimary, fxSecondary, effGlow)
                             drawTouchKeyHighlight(canvas, rect, cornerRadius, magmaCol, effGlow, fillMaxAlpha = 175)
                         }
                     }
 
-                    TouchTypingEffect.TOUCH_FROST_FREEZE -> {
+                    TouchEffectVisualStyle.FROST_CRYSTAL -> {
                         var frostStrength = effGlow
                         var isFrostCenter = effGlow > 0.25f
                         for (gIdx in renderGlows.indices) {
@@ -1014,9 +1103,8 @@ class RgbKeyboardView @JvmOverloads constructor(
                         }
                         effectiveTouchGlow = maxOf(effectiveTouchGlow, frostStrength)
                         if (frostStrength > 0.02f) {
-                            val frostCol = if (isFrostCenter) Color.parseColor("#E0FBFC") else Color.parseColor("#38BDF8")
+                            val frostCol = if (isFrostCenter) fxPrimary else fxSecondary
                             drawTouchKeyHighlight(canvas, rect, cornerRadius, frostCol, frostStrength, fillMaxAlpha = 165)
-                            // Crisp crystalline frost corner accents
                             effectOverlayPaint.style = Paint.Style.STROKE
                             effectOverlayPaint.strokeWidth = 1.4f * density
                             effectOverlayPaint.color = Color.argb((frostStrength * 220).toInt().coerceIn(0, 220), 224, 251, 252)
@@ -1026,17 +1114,32 @@ class RgbKeyboardView @JvmOverloads constructor(
                         }
                     }
 
-                    TouchTypingEffect.TOUCH_COMET_TRAIL -> {
+                    TouchEffectVisualStyle.COMET_STREAK -> {
                         if (effGlow > 0.01f) {
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, box.neonColor, effGlow, fillMaxAlpha = 140)
+                            val streakCol = blendColor(fxPrimary, fxSecondary, effGlow)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, streakCol, effGlow, fillMaxAlpha = 148)
                         }
                     }
 
-                    TouchTypingEffect.TOUCH_DIAMOND_FLASH -> {
+                    TouchEffectVisualStyle.PRISM_SHATTER -> {
                         if (effGlow > 0.01f) {
-                            val prismCol = blendColor(Color.parseColor("#00E5FF"), Color.WHITE, 0.55f)
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, prismCol, effGlow, fillMaxAlpha = 150)
+                            val prismCol = blendColor(fxPrimary, fxSecondary, 0.45f)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, prismCol, effGlow, fillMaxAlpha = 152)
                             drawDiamondStarGlint(canvas, rect, effGlow)
+                        }
+                    }
+
+                    TouchEffectVisualStyle.CHRONO_ORBIT -> {
+                        if (effGlow > 0.01f) {
+                            val orbitCol = blendColor(fxPrimary, fxSecondary, ((sin(timeSec * 7f) + 1f) * 0.5f))
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, orbitCol, effGlow, fillMaxAlpha = 155)
+                            effectOverlayPaint.style = Paint.Style.FILL
+                            val angle = timeSec * 7.5f + box.colIndex
+                            val rOrbit = min(rect.width(), rect.height()) * 0.42f
+                            val ox = rect.centerX() + cos(angle) * rOrbit
+                            val oy = rect.centerY() + sin(angle) * rOrbit
+                            effectOverlayPaint.color = Color.argb((effGlow * 245).toInt().coerceIn(0, 255), Color.red(fxSecondary), Color.green(fxSecondary), Color.blue(fxSecondary))
+                            canvas.drawCircle(ox, oy, 2.8f * density, effectOverlayPaint)
                         }
                     }
                 }
@@ -1059,23 +1162,23 @@ class RgbKeyboardView @JvmOverloads constructor(
                 continue
             }
 
-            // Subtle Gboard top-right sub-label hint
+            // Subtle Gboard top-right micro-digit / sub-label hint
             if (box.subLabel != null) {
-                subLabelPaint.color = if (effectiveTouchGlow > 0.1f) {
-                    blendColor(Color.parseColor("#8C95AD"), box.neonColor, effectiveTouchGlow)
-                } else {
-                    Color.parseColor("#8891A8")
+                subLabelPaint.color = when {
+                    effectiveTouchGlow > 0.1f -> blendColor(Color.parseColor("#9AA0A6"), box.neonColor, effectiveTouchGlow)
+                    hasCustomPhoto -> Color.argb(215, 238, 242, 250)
+                    else -> Color.parseColor("#9AA0A6")
                 }
-                subLabelPaint.textSize = if (box.subLabel == "☺") 8.5f * scaledDensity else 9.5f * scaledDensity
+                subLabelPaint.textSize = if (box.subLabel == "☺") 8.5f * scaledDensity else 9.2f * scaledDensity
                 canvas.drawText(
                     box.subLabel,
-                    rect.right - 3.5f * density,
-                    rect.top + 10.5f * density,
+                    rect.right - 3.8f * density,
+                    rect.top + 10.2f * density,
                     subLabelPaint
                 )
             }
 
-            // Crisp centered keycap letter / label
+            // Crisp centered sans-serif keycap letter / label
             val rowH = rect.height()
             val isNumDigit = isNumberPad && isNumberPadDigit(box.rawKey)
             textPaint.typeface = when {
@@ -1083,28 +1186,33 @@ class RgbKeyboardView @JvmOverloads constructor(
                 else -> activeLegendTypeface
             }
             textPaint.textSize = when {
-                box.rawKey == "SPACE" -> (rowH * 0.29f).coerceIn(11f * scaledDensity, 13.5f * scaledDensity)
-                box.rawKey == "1234" -> (rowH * 0.27f).coerceIn(10f * scaledDensity, 12.5f * scaledDensity)
+                box.rawKey == "SPACE" -> (rowH * 0.28f).coerceIn(11f * scaledDensity, 13f * scaledDensity)
                 box.rawKey == "NUM_ALPHA" || box.rawKey == "NUM_SYM" -> (rowH * 0.28f).coerceIn(10.5f * scaledDensity, 13f * scaledDensity)
                 box.rawKey == "NUM_SPACE" -> (rowH * 0.44f).coerceIn(16f * scaledDensity, 21f * scaledDensity)
                 isNumDigit -> (rowH * 0.50f).coerceIn(18f * scaledDensity, 25f * scaledDensity)
-                box.displayLabel.length > 2 -> (rowH * 0.30f).coerceIn(10.5f * scaledDensity, 13.5f * scaledDensity)
+                box.displayLabel.length > 2 -> (rowH * 0.29f).coerceIn(10.5f * scaledDensity, 13f * scaledDensity)
                 box.rawKey == "SHIFT" || box.rawKey == "DEL" -> (rowH * 0.43f).coerceIn(15f * scaledDensity, 20f * scaledDensity)
                 box.isKarBarKey -> (rowH * 0.50f).coerceIn(15f * scaledDensity, 21f * scaledDensity)
-                else -> (rowH * 0.45f).coerceIn(14f * scaledDensity, 21f * scaledDensity)
+                else -> (rowH * 0.46f).coerceIn(14.5f * scaledDensity, 21.5f * scaledDensity)
             }
 
             if (!hasAmbientRgb) {
                 textPaint.shader = null
                 textPaint.color = when {
                     isPressed -> Color.WHITE
-                    effectiveTouchGlow > 0.08f -> blendColor(Color.parseColor("#EEF2FC"), box.neonColor, effectiveTouchGlow)
-                    isShiftLit -> box.neonColor
-                    box.isKarBarKey -> Color.parseColor("#7CEEFF")
-                    box.rawKey == "SPACE" -> Color.parseColor("#C2CBE0")
-                    else -> Color.parseColor("#EEF2FC")
+                    effectiveTouchGlow > 0.08f -> blendColor(Color.parseColor("#F1F3F4"), box.neonColor, effectiveTouchGlow)
+                    isShiftLit -> Color.WHITE
+                    box.isKarBarKey -> Color.parseColor("#8AB4F8")
+                    box.rawKey == "SPACE" -> if (hasCustomPhoto) Color.argb(230, 241, 243, 244) else Color.parseColor("#BDC1C6")
+                    else -> Color.parseColor("#F1F3F4")
+                }
+                if (hasCustomPhoto) {
+                    textPaint.setShadowLayer(2.2f * density, 0f, 0.8f * density, Color.argb(145, 0, 0, 0))
+                } else {
+                    textPaint.clearShadowLayer()
                 }
             } else {
+                textPaint.clearShadowLayer()
                 textPaint.shader = if (settings.illuminatedLegends && !isPressed && effectiveTouchGlow < 0.25f) continuousShader else null
                 textPaint.color = Color.WHITE
             }
@@ -1113,6 +1221,7 @@ class RgbKeyboardView @JvmOverloads constructor(
             val textY = rect.centerY() + yShift - (textPaint.descent() + textPaint.ascent()) / 2f
             canvas.drawText(box.displayLabel, rect.centerX(), textY, textPaint)
         }
+        textPaint.clearShadowLayer()
         textPaint.shader = null
 
         // =========================================================================
@@ -1120,11 +1229,12 @@ class RgbKeyboardView @JvmOverloads constructor(
         // Magma Rising Embers, Comet Tail, Glide Trail, Rising Key Bubbles)
         // =========================================================================
         if (allowTouchLayer) {
-            when (settings.touchEffect) {
-                TouchTypingEffect.TOUCH_ELECTRIC_CROSS -> drawElectricCrossBeams(canvas, renderGlows, nowMs)
-                TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> drawShockwaveRings(canvas, renderShockwaves, nowMs)
-                TouchTypingEffect.TOUCH_MAGMA_EMBER -> drawMagmaEmberSparks(canvas, renderEmbers, nowMs)
-                TouchTypingEffect.TOUCH_COMET_TRAIL -> drawCometKeyTrail(canvas, renderCometPoints, nowMs)
+            when (settings.touchEffect.visualStyle) {
+                TouchEffectVisualStyle.ELECTRIC_CROSS -> drawElectricCrossBeams(canvas, renderGlows, nowMs)
+                TouchEffectVisualStyle.RADIAL_SHOCKWAVE -> drawShockwaveRings(canvas, renderShockwaves, nowMs, implode = false)
+                TouchEffectVisualStyle.GRAVITY_IMPLOSION -> drawShockwaveRings(canvas, renderShockwaves, nowMs, implode = true)
+                TouchEffectVisualStyle.RISING_EMBER -> drawMagmaEmberSparks(canvas, renderEmbers, nowMs)
+                TouchEffectVisualStyle.COMET_STREAK -> drawCometKeyTrail(canvas, renderCometPoints, nowMs)
                 else -> Unit
             }
             if (renderTrails.size >= 2) {
@@ -1155,15 +1265,19 @@ class RgbKeyboardView @JvmOverloads constructor(
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
 
         sparkBorderPaint.color = Color.argb(
-            (strength * 255 * settings.glowIntensity).toInt().coerceIn(0, 255),
+            (strength * 230 * settings.glowIntensity).toInt().coerceIn(0, 235),
             r, g, b
         )
-        sparkBorderPaint.strokeWidth = (1.6f + strength * 1.5f) * density
+        sparkBorderPaint.strokeWidth = (1.1f + strength * 0.9f) * density
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
     }
 
     private fun drawElectricCrossBeams(canvas: Canvas, renderGlows: List<ActiveKeyGlow>, nowMs: Long) {
         if (renderGlows.isEmpty()) return
+        val fxPrimary = androidx.compose.ui.graphics.Color(settings.touchEffect.primaryHex).toArgb()
+        val r = Color.red(fxPrimary)
+        val gC = Color.green(fxPrimary)
+        val b = Color.blue(fxPrimary)
         effectOverlayPaint.style = Paint.Style.STROKE
         effectOverlayPaint.strokeCap = Paint.Cap.ROUND
         for (i in renderGlows.indices) {
@@ -1174,19 +1288,24 @@ class RgbKeyboardView @JvmOverloads constructor(
             val cy = g.rect.centerY()
             val alphaOuter = (fade * 105 * settings.glowIntensity).toInt().coerceIn(0, 140)
             val alphaCore = (fade * 235 * settings.glowIntensity).toInt().coerceIn(0, 255)
-            effectOverlayPaint.color = Color.argb(alphaOuter, 0, 229, 255)
+            effectOverlayPaint.color = Color.argb(alphaOuter, r, gC, b)
             effectOverlayPaint.strokeWidth = 6.5f * density * fade
             canvas.drawLine(0f, cy, width.toFloat(), cy, effectOverlayPaint)
             canvas.drawLine(cx, 0f, cx, height.toFloat(), effectOverlayPaint)
 
-            effectOverlayPaint.color = Color.argb(alphaCore, 210, 252, 255)
+            effectOverlayPaint.color = Color.argb(alphaCore, 235, 252, 255)
             effectOverlayPaint.strokeWidth = 1.8f * density * fade
             canvas.drawLine(0f, cy, width.toFloat(), cy, effectOverlayPaint)
             canvas.drawLine(cx, 0f, cx, height.toFloat(), effectOverlayPaint)
         }
     }
 
-    private fun drawShockwaveRings(canvas: Canvas, rings: List<ShockwaveRing>, nowMs: Long) {
+    private fun drawShockwaveRings(
+        canvas: Canvas,
+        rings: List<ShockwaveRing>,
+        nowMs: Long,
+        implode: Boolean = false
+    ) {
         if (rings.isEmpty()) return
         effectOverlayPaint.style = Paint.Style.STROKE
         val maxR = width.toFloat() * 0.44f
@@ -1196,7 +1315,11 @@ class RgbKeyboardView @JvmOverloads constructor(
             val progress = (age / SHOCKWAVE_LIFETIME_MS).coerceIn(0f, 1f)
             if (progress >= 1f) continue
             val eased = 1f - (1f - progress) * (1f - progress)
-            val radius = 14f * density + eased * maxR
+            val radius = if (implode) {
+                12f * density + (1f - eased) * (maxR * 0.72f)
+            } else {
+                14f * density + eased * maxR
+            }
             val fade = (1f - progress)
             val r = Color.red(ring.color)
             val g = Color.green(ring.color)
@@ -1275,20 +1398,25 @@ class RgbKeyboardView @JvmOverloads constructor(
         canvas: Canvas,
         box: KeyBox,
         isPressed: Boolean,
-        glowIntensity: Float
+        glowIntensity: Float,
+        hasCustomPhoto: Boolean = false
     ) {
         val r = box.rect
         val radius = (min(r.width(), r.height()) * 0.48f)
         val cx = r.centerX()
         val cy = r.centerY()
 
-        // Outer neon touch halo when pressed/fading
+        // Soft 2dp bottom drop shadow under the circular Enter key
+        keyShadowPaint.color = Color.argb(if (hasCustomPhoto) 95 else 140, 0, 0, 0)
+        canvas.drawCircle(cx, cy + 1.8f * density, radius, keyShadowPaint)
+
+        // Outer subtle touch halo when pressed/fading
         if (glowIntensity > 0.02f) {
-            val haloR = radius * 1.32f
+            val haloR = radius * 1.28f
             popupHaloPaint.shader = RadialGradient(
                 cx, cy, haloR,
                 intArrayOf(
-                    Color.argb((glowIntensity * 165).toInt().coerceIn(0, 200), 66, 133, 244),
+                    Color.argb((glowIntensity * 145).toInt().coerceIn(0, 180), 66, 133, 244),
                     Color.TRANSPARENT
                 ),
                 null,
@@ -1298,7 +1426,7 @@ class RgbKeyboardView @JvmOverloads constructor(
             popupHaloPaint.shader = null
         }
 
-        blueActionPaint.color = if (isPressed) Color.parseColor("#5C9CFF") else Color.parseColor("#3B82F6")
+        blueActionPaint.color = if (isPressed) Color.parseColor("#5C9CFF") else Color.parseColor("#4285F4")
         canvas.drawCircle(cx, cy, radius, blueActionPaint)
 
         // Draw crisp white Search magnifying glass or Return arrow inside the blue circle
@@ -1350,9 +1478,9 @@ class RgbKeyboardView @JvmOverloads constructor(
         photoDstRect.set(0f, 0f, width.toFloat(), height.toFloat())
         canvas.drawBitmap(bmp, photoSrcRect, photoDstRect, photoPaint)
 
-        // Configurable dim overlay so keys & Touch Spark RGB glow pop cleanly over bright photos
-        val dimAlphaInt = (photoTheme.dimAlpha.coerceIn(0.15f, 0.85f) * 255f).toInt()
-        photoDimPaint.color = Color.argb(dimAlphaInt, 8, 10, 18)
+        // Configurable dim overlay so background photos shine cleanly through 0.22f frosted glass keys
+        val dimAlphaInt = (photoTheme.dimAlpha.coerceIn(0.05f, 0.80f) * 255f).toInt()
+        photoDimPaint.color = Color.argb(dimAlphaInt, 8, 10, 16)
         canvas.drawRect(photoDstRect, photoDimPaint)
         return true
     }
@@ -1621,12 +1749,11 @@ class RgbKeyboardView @JvmOverloads constructor(
             }
         }
         return when (key) {
-            "SPACE" -> 3.65f
-            "1234" -> 1.12f
-            "?123", "?১২৩", "?१२३", "?١٢٣", "?۱۲۳", "ABC" -> 1.38f
-            "ENTER" -> 1.44f
+            "SPACE" -> 4.35f
+            "?123", "?১২৩", "?१२३", "?١٢٣", "?۱۲۳", "ABC" -> 1.42f
+            "ENTER" -> 1.48f
             "SHIFT", "DEL", "=\\<" -> if (isFiveRow) 1.25f else 1.45f
-            "GLOBE", ",", "،", ".", "।", "۔" -> 0.88f
+            "GLOBE", ",", "،", ".", "।", "۔" -> 0.90f
             else -> 1.0f
         }
     }
@@ -1644,7 +1771,6 @@ class RgbKeyboardView @JvmOverloads constructor(
             key == "ABC" ||
             key == "=\\<" ||
             key == "ENTER" ||
-            key == "1234" ||
             key == "NUM_ALPHA" ||
             key == "NUM_SYM" ||
             key == "NUM_SPACE"
@@ -1883,7 +2009,9 @@ class RgbKeyboardView @JvmOverloads constructor(
         val cx = box.rect.centerX()
         val cy = box.rect.centerY()
         val activeTouchMode = settings.touchEffect
-        val allowTouchFx = vipVisualsEnabled
+        val allowTouchFx = vipVisualsEnabled && activeTouchMode != TouchTypingEffect.NONE
+        val fxPrimary = androidx.compose.ui.graphics.Color(activeTouchMode.primaryHex).toArgb()
+        val fxSecondary = androidx.compose.ui.graphics.Color(activeTouchMode.secondaryHex).toArgb()
 
         particleScope.launch {
             synchronized(particleStateLock) {
@@ -1895,15 +2023,17 @@ class RgbKeyboardView @JvmOverloads constructor(
                 activeGlows.add(newGlow)
 
                 if (allowTouchFx) {
-                    when (activeTouchMode) {
-                        TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> {
-                            shockwaves.add(ShockwaveRing(cx, cy, nowMs, box.neonColor))
+                    when (activeTouchMode.visualStyle) {
+                        TouchEffectVisualStyle.RADIAL_SHOCKWAVE,
+                        TouchEffectVisualStyle.GRAVITY_IMPLOSION -> {
+                            val ringCol = if (activeTouchMode == TouchTypingEffect.TOUCH_SHOCKWAVE_RING) box.neonColor else fxPrimary
+                            shockwaves.add(ShockwaveRing(cx, cy, nowMs, ringCol))
                         }
-                        TouchTypingEffect.TOUCH_MAGMA_EMBER -> {
+                        TouchEffectVisualStyle.RISING_EMBER -> {
                             for (e in 0 until 6) {
                                 val angle = (-Math.PI * 0.15) - (Math.PI * 0.70) * (e / 5.0)
                                 val speed = 42f + (e % 3) * 26f
-                                val col = if (e % 2 == 0) Color.parseColor("#FFD600") else Color.parseColor("#FF4500")
+                                val col = if (e % 2 == 0) fxSecondary else fxPrimary
                                 embers.add(
                                     EmberSpark(
                                         x = cx + ((e - 2.5f) * 4.5f * density),
@@ -1917,8 +2047,9 @@ class RgbKeyboardView @JvmOverloads constructor(
                                 )
                             }
                         }
-                        TouchTypingEffect.TOUCH_COMET_TRAIL -> {
-                            cometPoints.add(CometKeyPoint(cx, cy, nowMs, box.neonColor))
+                        TouchEffectVisualStyle.COMET_STREAK -> {
+                            val cometCol = if (activeTouchMode == TouchTypingEffect.TOUCH_COMET_TRAIL) box.neonColor else fxPrimary
+                            cometPoints.add(CometKeyPoint(cx, cy, nowMs, cometCol))
                             while (cometPoints.size > 4) {
                                 cometPoints.removeAt(0)
                             }
@@ -2158,12 +2289,6 @@ class RgbKeyboardView @JvmOverloads constructor(
                     }
                 }
                 if (shiftMode != ShiftMode.OFF) isKarBarActive = false
-                rebuildKeyBoxes()
-            }
-            key == "1234" -> {
-                isNumberPad = true
-                isSymbols = false
-                isKarBarActive = false
                 rebuildKeyBoxes()
             }
             key == "NUM_ALPHA" -> {

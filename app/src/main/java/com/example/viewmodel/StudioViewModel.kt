@@ -717,6 +717,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { repository.updateCornerRadius(radiusDp) }
     }
 
+    fun setShowKeyBorders(show: Boolean) {
+        viewModelScope.launch { repository.updateShowKeyBorders(show) }
+    }
+
     fun setIlluminatedLegends(enabled: Boolean) {
         viewModelScope.launch { repository.updateIlluminatedLegends(enabled) }
     }
@@ -761,7 +765,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         customBackgroundManager.selectPreset(presetId)
     }
 
-    /** On-demand download & apply for any of the 52 Combos or remote Cloud Themes (`filesDir/themes/`). */
+    /**
+     * On-demand download & apply for any of the 52 Combos or remote Cloud Themes (`filesDir/themes/`).
+     * Clean Isolation Rule: keeps Package Themes crisp without turning on Touch Effects unless the user enables one!
+     */
     fun downloadComboTheme(combo: ComboThemePreset, applyAfterDownload: Boolean = true) {
         if (combo.id in _downloadingThemeIds.value) return
         viewModelScope.launch {
@@ -771,18 +778,18 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             if (result.isSuccess && applyAfterDownload) {
                 customBackgroundManager.selectDownloadedCombo(combo.id)
                 repository.updateEffect(combo.effect)
-                repository.updateTouchEffect(combo.touchEffect)
+                repository.updateTouchEffect(TouchTypingEffect.NONE)
                 repository.updatePalette(combo.palette)
             }
         }
     }
 
-    /** 1-Tap Combo apply: applies locally cached `filesDir/themes/` artwork or downloads on demand. */
+    /** 1-Tap Combo apply: applies locally cached `filesDir/themes/` artwork or downloads on demand cleanly. */
     fun applyComboTheme(combo: ComboThemePreset) {
         if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
             viewModelScope.launch {
                 repository.updateEffect(combo.effect)
-                repository.updateTouchEffect(combo.touchEffect)
+                repository.updateTouchEffect(TouchTypingEffect.NONE)
                 repository.updatePalette(combo.palette)
             }
         } else {
@@ -815,11 +822,116 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Static HD Photo Banner — applies static banner (keeps user's active Touch Effect intact!). */
+    /** Static HD Photo Banner — applies static banner cleanly without unwanted overlapping touch effects. */
     fun applyStaticBannerOnly(presetId: String) {
         customBackgroundManager.selectPreset(presetId)
         viewModelScope.launch {
             repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            repository.updateTouchEffect(TouchTypingEffect.NONE)
+        }
+    }
+
+    /** Switches Typing Effect backdrop to pure Default Black cleanly while ensuring an active Touch Response is ready. */
+    fun applyTypingEffectDefaultBlack() {
+        customBackgroundManager.clearCustomPhoto()
+        viewModelScope.launch {
+            repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            if (settings.value.touchEffect == TouchTypingEffect.NONE) {
+                repository.updateTouchEffect(TouchTypingEffect.AI_NEURAL_PULSE)
+            }
+        }
+    }
+
+    // --- Side-by-Side Independent Layer Controls (Left Photos / Right Animations) ---
+
+    /** Sets Default Black backdrop ONLY, preserving any active Touch Response or Ambient Animation. */
+    fun applyDefaultBlackBackdropPreservingTouch() {
+        customBackgroundManager.clearCustomPhoto()
+        viewModelScope.launch {
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
+        }
+    }
+
+    /** Sets HD Banner Photo backdrop ONLY, preserving the user's active Touch Response. */
+    fun applyBannerPhotoPreservingTouch(presetId: String) {
+        customBackgroundManager.selectPreset(presetId)
+        viewModelScope.launch {
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
+        }
+    }
+
+    /** Downloads & applies a Theme Pack artwork as background photo ONLY, preserving active Touch Response. */
+    fun applyComboPhotoPreservingTouch(combo: ComboThemePreset) {
+        if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
+            viewModelScope.launch {
+                repository.updatePalette(combo.palette)
+                if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                }
+            }
+            return
+        }
+        if (combo.id in _downloadingThemeIds.value) return
+        viewModelScope.launch {
+            _downloadingThemeIds.update { it + combo.id }
+            val result = customBackgroundManager.downloadComboTheme(combo)
+            _downloadingThemeIds.update { it - combo.id }
+            if (result.isSuccess) {
+                customBackgroundManager.selectDownloadedCombo(combo.id)
+                repository.updatePalette(combo.palette)
+                if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                }
+            }
+        }
+    }
+
+    /** Turns OFF active Touch Response & Ambient RGB animations while preserving the active background photo. */
+    fun clearAnimationsPreservingBackdrop() {
+        viewModelScope.launch {
+            repository.updateTouchEffect(TouchTypingEffect.NONE)
+            repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+        }
+    }
+
+    /** Atomic 1-tap Apply from the Full Keyboard Theme Customizer Sheet (supports Key Borders toggle). */
+    fun applyThemeCustomizerSelection(
+        bannerPresetId: String?,
+        combo: ComboThemePreset?,
+        effect: RgbEffect,
+        touchEffect: TouchTypingEffect,
+        palette: RgbPalette,
+        showKeyBorders: Boolean,
+        clearPhotoToBlack: Boolean
+    ) {
+        viewModelScope.launch {
+            repository.updateShowKeyBorders(showKeyBorders)
+            repository.updateTouchEffect(touchEffect)
+            repository.updatePalette(palette)
+            when {
+                combo != null -> {
+                    if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
+                        repository.updateEffect(combo.effect)
+                    } else {
+                        downloadComboTheme(combo, applyAfterDownload = true)
+                    }
+                }
+                !bannerPresetId.isNullOrBlank() -> {
+                    customBackgroundManager.selectPreset(bannerPresetId)
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                }
+                clearPhotoToBlack -> {
+                    customBackgroundManager.clearCustomPhoto()
+                    repository.updateEffect(effect)
+                }
+                else -> {
+                    repository.updateEffect(effect)
+                }
+            }
         }
     }
 

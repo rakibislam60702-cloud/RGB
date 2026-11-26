@@ -159,7 +159,10 @@ class RgbKeyboardService : InputMethodService() {
     private var btnClipboard: TextView? = null
     private var btnStylishFonts: TextView? = null
     private var btnMic: ImageButton? = null
+    private var btnKeyboardSettings: TextView? = null
     private var btnAiHub: TextView? = null
+    private var isTypingWindowVisible: Boolean = false
+    private var lastKeyboardCallAcceptMs: Long = 0L
 
     private var currentSettings: KeyboardSettings = KeyboardSettings()
     private var currentPhotoTheme: CustomPhotoTheme = CustomPhotoTheme()
@@ -374,7 +377,17 @@ class RgbKeyboardService : InputMethodService() {
         btnClipboard = root.findViewById(R.id.btnClipboard)
         btnStylishFonts = root.findViewById(R.id.btnStylishFonts)
         btnMic = root.findViewById(R.id.btnMic)
+        btnKeyboardSettings = root.findViewById(R.id.btnKeyboardSettings)
         btnAiHub = root.findViewById(R.id.btnAiHub)
+
+        tvBrandSignature?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            handleOpenThemeCustomizer()
+        }
+        btnKeyboardSettings?.setOnClickListener {
+            feedbackEngine.triggerKeyFeedback(currentSettings, isModifier = true)
+            handleOpenSettings()
+        }
 
         clipboardPanel = root.findViewById(R.id.clipboardPanel)
         clipboardContainer = root.findViewById(R.id.clipboardContainer)
@@ -631,13 +644,19 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        isTypingWindowVisible = true
         clearBanglishBuffer(finishComposing = false)
         clipboardManager.captureCurrentPrimaryClip()
         // Keep DataStore activeLanguageId as single source of truth so Bangla ('bn') never reverts to English!
         keyboardView?.setActiveLanguage(currentSettings.activeLanguageId)
-        val inputClass = (info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS
+        val rawInputType = info?.inputType ?: 0
+        val inputClass = rawInputType and InputType.TYPE_MASK_CLASS
         val isNumericField = inputClass == InputType.TYPE_CLASS_NUMBER ||
-            inputClass == InputType.TYPE_CLASS_PHONE
+            inputClass == InputType.TYPE_CLASS_PHONE ||
+            inputClass == InputType.TYPE_CLASS_DATETIME
+        if (isNumericField && activeOverlay != OverlayMode.NONE) {
+            setOverlay(OverlayMode.NONE)
+        }
         keyboardView?.setNumberPadMode(isNumericField)
         val actionId = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         keyboardView?.setSearchAction(actionId == EditorInfo.IME_ACTION_SEARCH)
@@ -653,6 +672,7 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onWindowShown() {
         super.onWindowShown()
+        isTypingWindowVisible = true
         keyboardView?.resumeAnimations()
         registerCallStateListenerIfPermitted()
         updateCallBannerVisibility()
@@ -660,6 +680,7 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        isTypingWindowVisible = false
         keyboardView?.pauseAnimations()
         isEmojiBackspaceRepeating = false
         uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
@@ -695,6 +716,7 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        isTypingWindowVisible = false
         stopStickerPulseAnimation()
         keyboardView?.pauseAnimations()
         clearBanglishBuffer(finishComposing = true)
@@ -791,6 +813,7 @@ class RgbKeyboardService : InputMethodService() {
         btnClipboard = null
         btnStylishFonts = null
         btnMic = null
+        btnKeyboardSettings = null
         btnAiHub = null
     }
 
@@ -2640,6 +2663,15 @@ class RgbKeyboardService : InputMethodService() {
     private fun handleOpenSettings() {
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(MainActivity.EXTRA_OPEN_KEYBOARD_SETTINGS, true)
+        }
+        runCatching { startActivity(intent) }
+    }
+
+    private fun handleOpenThemeCustomizer() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(MainActivity.EXTRA_OPEN_THEME_CUSTOMIZER, true)
         }
         runCatching { startActivity(intent) }
     }
@@ -2739,11 +2771,22 @@ class RgbKeyboardService : InputMethodService() {
         }
     }
 
+    /**
+     * Strict Only-While-Typing Guard:
+     * Never shows call bar or opens keyboard when the user is on the Home screen / lock screen / outside an active editor.
+     */
+    private fun isActivelyTyping(): Boolean {
+        val editorInfo = currentInputEditorInfo ?: return false
+        if (currentInputConnection == null) return false
+        val inputClass = editorInfo.inputType and InputType.TYPE_MASK_CLASS
+        return isInputViewShown && isTypingWindowVisible && inputClass != InputType.TYPE_NULL
+    }
+
     private fun updateCallBannerVisibility() {
         val bar = callBannerBar ?: return
         uiHandler.removeCallbacks(callTimerRunnable)
 
-        val shouldShow = isInputViewShown &&
+        val shouldShow = isActivelyTyping() &&
             currentLicenseState.isCallBarUnlocked &&
             currentCallState != TelephonyManager.CALL_STATE_IDLE
 
@@ -2778,6 +2821,7 @@ class RgbKeyboardService : InputMethodService() {
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
     private fun answerIncomingCall() {
+        if (!isActivelyTyping()) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val granted = ContextCompat.checkSelfPermission(
             this,
@@ -2785,7 +2829,29 @@ class RgbKeyboardService : InputMethodService() {
         ) == PackageManager.PERMISSION_GRANTED
         if (!granted) return
         val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return
-        runCatching { telecomManager.acceptRingingCall() }
+        lastKeyboardCallAcceptMs = SystemClock.elapsedRealtime()
+        val accepted = runCatching { telecomManager.acceptRingingCall() }.isSuccess
+        if (accepted) {
+            // Immediately transition keyboard call bar to Active Timer and keep typing editor focused
+            currentCallState = TelephonyManager.CALL_STATE_OFFHOOK
+            if (callOffhookStartMs <= 0L) {
+                callOffhookStartMs = SystemClock.elapsedRealtime()
+            }
+            updateCallBannerVisibility()
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 240L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 620L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 1100L)
+        }
+    }
+
+    private fun ensureKeyboardStaysFocusedAfterCallAccept() {
+        val elapsedSinceAccept = SystemClock.elapsedRealtime() - lastKeyboardCallAcceptMs
+        if (elapsedSinceAccept > 1_800L) return
+        val editorInfo = currentInputEditorInfo ?: return
+        val inputClass = editorInfo.inputType and InputType.TYPE_MASK_CLASS
+        if (!isInputViewShown && currentInputConnection != null && inputClass != InputType.TYPE_NULL) {
+            runCatching { requestShowSelf(0) }
+        }
     }
 
     @SuppressLint("MissingPermission")

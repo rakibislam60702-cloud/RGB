@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.lerp
 import com.example.model.KeyboardSettings
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
+import com.example.model.TouchEffectVisualStyle
 import com.example.model.TouchTypingEffect
 import kotlin.math.PI
 import kotlin.math.abs
@@ -416,8 +417,8 @@ object RgbLightingEngine {
     }
 
     /**
-     * Layer 2 Preview Helper: Computes an animated simulated keypress effect color for any
-     * of the 7 TouchTypingEffects inside EffectsScreen mini-grid cards and LiveMiniDeckPreview.
+     * Layer 2 Preview Helper: Computes an animated simulated or live-tapped keypress effect color
+     * for NONE + all 56 AI & Physics TouchTypingEffects inside mini-keyboard previews & Theme Customizer.
      */
     fun computeTouchPreviewColor(
         touchEffect: TouchTypingEffect,
@@ -429,15 +430,25 @@ object RgbLightingEngine {
         cols: Int,
         timeSec: Float,
         palette: RgbPalette,
-        glowIntensity: Float
+        glowIntensity: Float,
+        explicitTap: Pair<Int, Int>? = null,
+        explicitTapAgeSec: Float? = null
     ): Color {
+        if (touchEffect == TouchTypingEffect.NONE || touchEffect.visualStyle == TouchEffectVisualStyle.NONE) {
+            return Color.Transparent
+        }
+
+        val primary = Color(touchEffect.primaryHex)
+        val secondary = Color(touchEffect.secondaryHex)
+
         val step = floor(timeSec * 2.1f).toInt()
-        val frac = (timeSec * 2.1f) - step
-        // Simulated typing path across the keyboard grid
+        val autoFrac = (timeSec * 2.1f) - step
         val path = listOf(
             1 to 2, 0 to 4, 2 to 6, 1 to 8, 0 to 1, 2 to 3, 1 to 5, 0 to 7
         )
-        val cur = path[abs(step) % path.size]
+        val usingExplicit = explicitTap != null && explicitTapAgeSec != null && explicitTapAgeSec in 0f..0.70f
+        val cur = if (usingExplicit) explicitTap!! else path[abs(step) % path.size]
+        val frac = if (usingExplicit) (explicitTapAgeSec!! / 0.70f).coerceIn(0f, 1f) else autoFrac
         val prev1 = path[abs(step - 1) % path.size]
         val prev2 = path[abs(step - 2) % path.size]
         val prev3 = path[abs(step - 3) % path.size]
@@ -447,75 +458,132 @@ object RgbLightingEngine {
         val targetNx = (curCol + 0.5f) / cols.coerceAtLeast(1)
         val targetNy = (curRow + 0.5f) / rows.coerceAtLeast(1)
         val fade = (1f - frac).coerceIn(0f, 1f)
+        val dr = abs(row - curRow)
+        val dc = abs(col - curCol)
 
-        return when (touchEffect) {
-            TouchTypingEffect.TOUCH_SPARK -> {
-                if (row == curRow && col == curCol) {
-                    val distinct = distinctNeonColorForKey("k$row$col", row * 17 + col * 31)
-                    lerp(distinct, Color.White, (fade * 0.3f)).copy(alpha = (0.35f + fade * 0.65f) * glowIntensity)
+        return when (touchEffect.visualStyle) {
+            TouchEffectVisualStyle.NONE -> Color.Transparent
+
+            TouchEffectVisualStyle.GLITCH_PULSE -> {
+                if (dr == 0 && dc == 0) {
+                    val distinct = if (touchEffect == TouchTypingEffect.TOUCH_SPARK) {
+                        distinctNeonColorForKey("k$row$col", row * 17 + col * 31)
+                    } else {
+                        lerp(primary, secondary, ((sin(timeSec * 24f) + 1f) * 0.5f))
+                    }
+                    lerp(distinct, Color.White, fade * 0.35f)
+                        .copy(alpha = (0.38f + fade * 0.62f) * glowIntensity)
+                } else if (touchEffect != TouchTypingEffect.TOUCH_SPARK && dr == 0 && dc == 1) {
+                    secondary.copy(alpha = (fade * 0.42f * glowIntensity).coerceIn(0f, 1f))
                 } else Color.Transparent
             }
 
-            TouchTypingEffect.TOUCH_ELECTRIC_CROSS -> {
-                val isCenter = row == curRow && col == curCol
-                val isCross = row == curRow || col == curCol
-                if (isCenter) {
-                    Color(0xFFFFFFFF).copy(alpha = (0.6f + fade * 0.4f) * glowIntensity)
-                } else if (isCross) {
-                    val dist = abs(row - curRow) + abs(col - curCol)
-                    val falloff = (1f - dist * 0.14f).coerceIn(0.25f, 1f)
-                    Color(0xFF00E5FF).copy(alpha = fade * falloff * glowIntensity)
-                } else Color.Transparent
-            }
-
-            TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> {
-                val dist = hypot((nx - targetNx) * 1.15f, (ny - targetNy) * 0.85f)
-                val radius = frac * 0.72f
-                val ring = exp(-((dist - radius) * (dist - radius)) / 0.016f)
-                val energy = (ring * (1f - frac * 0.75f)).coerceIn(0f, 1f)
-                if (energy > 0.06f) {
-                    samplePalette(palette, dist * 1.4f + timeSec * 0.4f)
-                        .copy(alpha = (energy * glowIntensity).coerceIn(0f, 1f))
-                } else Color.Transparent
-            }
-
-            TouchTypingEffect.TOUCH_MAGMA_EMBER -> {
-                if (row == curRow && col == curCol) {
-                    lerp(Color(0xFFFF3D00), Color(0xFFFFD600), fade).copy(alpha = (0.4f + fade * 0.6f) * glowIntensity)
-                } else if (col == curCol && row == (curRow - 1).coerceAtLeast(0)) {
-                    Color(0xFFFF9E00).copy(alpha = (fade * 0.72f * glowIntensity).coerceIn(0f, 1f))
-                } else Color.Transparent
-            }
-
-            TouchTypingEffect.TOUCH_FROST_FREEZE -> {
-                val dr = abs(row - curRow)
-                val dc = abs(col - curCol)
+            TouchEffectVisualStyle.NEURAL_SYNAPSE -> {
                 when {
-                    dr == 0 && dc == 0 -> Color(0xFFE0FBFC).copy(alpha = (0.5f + fade * 0.5f) * glowIntensity)
-                    dr <= 1 && dc <= 1 -> Color(0xFF38BDF8).copy(alpha = (fade * 0.78f * glowIntensity).coerceIn(0f, 1f))
+                    dr == 0 && dc == 0 -> lerp(primary, Color.White, 0.45f)
+                        .copy(alpha = (0.50f + fade * 0.50f) * glowIntensity)
+                    dr + dc == 1 -> primary.copy(alpha = (fade * 0.78f * glowIntensity).coerceIn(0f, 1f))
+                    dr + dc == 2 -> secondary.copy(alpha = (fade * 0.48f * glowIntensity).coerceIn(0f, 1f))
                     else -> Color.Transparent
                 }
             }
 
-            TouchTypingEffect.TOUCH_COMET_TRAIL -> {
+            TouchEffectVisualStyle.ELECTRIC_CROSS -> {
+                val isCenter = row == curRow && col == curCol
+                val isCross = row == curRow || col == curCol
+                if (isCenter) {
+                    lerp(primary, Color.White, 0.75f).copy(alpha = (0.62f + fade * 0.38f) * glowIntensity)
+                } else if (isCross) {
+                    val dist = dr + dc
+                    val falloff = (1f - dist * 0.13f).coerceIn(0.24f, 1f)
+                    lerp(primary, secondary, 0.22f).copy(alpha = fade * falloff * glowIntensity)
+                } else Color.Transparent
+            }
+
+            TouchEffectVisualStyle.RADIAL_SHOCKWAVE -> {
+                val dist = hypot((nx - targetNx) * 1.15f, (ny - targetNy) * 0.85f)
+                val radius = frac * 0.72f
+                val ring = exp(-((dist - radius) * (dist - radius)) / 0.017f)
+                val energy = (ring * (1f - frac * 0.70f)).coerceIn(0f, 1f)
+                val waveCol = if (touchEffect == TouchTypingEffect.SPECTRUM_RIPPLE) {
+                    samplePalette(palette, dist * 1.4f + timeSec * 0.4f)
+                } else {
+                    lerp(primary, secondary, (dist * 1.5f).coerceIn(0f, 1f))
+                }
+                if (energy > 0.06f) {
+                    waveCol.copy(alpha = (energy * glowIntensity).coerceIn(0f, 1f))
+                } else if (dr == 0 && dc == 0) {
+                    primary.copy(alpha = (fade * 0.65f * glowIntensity).coerceIn(0f, 1f))
+                } else Color.Transparent
+            }
+
+            TouchEffectVisualStyle.RISING_EMBER -> {
+                if (dr == 0 && dc == 0) {
+                    lerp(primary, secondary, fade).copy(alpha = (0.42f + fade * 0.58f) * glowIntensity)
+                } else if (col == curCol && row == (curRow - 1).coerceAtLeast(0)) {
+                    secondary.copy(alpha = (fade * 0.75f * glowIntensity).coerceIn(0f, 1f))
+                } else if (dc == 1 && row == (curRow - 1).coerceAtLeast(0)) {
+                    primary.copy(alpha = (fade * 0.36f * glowIntensity).coerceIn(0f, 1f))
+                } else Color.Transparent
+            }
+
+            TouchEffectVisualStyle.FROST_CRYSTAL -> {
+                when {
+                    dr == 0 && dc == 0 -> lerp(primary, Color.White, 0.45f)
+                        .copy(alpha = (0.52f + fade * 0.48f) * glowIntensity)
+                    dr <= 1 && dc <= 1 -> secondary.copy(alpha = (fade * 0.78f * glowIntensity).coerceIn(0f, 1f))
+                    else -> Color.Transparent
+                }
+            }
+
+            TouchEffectVisualStyle.COMET_STREAK -> {
                 val trail = listOf(cur to 1.0f, prev1 to 0.72f, prev2 to 0.48f, prev3 to 0.28f)
                 val match = trail.firstOrNull { (pos, _) ->
                     pos.first.coerceIn(0, rows - 1) == row && pos.second.coerceIn(0, cols - 1) == col
                 }
                 if (match != null) {
-                    val weight = match.second
-                    lerp(Color(0xFFFF2A85), Color(0xFF00F5D4), weight)
+                    val weight = match.second * if (usingExplicit && match.first == cur) (0.4f + fade * 0.6f) else 1f
+                    lerp(primary, secondary, weight)
                         .copy(alpha = (weight * glowIntensity).coerceIn(0f, 1f))
                 } else Color.Transparent
             }
 
-            TouchTypingEffect.TOUCH_DIAMOND_FLASH -> {
-                if (row == curRow && col == curCol) {
-                    lerp(Color(0xFF00E5FF), Color.White, 0.78f)
+            TouchEffectVisualStyle.PRISM_SHATTER -> {
+                when {
+                    dr == 0 && dc == 0 -> lerp(primary, Color.White, 0.72f)
+                        .copy(alpha = (0.48f + fade * 0.52f) * glowIntensity)
+                    (dr == 1 && dc == 1) || (dr + dc == 1) -> secondary
+                        .copy(alpha = (fade * 0.55f * glowIntensity).coerceIn(0f, 1f))
+                    else -> Color.Transparent
+                }
+            }
+
+            TouchEffectVisualStyle.GRAVITY_IMPLOSION -> {
+                val dist = hypot((nx - targetNx) * 1.15f, (ny - targetNy) * 0.85f)
+                val radius = (1f - frac) * 0.62f
+                val ring = exp(-((dist - radius) * (dist - radius)) / 0.018f)
+                val energy = (ring * (0.45f + fade * 0.55f)).coerceIn(0f, 1f)
+                when {
+                    dr == 0 && dc == 0 -> lerp(secondary, Color.White, 0.35f)
+                        .copy(alpha = (0.42f + fade * 0.58f) * glowIntensity)
+                    energy > 0.08f -> lerp(primary, secondary, 1f - frac)
+                        .copy(alpha = (energy * glowIntensity).coerceIn(0f, 1f))
+                    else -> Color.Transparent
+                }
+            }
+
+            TouchEffectVisualStyle.CHRONO_ORBIT -> {
+                when {
+                    dr == 0 && dc == 0 -> lerp(primary, Color.White, 0.3f)
                         .copy(alpha = (0.45f + fade * 0.55f) * glowIntensity)
-                } else if ((abs(row - curRow) == 1 && col == curCol) || (row == curRow && abs(col - curCol) == 1)) {
-                    Color(0xFFA855F7).copy(alpha = (fade * 0.45f * glowIntensity).coerceIn(0f, 1f))
-                } else Color.Transparent
+                    dr <= 1 && dc <= 1 -> {
+                        val angle = atan2((row - curRow).toDouble(), (col - curCol).toDouble()).toFloat()
+                        val orbit = ((sin(angle * 2f - timeSec * 8f) + 1f) * 0.5f)
+                        lerp(primary, secondary, orbit)
+                            .copy(alpha = ((0.35f + orbit * 0.65f) * fade * glowIntensity).coerceIn(0f, 1f))
+                    }
+                    else -> Color.Transparent
+                }
             }
         }
     }

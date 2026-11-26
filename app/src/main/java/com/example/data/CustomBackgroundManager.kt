@@ -1162,9 +1162,9 @@ class CustomBackgroundManager private constructor(
         private const val KEY_BG_UPDATED_AT = "custom_bg_updated_at"
         private const val BG_FILE_NAME = "custom_bg.jpg"
         private const val THEMES_DIR_NAME = "themes"
-        const val DEFAULT_DIM_ALPHA = 0.44f
-        const val MIN_DIM_ALPHA = 0.15f
-        const val MAX_DIM_ALPHA = 0.85f
+        const val DEFAULT_DIM_ALPHA = 0.24f
+        const val MIN_DIM_ALPHA = 0.05f
+        const val MAX_DIM_ALPHA = 0.80f
 
         @Volatile
         private var instance: CustomBackgroundManager? = null

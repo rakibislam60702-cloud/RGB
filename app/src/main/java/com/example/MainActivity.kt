@@ -81,6 +81,7 @@ import com.example.ui.components.FinalLifetimeVipAutoBanner
 import com.example.ui.components.LifetimeUnlockScreen
 import com.example.ui.components.SilentFeatureTourOverlay
 import com.example.ui.components.StartupSetupStepper
+import com.example.ui.components.StudioEffectsCategory
 import com.example.ui.components.UnlockPaywallFocus
 import com.example.ui.screens.EffectsScreen
 import com.example.ui.screens.HardwareScreen
@@ -144,6 +145,8 @@ class MainActivity : ComponentActivity() {
 
     private var windowFocusTick by mutableIntStateOf(0)
     private var openUnlockTrigger by mutableIntStateOf(0)
+    private var openSettingsTrigger by mutableIntStateOf(0)
+    private var openThemeCustomizerTrigger by mutableIntStateOf(0)
 
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -162,7 +165,9 @@ class MainActivity : ComponentActivity() {
             ProRgbKeyboardTheme {
                 ProRgbKeyboardApp(
                     windowFocusTick = windowFocusTick,
-                    openUnlockTrigger = openUnlockTrigger
+                    openUnlockTrigger = openUnlockTrigger,
+                    openSettingsTrigger = openSettingsTrigger,
+                    openThemeCustomizerTrigger = openThemeCustomizerTrigger
                 )
             }
         }
@@ -196,11 +201,21 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(EXTRA_OPEN_UNLOCK_SCREEN)
             openUnlockTrigger++
         }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD_SETTINGS, false) == true) {
+            intent.removeExtra(EXTRA_OPEN_KEYBOARD_SETTINGS)
+            openSettingsTrigger++
+        }
+        if (intent?.getBooleanExtra(EXTRA_OPEN_THEME_CUSTOMIZER, false) == true) {
+            intent.removeExtra(EXTRA_OPEN_THEME_CUSTOMIZER)
+            openThemeCustomizerTrigger++
+        }
     }
 
     companion object {
         const val EXTRA_REQUEST_AUDIO_PERMISSION = "extra_request_audio_permission"
         const val EXTRA_OPEN_UNLOCK_SCREEN = "extra_open_unlock_screen"
+        const val EXTRA_OPEN_KEYBOARD_SETTINGS = "extra_open_keyboard_settings"
+        const val EXTRA_OPEN_THEME_CUSTOMIZER = "extra_open_theme_customizer"
         private const val PREFS_PERMISSIONS = "rakib_permissions_prefs"
         private const val KEY_MIC_PROMPTED_ONCE = "mic_permission_prompted_once"
     }
@@ -210,6 +225,8 @@ class MainActivity : ComponentActivity() {
 fun ProRgbKeyboardApp(
     windowFocusTick: Int = 0,
     openUnlockTrigger: Int = 0,
+    openSettingsTrigger: Int = 0,
+    openThemeCustomizerTrigger: Int = 0,
     viewModel: StudioViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -234,6 +251,8 @@ fun ProRgbKeyboardApp(
     var activeTourTarget by remember { mutableStateOf<FeatureTourTarget?>(null) }
 
     var currentTab by rememberSaveable { mutableStateOf(StudioTab.STUDIO) }
+    var selectedEffectsCategory by rememberSaveable { mutableStateOf(StudioEffectsCategory.TOUCH_RESPONSES) }
+    var effectsCategoryJumpTrigger by remember { mutableIntStateOf(0) }
     var showVipUnlockModal by rememberSaveable { mutableStateOf(false) }
     var unlockModalFocus by rememberSaveable { mutableStateOf(UnlockPaywallFocus.VIP_FEATURES) }
 
@@ -254,6 +273,18 @@ fun ProRgbKeyboardApp(
             if (!licenseState.isAllUnlocked) {
                 openVipModal(UnlockPaywallFocus.VIP_FEATURES)
             }
+        }
+    }
+
+    LaunchedEffect(openSettingsTrigger) {
+        if (openSettingsTrigger > 0) {
+            currentTab = StudioTab.SETTINGS
+        }
+    }
+
+    LaunchedEffect(openThemeCustomizerTrigger) {
+        if (openThemeCustomizerTrigger > 0) {
+            currentTab = StudioTab.EFFECTS
         }
     }
 
@@ -385,6 +416,18 @@ fun ProRgbKeyboardApp(
                             onOpenBanglishVip = { openVipModal(UnlockPaywallFocus.BANGLISH) },
                             onOpenHardwareSettings = { currentTab = StudioTab.HARDWARE },
                             onOpenLanguagesTab = { currentTab = StudioTab.LANGUAGES },
+                            onOpenThemeCustomizer = { currentTab = StudioTab.EFFECTS },
+                            selectedEffectsCategory = selectedEffectsCategory,
+                            effectsCategoryJumpTrigger = effectsCategoryJumpTrigger,
+                            onSelectEffectsCategory = { cat ->
+                                selectedEffectsCategory = cat
+                                effectsCategoryJumpTrigger++
+                            },
+                            onOpenEffectsCategoryFromHome = { cat ->
+                                selectedEffectsCategory = cat
+                                effectsCategoryJumpTrigger++
+                                currentTab = StudioTab.EFFECTS
+                            },
                             isFeatureTourActive = showFeatureTour,
                             activeTourTarget = activeTourTarget,
                             featureTourCoordinates = featureTourCoordinates
@@ -466,6 +509,18 @@ fun ProRgbKeyboardApp(
                             onOpenBanglishVip = { openVipModal(UnlockPaywallFocus.BANGLISH) },
                             onOpenHardwareSettings = { currentTab = StudioTab.HARDWARE },
                             onOpenLanguagesTab = { currentTab = StudioTab.LANGUAGES },
+                            onOpenThemeCustomizer = { currentTab = StudioTab.EFFECTS },
+                            selectedEffectsCategory = selectedEffectsCategory,
+                            effectsCategoryJumpTrigger = effectsCategoryJumpTrigger,
+                            onSelectEffectsCategory = { cat ->
+                                selectedEffectsCategory = cat
+                                effectsCategoryJumpTrigger++
+                            },
+                            onOpenEffectsCategoryFromHome = { cat ->
+                                selectedEffectsCategory = cat
+                                effectsCategoryJumpTrigger++
+                                currentTab = StudioTab.EFFECTS
+                            },
                             isFeatureTourActive = showFeatureTour,
                             activeTourTarget = activeTourTarget,
                             featureTourCoordinates = featureTourCoordinates
@@ -537,6 +592,11 @@ private fun TabContent(
     onOpenBanglishVip: () -> Unit,
     onOpenHardwareSettings: () -> Unit,
     onOpenLanguagesTab: () -> Unit,
+    onOpenThemeCustomizer: () -> Unit,
+    selectedEffectsCategory: StudioEffectsCategory,
+    effectsCategoryJumpTrigger: Int,
+    onSelectEffectsCategory: (StudioEffectsCategory) -> Unit,
+    onOpenEffectsCategoryFromHome: (StudioEffectsCategory) -> Unit,
     isFeatureTourActive: Boolean,
     activeTourTarget: FeatureTourTarget?,
     featureTourCoordinates: FeatureTourCoordinates
@@ -583,6 +643,7 @@ private fun TabContent(
                 onKeyFeedback = viewModel::triggerKeyFeedback,
                 onOpenHardwareSettings = onOpenHardwareSettings,
                 onOpenLanguagesTab = onOpenLanguagesTab,
+                onOpenEffectsCategory = onOpenEffectsCategoryFromHome,
                 isFeatureTourActive = isFeatureTourActive,
                 activeTourTarget = activeTourTarget,
                 featureTourCoordinates = featureTourCoordinates
@@ -611,14 +672,19 @@ private fun TabContent(
                 licenseState = licenseState,
                 downloadedThemeIds = downloadedThemeIds,
                 downloadingThemeIds = downloadingThemeIds,
+                selectedCategory = selectedEffectsCategory,
+                categoryJumpTrigger = effectsCategoryJumpTrigger,
+                onSelectCategory = onSelectEffectsCategory,
                 onApplyVipToKeyboard = onOpenUnlockScreen,
                 onApplyComboTheme = viewModel::applyComboTheme,
                 onDownloadComboTheme = { combo -> viewModel.downloadComboTheme(combo, applyAfterDownload = true) },
-                onApplyAnimationOnly = viewModel::applyAnimationOnly,
+                onApplyDefaultBlackPreservingTouch = viewModel::applyDefaultBlackBackdropPreservingTouch,
+                onApplyBannerPhotoPreservingTouch = viewModel::applyBannerPhotoPreservingTouch,
+                onApplyComboPhotoPreservingTouch = viewModel::applyComboPhotoPreservingTouch,
+                onClearAnimationsPreservingBackdrop = viewModel::clearAnimationsPreservingBackdrop,
                 onSelectTouchEffect = viewModel::setTouchEffect,
                 onApplyCloudAnimation = viewModel::applyCloudAnimation,
-                onApplyStaticBannerOnly = viewModel::applyStaticBannerOnly,
-                onSelectBannerPreset = viewModel::selectBannerPreset,
+                onApplyThemeCustomizerSelection = viewModel::applyThemeCustomizerSelection,
                 onPickCustomPhoto = viewModel::saveCustomPhoto,
                 onPhotoDimChange = viewModel::setCustomPhotoDim,
                 onRemoveCustomPhoto = viewModel::clearCustomPhoto,
@@ -628,6 +694,7 @@ private fun TabContent(
                 onSpeedChange = viewModel::setAnimationSpeed,
                 onGlowChange = viewModel::setGlowIntensity,
                 onCornerRadiusChange = viewModel::setCornerRadius,
+                onShowKeyBordersChange = viewModel::setShowKeyBorders,
                 onIlluminatedLegendsChange = viewModel::setIlluminatedLegends,
                 onChassisAuraChange = viewModel::setChassisAura
             )
@@ -665,6 +732,8 @@ private fun TabContent(
                 onSelectSwitchSound = viewModel::setSwitchSound,
                 onHapticEnabledChange = viewModel::setHapticEnabled,
                 onSmartSuggestionsChange = viewModel::setSmartSuggestionsEnabled,
+                onShowKeyBordersChange = viewModel::setShowKeyBorders,
+                onOpenThemeCustomizer = onOpenThemeCustomizer,
                 onReplayFeatureGuide = viewModel::replayFeatureTour,
                 onOpenUnlockScreen = onOpenUnlockScreen
             )
