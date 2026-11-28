@@ -45,43 +45,52 @@ data class LicenseUiState(
     val banglishTotalDurationSeconds: Long = TrialLicenseManager.TRIAL_DURATION_SECONDS,
     val vipStatusCode: String = TrialLicenseManager.STATUS_TRIAL,
     val isTrialExpired: Boolean = false,
+    val remainingMillis: Long = TrialLicenseManager.TRIAL_DURATION_MS,
     val remainingSeconds: Long = TrialLicenseManager.TRIAL_DURATION_SECONDS,
+    val trialStartedAtMs: Long = 0L,
+    val trialExpiresAtMs: Long = 0L,
     val deviceId: String = "RK-00000000",
     val unlockMethod: String? = null,
     val unlockedTxnId: String? = null,
+    val isDeviceBlocked: Boolean = false,
     val adminConfig: RemoteAdminConfig = RemoteAdminConfig(),
     val deviceOverrides: DeviceRemoteOverrides = DeviceRemoteOverrides(),
     val pendingPayment: PendingPaymentSnapshot? = null
 ) {
     /** True when admin unlocked everything globally (`globalAllFree`) or for this friend (`adminAllFree` / `adminFreeVip`). */
     val isGlobalOrAdminAllFree: Boolean
-        get() = isGlobalAllFree || isAdminGrantedVip || deviceOverrides.hasFullAdminFreeAccess
+        get() = !isDeviceBlocked && (isGlobalAllFree || isAdminGrantedVip || deviceOverrides.hasFullAdminFreeAccess)
+
+    /** True ONLY when this device genuinely holds Lifetime VIP, Global All Free, or device adminAllFree. */
+    val isTrueLifetimeDisplay: Boolean
+        get() = !isDeviceBlocked && (isLifetimeUnlocked || isGlobalAllFree || deviceOverrides.adminAllFree)
 
     /** True when user purchased Card 1 (RGB & VIP Features) as Lifetime or active timed pass. */
     val isVipFeaturesPaidActive: Boolean
-        get() = isLifetimeUnlocked || isMonthlyActive || isWeeklyActive
+        get() = !isDeviceBlocked && (isLifetimeUnlocked || isMonthlyActive || isWeeklyActive)
 
     /** True when user purchased Card 2 (Romanized Bengali) as Lifetime or active timed pass. */
     val isBanglishPaidActive: Boolean
-        get() = isBanglishLifetimeUnlocked || banglishRemainingSeconds > 0L
+        get() = !isDeviceBlocked && (isBanglishLifetimeUnlocked || banglishRemainingSeconds > 0L)
 
     /** True when both Card 1 and Card 2 are permanently unlocked (or global/admin all-free is active). */
     val isAllUnlocked: Boolean
-        get() = isGlobalOrAdminAllFree || (isLifetimeUnlocked && isBanglishLifetimeUnlocked)
+        get() = !isDeviceBlocked && (isGlobalOrAdminAllFree || (isLifetimeUnlocked && isBanglishLifetimeUnlocked))
 
     /** True when user holds Paid Card 1 VIP or Global/Admin All-Free. */
     val isPaidOrAdminVip: Boolean
-        get() = isGlobalOrAdminAllFree || isVipFeaturesPaidActive
+        get() = !isDeviceBlocked && (isGlobalOrAdminAllFree || isVipFeaturesPaidActive)
 
     /** True during the active trial window OR with Paid VIP / Global or Admin All-Free. */
     val isVipActive: Boolean
-        get() = isPaidOrAdminVip || !isTrialExpired
+        get() = !isDeviceBlocked && (isPaidOrAdminVip || !isTrialExpired)
 
     /** True after trial ends without active Card 1 VIP: keyboard defaults to Normal / Classic Black (No RGB). */
     val isFreeStandardMode: Boolean
-        get() = !isPaidOrAdminVip && isTrialExpired
+        get() = isDeviceBlocked || (!isPaidOrAdminVip && isTrialExpired)
 
     private fun resolveVipFeatureAccess(deviceOverride: Boolean?, globalFree: Boolean): Boolean {
+        if (isDeviceBlocked) return false
         if (deviceOverride != null) return deviceOverride
         if (isGlobalOrAdminAllFree) return true
         return isVipFeaturesPaidActive || !isTrialExpired || globalFree
@@ -97,6 +106,7 @@ data class LicenseUiState(
      */
     fun isThemeItemUnlocked(themeId: String, isPermanentlyFree: Boolean = false): Boolean {
         if (isPermanentlyFree) return true
+        if (isDeviceBlocked) return false
         if (isRgbThemesUnlocked) return true
         return themeId.isNotBlank() && adminConfig.freeThemeIds.any { it.equals(themeId, ignoreCase = true) }
     }
@@ -104,6 +114,7 @@ data class LicenseUiState(
     /** Independent Card 2 unlock check for Romanized Bengali (BN-EN): Card 1 VIP purchase excludes Banglish. */
     val isBanglishUnlocked: Boolean
         get() {
+            if (isDeviceBlocked) return false
             val deviceOverride = deviceOverrides.allowedFeatures.banglish
             if (deviceOverride != null) return deviceOverride
             if (isGlobalOrAdminAllFree) return true
@@ -127,7 +138,7 @@ data class LicenseUiState(
         get() = when {
             isGlobalOrAdminAllFree || isBanglishLifetimeUnlocked -> 0L
             banglishRemainingSeconds > 0L -> banglishRemainingSeconds
-            !isTrialExpired -> remainingSeconds
+            !isTrialExpired -> clampedRemainingSeconds
             else -> 0L
         }
 
@@ -141,7 +152,7 @@ data class LicenseUiState(
             }
             !isTrialExpired -> {
                 val totalTrialSec = (adminConfig.trialDurationMs / 1000L).coerceAtLeast(1L)
-                (remainingSeconds.toFloat() / totalTrialSec.toFloat()).coerceIn(0.04f, 1f)
+                (clampedRemainingSeconds.toFloat() / totalTrialSec.toFloat()).coerceIn(0.04f, 1f)
             }
             else -> 0f
         }
@@ -166,16 +177,49 @@ data class LicenseUiState(
             else -> "০ দিন ০ ঘণ্টা ০ মি. • মেয়াদ শেষ"
         }
 
+    val effectiveTrialDays: Int
+        get() = (if (adminConfig.freeTrialDays > 0) adminConfig.freeTrialDays else RemoteAdminConfig.DEFAULT_FREE_TRIAL_DAYS)
+            .coerceIn(1, 365)
+
+    val maxTrialMillis: Long
+        get() = effectiveTrialDays.toLong() * 86_400_000L
+
+    /**
+     * Strictly clamps remaining time to `0..(trialDays * 86_400_000L)` whenever
+     * `lifetime != true && globalAllFree != true && adminAllFree != true`.
+     */
+    val clampedRemainingMillis: Long
+        get() {
+            if (isDeviceBlocked || isLifetimeUnlocked || isGlobalAllFree || deviceOverrides.adminAllFree) {
+                return 0L
+            }
+            val secBoundMs = remainingSeconds.coerceIn(0L, 3650L * 86_400L) * 1000L
+            val candidateMs = if (remainingMillis == TrialLicenseManager.TRIAL_DURATION_MS &&
+                remainingSeconds != TrialLicenseManager.TRIAL_DURATION_SECONDS
+            ) {
+                secBoundMs
+            } else {
+                minOf(remainingMillis.coerceAtLeast(0L), secBoundMs)
+            }
+            return candidateMs.coerceIn(0L, maxTrialMillis)
+        }
+
+    val clampedRemainingSeconds: Long
+        get() {
+            val ms = clampedRemainingMillis
+            return if (ms <= 0L) 0L else (ms + 999L) / 1000L
+        }
+
     /** Days, Hours, Minutes strictly — NO seconds anywhere. */
     val remainingDays: Long
-        get() = (remainingSeconds.coerceAtLeast(0L)) / 86_400L
+        get() = clampedRemainingSeconds / 86_400L
 
     val remainingHours: Long
-        get() = (remainingSeconds.coerceAtLeast(0L) % 86_400L) / 3_600L
+        get() = (clampedRemainingSeconds % 86_400L) / 3_600L
 
     val remainingMinutes: Long
         get() {
-            val clamped = remainingSeconds.coerceAtLeast(0L)
+            val clamped = clampedRemainingSeconds
             if (clamped <= 0L) return 0L
             val rawMins = (clamped % 3_600L) / 60L
             return if (remainingDays == 0L && remainingHours == 0L && rawMins == 0L) 1L else rawMins
@@ -183,27 +227,27 @@ data class LicenseUiState(
 
     /** Exact Days, Hours & Minutes format ONLY (NO seconds): e.g., "6d 23h 59m", "0d 0h 0m" at expiry. */
     val formattedCompactEnglish: String
-        get() = if (isTrialExpired && !isPaidOrAdminVip) {
+        get() = if (clampedRemainingMillis <= 0L && !isPaidOrAdminVip) {
             "0d 0h 0m"
         } else {
             "${remainingDays}d ${remainingHours}h ${remainingMinutes}m"
         }
 
-    /** Flagship top-bar pill text reflecting Global Free, Admin VIP, Lifetime VIP, Timed VIP, Trial, or Expired. */
+    /** Flagship top-bar pill text reflecting Blocked, Global Free, Admin VIP, Lifetime VIP, Timed VIP, Trial, or Expired. */
     val formattedVipPillText: String
         get() = when {
+            isDeviceBlocked -> "🔒 BLOCKED"
             isGlobalAllFree -> "👑 ALL FREE VIP"
             isAdminGrantedVip || deviceOverrides.hasFullAdminFreeAccess -> "👑 ADMIN VIP"
             isLifetimeUnlocked -> "👑 LIFETIME VIP"
-            isMonthlyActive || isWeeklyActive -> "👑 VIP • $formattedCompactEnglish"
-            isTrialExpired -> "🔒 0d 0h 0m · VIP"
+            clampedRemainingMillis <= 0L -> "🔒 0d 0h 0m · VIP"
             else -> "👑 VIP • $formattedCompactEnglish"
         }
 
     /** Bengali countdown strictly in Days, Hours & Minutes ONLY (NO seconds). */
     val formattedRemainingBangla: String
         get() {
-            if (isTrialExpired && !isPaidOrAdminVip) {
+            if (clampedRemainingMillis <= 0L && !isPaidOrAdminVip) {
                 return "০ দিন ০ ঘণ্টা ০ মি."
             }
             return "${toBengaliDigits(remainingDays)} দিন ${toBengaliDigits(remainingHours)} ঘণ্টা ${toBengaliDigits(remainingMinutes)} মি."
@@ -268,6 +312,10 @@ class TrialLicenseManager private constructor(
     private val context: Context
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val hadLocalPriorInstallOnBoot: Boolean =
+        prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS) ||
+            prefs.contains(KEY_FIRST_LAUNCH_WALL_MS) ||
+            prefs.getInt(KEY_TRIAL_POLICY_VERSION, 0) > 0
     private val rawAndroidId: String = readHardwareAndroidId(context)
     private val deviceModel: String = Build.MODEL.orEmpty().trim().ifBlank { "UNKNOWN_MODEL" }
 
@@ -281,6 +329,11 @@ class TrialLicenseManager private constructor(
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val isInternalPrefWrite = AtomicBoolean(false)
     private val isStorageSyncRunning = AtomicBoolean(false)
+    private val hasReceivedDeviceSnapshotFromServer = AtomicBoolean(false)
+    private val serverHasEstablishedFirstInstall = AtomicBoolean(false)
+    private val hasSyncedFullDeviceRecord = AtomicBoolean(false)
+    private val reinstallRecordedThisSession = AtomicBoolean(false)
+    private val rollbackRecordedThisSession = AtomicBoolean(false)
 
     @Volatile
     private var lastTrialPersistMs: Long = 0L
@@ -295,12 +348,28 @@ class TrialLicenseManager private constructor(
     private var lastSyncedVipStatus: String = ""
 
     @Volatile
+    private var lastLocalPurchaseAtMs: Long = 0L
+
+    @Volatile
     private var latestPendingPayment: PendingPaymentSnapshot? = null
 
     @Volatile
     private var cachedCustomBanglishPlans: List<BanglishPlanOption> = emptyList()
 
+    @Volatile
+    private var cachedFreeThemeIds: Set<String> = emptySet()
+
+    @Volatile
+    private var cachedCloudThemes: List<CloudThemeConfig> = emptyList()
+
+    @Volatile
+    private var cachedCloudAnimations: List<CloudAnimationConfig> = emptyList()
+
     private val firebaseRemoteManager = FirebaseRemoteManager.getInstance(context)
+    val isFirebaseConnected: StateFlow<Boolean> = firebaseRemoteManager.isConnected
+    val lastFirebaseSyncTimestampMs: StateFlow<Long> = firebaseRemoteManager.lastSyncTimestampMs
+
+    fun getAppVersionLabel(): String = firebaseRemoteManager.getAppVersionLabel()
 
     private val _licenseState = MutableStateFlow(computeFastStateFromPrefsOnly())
     val licenseState: StateFlow<LicenseUiState> = _licenseState.asStateFlow()
@@ -318,6 +387,7 @@ class TrialLicenseManager private constructor(
             key == KEY_ADMIN_GRANTED_VIP ||
             key == KEY_ADMIN_ALL_FREE_DEVICE ||
             key == KEY_ADMIN_GLOBAL_ALL_FREE ||
+            key == KEY_DEVICE_BLOCKED ||
             key == KEY_DEVICE_CUSTOM_EXPIRY_MS ||
             key == KEY_VIP_EXPIRY_TIMESTAMP_MS ||
             key == KEY_ACTIVE_SUB_PLAN ||
@@ -325,6 +395,10 @@ class TrialLicenseManager private constructor(
             key == KEY_UNLOCK_TXN_ID ||
             key == KEY_UNLOCK_METHOD ||
             key == KEY_FIRST_INSTALL_TIMESTAMP_MS ||
+            key == KEY_MAX_SEEN_ELAPSED_MS ||
+            key == KEY_REINSTALL_DETECTED ||
+            key == KEY_CLOCK_ROLLBACK_DETECTED ||
+            key == KEY_LOCAL_TAMPER_DETECTED ||
             key == KEY_ADMIN_FREE_TRIAL_DAYS ||
             key == KEY_ADMIN_VIP_PRICE ||
             key == KEY_ADMIN_VIP_DURATION_DAYS ||
@@ -335,8 +409,10 @@ class TrialLicenseManager private constructor(
             key == KEY_ADMIN_BANGLISH_DAILY_PRICE ||
             key == KEY_ADMIN_BANGLISH_WEEKLY_PRICE ||
             key == KEY_ADMIN_BANGLISH_MONTHLY_PRICE ||
+            key == KEY_ADMIN_FREE_THEME_IDS_CSV ||
             key?.startsWith("admin_free_") == true ||
             key?.startsWith("admin_banner") == true ||
+            key?.startsWith("admin_offer_") == true ||
             key?.startsWith("device_allow_") == true
         ) {
             if (!verifyStoredPrivilegeHmac(allowBootstrap = false)) {
@@ -353,6 +429,7 @@ class TrialLicenseManager private constructor(
         }
         migrateLegacyBannerTitleAndCleanState()
         ensureLocalTrialSeededFast()
+        sanitizeCorruptFutureExpiryPrefs()
         sealPrivilegePrefsHmac()
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         val initial = computeFastStateFromPrefsOnly()
@@ -365,6 +442,23 @@ class TrialLicenseManager private constructor(
         )
         syncDeviceToFirebase(state = initial, force = true)
         syncStorageInBackground(forcePersistToDocuments = true)
+    }
+
+    /**
+     * Immediately ensures Firebase listeners are attached and writes/updates `/devices/{RK-ID}`
+     * on app launch or keyboard service start.
+     */
+    fun syncNowOnLaunchOrServiceStart(): LicenseUiState {
+        firebaseRemoteManager.start(
+            deviceId = deviceId,
+            onAdminConfigChanged = { remoteCfg -> applyRemoteAdminConfig(remoteCfg) },
+            onDeviceSnapshotChanged = { snapshot -> applyRemoteDeviceSnapshot(snapshot) },
+            onPendingPaymentChanged = { pending -> handlePendingPaymentSnapshot(pending) }
+        )
+        val current = computeFastStateFromPrefsOnly()
+        _licenseState.value = current
+        syncDeviceToFirebase(state = current, force = true)
+        return current
     }
 
     /**
@@ -387,7 +481,10 @@ class TrialLicenseManager private constructor(
         return state
     }
 
-    private fun currentServerOrUtcMs(): Long = firebaseRemoteManager.serverNowMs()
+    private fun currentServerOrUtcMs(): Long {
+        val server = firebaseRemoteManager.serverNowMs()
+        return FirebaseRemoteManager.normalizeEpochMs(server).takeIf { it > 0L } ?: System.currentTimeMillis()
+    }
 
     /**
      * Reconciles `Documents/.ai_keyboard_trial.dat` & auto-restores `Documents/.ai_keyboard_vip.lic`
@@ -412,6 +509,9 @@ class TrialLicenseManager private constructor(
 
     private fun applyRemoteAdminConfig(config: RemoteAdminConfig) {
         cachedCustomBanglishPlans = config.banglishCustomPlans
+        cachedFreeThemeIds = config.freeThemeIds
+        cachedCloudThemes = config.cloudThemes
+        cachedCloudAnimations = config.cloudAnimations
         editPrefsSafely {
             putInt(KEY_ADMIN_FREE_TRIAL_DAYS, config.freeTrialDays)
             putBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, config.globalAllFree)
@@ -443,6 +543,11 @@ class TrialLicenseManager private constructor(
             }
             putString(KEY_ADMIN_BANNER2_TITLE, resolvedBanner2Title)
             putString(KEY_ADMIN_BANNER2_SUBTITLE, config.banners.banner2Subtitle)
+            putString(KEY_ADMIN_FREE_THEME_IDS_CSV, config.freeThemeIds.joinToString(","))
+            putString(KEY_ADMIN_OFFER_TITLE, config.offerTitle)
+            putString(KEY_ADMIN_OFFER_MSG_BN, config.offerMessageBn)
+            putString(KEY_ADMIN_OFFER_MSG_EN, config.offerMessageEn)
+            putInt(KEY_ADMIN_OFFER_INTERVAL_DAYS, config.offerIntervalDays)
         }
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
@@ -476,33 +581,117 @@ class TrialLicenseManager private constructor(
     }
 
     private fun applyRemoteDeviceSnapshot(snapshot: RemoteDeviceSnapshot) {
+        hasReceivedDeviceSnapshotFromServer.set(true)
         val nowServer = currentServerOrUtcMs()
-        val serverFirstInstall = snapshot.firstInstallTimestampMs?.takeIf { it > 0L }
+        val serverFirstInstall = FirebaseRemoteManager.normalizeEpochMs(snapshot.firstInstallTimestampMs)
+            .takeIf { it > 0L }
+            ?: FirebaseRemoteManager.normalizeEpochMs(snapshot.firstInstallAtMs).takeIf { it > 0L }
+            ?: FirebaseRemoteManager.normalizeEpochMs(snapshot.trialStartedAtMs).takeIf { it > 0L }
+        serverHasEstablishedFirstInstall.set(serverFirstInstall != null)
         val statusLower = snapshot.vipStatus?.lowercase(Locale.US).orEmpty()
-        val isAdminFree = snapshot.overrides.hasFullAdminFreeAccess || statusLower == STATUS_ADMIN_FREE_VIP
-        val customExpiryMs = snapshot.overrides.customExpiryTimestampMs
-        val isServerLifetime = statusLower == STATUS_LIFETIME_VIP
-        val isServerTimedActive = (statusLower == STATUS_WEEKLY_ACTIVE ||
+        val deviceBlocked = snapshot.isBlocked || snapshot.overrides.isBlocked || snapshot.securityFlags.tamperBlocked
+        val isAdminFree = !deviceBlocked && (snapshot.overrides.hasFullAdminFreeAccess || statusLower == STATUS_ADMIN_FREE_VIP)
+        val customExpiryMs = FirebaseRemoteManager.normalizeEpochMs(snapshot.overrides.customExpiryTimestampMs)
+            .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+        val safeRemoteVipExpiryMs = FirebaseRemoteManager.normalizeEpochMs(snapshot.vipExpiryTimestampMs)
+            .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+        val safeRemoteBanglishExpiryMs = FirebaseRemoteManager.normalizeEpochMs(snapshot.banglishExpiryTimestampMs)
+            .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+        val isServerLifetime = !deviceBlocked && (
+            snapshot.explicitLifetime == true ||
+                (snapshot.explicitLifetime == null && statusLower == STATUS_LIFETIME_VIP)
+            )
+        val isServerTimedActive = !deviceBlocked && (statusLower == STATUS_WEEKLY_ACTIVE ||
             statusLower == STATUS_MONTHLY_ACTIVE ||
-            statusLower == STATUS_CUSTOM_ACTIVE) && snapshot.vipExpiryTimestampMs > nowServer
+            statusLower == STATUS_CUSTOM_ACTIVE) && safeRemoteVipExpiryMs > nowServer
+        val isExplicitNonLifetimeRevoke = snapshot.exists && !isServerLifetime &&
+            (snapshot.explicitLifetime == false ||
+                statusLower == STATUS_TRIAL ||
+                statusLower == STATUS_EXPIRED ||
+                statusLower == STATUS_BLOCKED ||
+                statusLower == STATUS_WEEKLY_ACTIVE ||
+                statusLower == STATUS_MONTHLY_ACTIVE ||
+                statusLower == STATUS_CUSTOM_ACTIVE) &&
+            (nowServer - lastLocalPurchaseAtMs > 15_000L)
         val allowed = snapshot.overrides.allowedFeatures
 
+        val serverIndicatesPriorUsage = snapshot.exists && (
+            serverFirstInstall != null ||
+                snapshot.trialUsed == true ||
+                statusLower in setOf(
+                    STATUS_EXPIRED,
+                    STATUS_LIFETIME_VIP,
+                    STATUS_BLOCKED,
+                    STATUS_WEEKLY_ACTIVE,
+                    STATUS_MONTHLY_ACTIVE,
+                    STATUS_CUSTOM_ACTIVE
+                )
+            )
+        val detectedReinstallFromServer = !hadLocalPriorInstallOnBoot && serverIndicatesPriorUsage
+        val remoteFlags = snapshot.securityFlags
+        val prevReinstallCount = prefs.getInt(KEY_REINSTALL_COUNT, 0)
+        val reinstallIncrement = if (detectedReinstallFromServer && reinstallRecordedThisSession.compareAndSet(false, true)) 1 else 0
+        val mergedReinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false) ||
+            remoteFlags.reinstallDetected ||
+            detectedReinstallFromServer
+        val mergedReinstallCount = maxOf(prevReinstallCount + reinstallIncrement, remoteFlags.reinstallCount + reinstallIncrement)
+        val mergedRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false) || remoteFlags.clockRollbackDetected
+        val mergedRollbackCount = maxOf(prefs.getInt(KEY_CLOCK_ROLLBACK_COUNT, 0), remoteFlags.clockRollbackCount)
+        val mergedLocalTamper = prefs.getBoolean(KEY_LOCAL_TAMPER_DETECTED, false) || remoteFlags.localTamperDetected
+
         editPrefsSafely {
-            // Strict One-Time Trial: server firstInstallTimestamp is authoritative and NEVER reset or extended
-            if (serverFirstInstall != null) {
-                val localFirst = prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, serverFirstInstall)
-                val authoritative = minOf(localFirst, serverFirstInstall)
+            // Strict One-Time Trial (v5+): adopt server firstInstallTimestamp whenever server holds valid prior record
+            val hasValidServerV5Timestamp = (snapshot.trialPolicyVersion >= CURRENT_TRIAL_POLICY_VERSION ||
+                snapshot.firstInstallAtMs != null ||
+                snapshot.trialUsed == true ||
+                statusLower == STATUS_EXPIRED) &&
+                serverFirstInstall != null &&
+                serverFirstInstall in FirebaseRemoteManager.MIN_VALID_EPOCH_MS..(nowServer + 60_000L)
+            if (hasValidServerV5Timestamp && serverFirstInstall != null) {
+                val localFirst = FirebaseRemoteManager.normalizeEpochMs(
+                    prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+                ).takeIf { it > 0L } ?: serverFirstInstall
+                val authoritative = if (!hadLocalPriorInstallOnBoot) {
+                    serverFirstInstall.coerceAtMost(nowServer)
+                } else {
+                    minOf(localFirst, serverFirstInstall).coerceAtMost(nowServer)
+                }
+                putInt(KEY_TRIAL_POLICY_VERSION, CURRENT_TRIAL_POLICY_VERSION)
                 putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, authoritative)
                 putLong(KEY_FIRST_LAUNCH_WALL_MS, authoritative)
                 val serverElapsed = (nowServer - authoritative).coerceAtLeast(0L)
-                val prevMax = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
-                putLong(KEY_MAX_SEEN_ELAPSED_MS, maxOf(prevMax, serverElapsed))
+                val rawPrevMax = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
+                val safePrevMax = if (rawPrevMax in 0L..MAX_REASONABLE_ELAPSED_MS) rawPrevMax else 0L
+                val effectiveTrialMs = readCachedAdminConfig().trialDurationMs
+                val serverAlreadyExpired = statusLower == STATUS_EXPIRED ||
+                    (snapshot.trialExpiresAtMs != null && snapshot.trialExpiresAtMs in 1L..nowServer) ||
+                    (snapshot.trialUsed == true && serverElapsed >= effectiveTrialMs)
+                val updatedMaxElapsed = if (serverAlreadyExpired) {
+                    maxOf(safePrevMax, serverElapsed, effectiveTrialMs)
+                } else {
+                    maxOf(safePrevMax, serverElapsed)
+                }
+                putLong(KEY_MAX_SEEN_ELAPSED_MS, updatedMaxElapsed)
+                if (serverElapsed >= effectiveTrialMs || serverAlreadyExpired) {
+                    putBoolean(KEY_TRIAL_EXPIRED_STICKY, true)
+                }
+            } else if (snapshot.exists && snapshot.trialUsed == true && statusLower == STATUS_EXPIRED) {
+                val effectiveTrialMs = readCachedAdminConfig().trialDurationMs
+                putLong(KEY_MAX_SEEN_ELAPSED_MS, maxOf(prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L), effectiveTrialMs))
+                putBoolean(KEY_TRIAL_EXPIRED_STICKY, true)
             }
 
-            // Instant Remote Admin VIP Override (`adminAllFree` / `adminFreeVip`) & per-device `customExpiryTimestamp`
+            putBoolean(KEY_REINSTALL_DETECTED, mergedReinstallDetected)
+            putInt(KEY_REINSTALL_COUNT, mergedReinstallCount)
+            putBoolean(KEY_CLOCK_ROLLBACK_DETECTED, mergedRollbackDetected)
+            putInt(KEY_CLOCK_ROLLBACK_COUNT, mergedRollbackCount)
+            putBoolean(KEY_LOCAL_TAMPER_DETECTED, mergedLocalTamper)
+
+            // Instant Remote Admin VIP Override & Block Enforcement
+            putBoolean(KEY_DEVICE_BLOCKED, deviceBlocked)
             putBoolean(KEY_ADMIN_GRANTED_VIP, isAdminFree)
-            putBoolean(KEY_ADMIN_ALL_FREE_DEVICE, snapshot.overrides.adminAllFree)
-            putLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, customExpiryMs.coerceAtLeast(0L))
+            putBoolean(KEY_ADMIN_ALL_FREE_DEVICE, !deviceBlocked && snapshot.overrides.adminAllFree)
+            putLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, if (deviceBlocked) 0L else customExpiryMs.coerceAtLeast(0L))
             if (isAdminFree) {
                 putString(KEY_UNLOCK_METHOD, "ADMIN_REMOTE_VIP")
             }
@@ -516,25 +705,31 @@ class TrialLicenseManager private constructor(
             putInt(KEY_DEVICE_ALLOW_AI_HUB, encodeTriState(allowed.aiHub))
 
             // Server-synced independent Banglish subscription expiry
-            if (snapshot.banglishExpiryTimestampMs > nowServer) {
+            if (safeRemoteBanglishExpiryMs > nowServer) {
                 val currentBnExpiry = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
-                putLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, maxOf(currentBnExpiry, snapshot.banglishExpiryTimestampMs))
+                    .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+                putLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, maxOf(currentBnExpiry, safeRemoteBanglishExpiryMs))
+            } else if (prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L) > nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) {
+                putLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
             }
 
-            // Server-granted permanent lifetime VIP
+            // Server-granted or revoked permanent lifetime VIP
             if (isServerLifetime) {
                 putBoolean(KEY_IS_LIFETIME_UNLOCKED, true)
                 putBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
                 if (prefs.getString(KEY_UNLOCK_METHOD, null).isNullOrBlank()) {
                     putString(KEY_UNLOCK_METHOD, "FIREBASE_LIFETIME_VIP")
                 }
+            } else if (isExplicitNonLifetimeRevoke) {
+                putBoolean(KEY_IS_LIFETIME_UNLOCKED, false)
             }
 
             // Server-synced active weekly / monthly / custom-day VIP expiry
             when {
                 isServerTimedActive -> {
                     val currentExpiry = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
-                    putLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, maxOf(currentExpiry, snapshot.vipExpiryTimestampMs))
+                        .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+                    putLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, maxOf(currentExpiry, safeRemoteVipExpiryMs))
                     val planCode = when (statusLower) {
                         STATUS_WEEKLY_ACTIVE -> RemoteAdminConfig.PLAN_WEEKLY
                         STATUS_MONTHLY_ACTIVE -> RemoteAdminConfig.PLAN_MONTHLY
@@ -542,7 +737,13 @@ class TrialLicenseManager private constructor(
                     }
                     putString(KEY_ACTIVE_SUB_PLAN, planCode)
                 }
-                statusLower == STATUS_EXPIRED && !isAdminFree && !isServerLifetime && customExpiryMs <= nowServer -> {
+                (statusLower == STATUS_EXPIRED || statusLower == STATUS_TRIAL || statusLower == STATUS_BLOCKED) &&
+                    !isAdminFree && !isServerLifetime && customExpiryMs <= nowServer &&
+                    (nowServer - lastLocalPurchaseAtMs > 15_000L) -> {
+                    putLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
+                    putString(KEY_ACTIVE_SUB_PLAN, "")
+                }
+                prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L) > nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS -> {
                     putLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
                     putString(KEY_ACTIVE_SUB_PLAN, "")
                 }
@@ -551,26 +752,94 @@ class TrialLicenseManager private constructor(
 
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
-        if (updated.vipStatusCode != lastSyncedVipStatus) {
-            syncDeviceToFirebase(state = updated, force = true)
+        val legacyRemoteTrialPolicy = snapshot.exists && snapshot.trialPolicyVersion < CURRENT_TRIAL_POLICY_VERSION
+        val corruptRemoteTrialExpiry = snapshot.trialExpiresAtMs != null &&
+            updated.trialExpiresAtMs > 0L &&
+            snapshot.trialExpiresAtMs > updated.trialExpiresAtMs + 60_000L
+        val corruptRemoteVipExpiry = snapshot.vipExpiryTimestampMs > nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS
+        val missingRemoteMetadata = !snapshot.exists ||
+            snapshot.firstInstallAtMs == null ||
+            snapshot.trialExpiresAtMs == null ||
+            snapshot.trialExpiresAtMs <= 0L ||
+            snapshot.trialUsed == null ||
+            snapshot.explicitLifetime == null ||
+            legacyRemoteTrialPolicy ||
+            corruptRemoteTrialExpiry ||
+            corruptRemoteVipExpiry ||
+            mergedReinstallDetected != remoteFlags.reinstallDetected ||
+            mergedReinstallCount != remoteFlags.reinstallCount ||
+            mergedRollbackDetected != remoteFlags.clockRollbackDetected ||
+            mergedRollbackCount != remoteFlags.clockRollbackCount ||
+            mergedLocalTamper != remoteFlags.localTamperDetected ||
+            !hasSyncedFullDeviceRecord.get()
+        if (updated.vipStatusCode != lastSyncedVipStatus || missingRemoteMetadata) {
+            syncDeviceToFirebase(
+                state = updated,
+                force = true,
+                overrideLegacyTrialTimestamps = legacyRemoteTrialPolicy
+            )
         }
     }
 
-    private fun syncDeviceToFirebase(state: LicenseUiState, force: Boolean) {
+    private fun syncDeviceToFirebase(
+        state: LicenseUiState,
+        force: Boolean,
+        overrideLegacyTrialTimestamps: Boolean = false,
+        isPurchaseEvent: Boolean = false
+    ) {
         val now = currentServerOrUtcMs()
+        val allowTrialAndVipWrite = hasReceivedDeviceSnapshotFromServer.get() || isPurchaseEvent
         val statusChanged = state.vipStatusCode != lastSyncedVipStatus
         if (!force && !statusChanged && (now - lastFirebaseSyncMs) < FIREBASE_SYNC_MIN_INTERVAL_MS) {
             return
         }
         lastFirebaseSyncMs = now
-        lastSyncedVipStatus = state.vipStatusCode
-        val firstInstallTs = prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+        if (allowTrialAndVipWrite) {
+            lastSyncedVipStatus = state.vipStatusCode
+            hasSyncedFullDeviceRecord.set(true)
+        }
+        val firstInstallTs = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+        ).takeIf { it > 0L } ?: state.trialStartedAtMs
+        val trialStartTs = state.trialStartedAtMs.takeIf { it > 0L } ?: firstInstallTs
+        val trialExpiryTs = state.trialExpiresAtMs.takeIf { it > 0L }
+            ?: if (trialStartTs > 0L) (trialStartTs + state.adminConfig.trialDurationMs) else 0L
+        val reinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false)
+        val reinstallCount = prefs.getInt(KEY_REINSTALL_COUNT, 0)
+        val clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
+        val clockRollbackCount = prefs.getInt(KEY_CLOCK_ROLLBACK_COUNT, 0)
+        val localTamperDetected = prefs.getBoolean(KEY_LOCAL_TAMPER_DETECTED, false)
+        val integrityStatus = when {
+            state.isDeviceBlocked -> "blocked"
+            localTamperDetected -> "tamper_flagged"
+            clockRollbackDetected -> "clock_rollback_flagged"
+            reinstallDetected -> "reinstall_verified"
+            else -> "verified"
+        }
+        val writeFirstInstallFields = isPurchaseEvent ||
+            overrideLegacyTrialTimestamps ||
+            (allowTrialAndVipWrite && !serverHasEstablishedFirstInstall.get())
         firebaseRemoteManager.syncDeviceStatus(
             deviceId = deviceId,
             vipStatus = state.vipStatusCode,
             vipExpiryTimestampMs = state.vipExpiryTimestampMs,
             firstInstallTimestampMs = firstInstallTs,
-            banglishExpiryTimestampMs = state.banglishExpiryTimestampMs
+            banglishExpiryTimestampMs = state.banglishExpiryTimestampMs,
+            trialStartedAtMs = trialStartTs,
+            trialExpiresAtMs = trialExpiryTs,
+            trialPolicyVersion = CURRENT_TRIAL_POLICY_VERSION,
+            overrideLegacyTrialTimestamps = overrideLegacyTrialTimestamps,
+            writeFirstInstallFields = writeFirstInstallFields,
+            allowTrialAndVipStatusWrite = allowTrialAndVipWrite,
+            trialUsed = true,
+            isLifetime = state.isLifetimeUnlocked,
+            isBlocked = state.isDeviceBlocked,
+            reinstallDetected = reinstallDetected,
+            reinstallCount = reinstallCount,
+            clockRollbackDetected = clockRollbackDetected,
+            clockRollbackCount = clockRollbackCount,
+            localTamperDetected = localTamperDetected,
+            integrityStatus = integrityStatus
         )
     }
 
@@ -604,9 +873,16 @@ class TrialLicenseManager private constructor(
         val cachedBanglishPrice = prefs.getInt(KEY_ADMIN_BANGLISH_PRICE, RemoteAdminConfig.DEFAULT_BANGLISH_PRICE)
             .coerceAtLeast(1)
 
+        val csvFreeThemeIds = prefs.getString(KEY_ADMIN_FREE_THEME_IDS_CSV, "").orEmpty()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        val resolvedFreeThemeIds = if (cachedFreeThemeIds.isNotEmpty()) cachedFreeThemeIds else csvFreeThemeIds
+
+        val rawTrialDays = prefs.getInt(KEY_ADMIN_FREE_TRIAL_DAYS, RemoteAdminConfig.DEFAULT_FREE_TRIAL_DAYS)
         return RemoteAdminConfig(
-            freeTrialDays = prefs.getInt(KEY_ADMIN_FREE_TRIAL_DAYS, RemoteAdminConfig.DEFAULT_FREE_TRIAL_DAYS)
-                .coerceIn(0, 365),
+            freeTrialDays = if (rawTrialDays > 0) rawTrialDays.coerceIn(1, 365) else RemoteAdminConfig.DEFAULT_FREE_TRIAL_DAYS,
             globalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
             vipPrice = prefs.getInt(KEY_ADMIN_VIP_PRICE, RemoteAdminConfig.DEFAULT_VIP_PRICE)
                 .coerceAtLeast(1),
@@ -644,7 +920,15 @@ class TrialLicenseManager private constructor(
                     ?: PromoBannerConfig.DEFAULT_BANNER2_TITLE,
                 banner2Subtitle = prefs.getString(KEY_ADMIN_BANNER2_SUBTITLE, PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE)
                     ?.takeIf { it.isNotBlank() } ?: PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE
-            )
+            ),
+            freeThemeIds = resolvedFreeThemeIds,
+            cloudThemes = cachedCloudThemes,
+            cloudAnimations = cachedCloudAnimations,
+            offerTitle = prefs.getString(KEY_ADMIN_OFFER_TITLE, "").orEmpty(),
+            offerMessageBn = prefs.getString(KEY_ADMIN_OFFER_MSG_BN, "").orEmpty(),
+            offerMessageEn = prefs.getString(KEY_ADMIN_OFFER_MSG_EN, "").orEmpty(),
+            offerIntervalDays = prefs.getInt(KEY_ADMIN_OFFER_INTERVAL_DAYS, RemoteAdminConfig.DEFAULT_OFFER_INTERVAL_DAYS)
+                .coerceIn(4, 7)
         )
     }
 
@@ -653,6 +937,7 @@ class TrialLicenseManager private constructor(
             adminFreeVip = prefs.getBoolean(KEY_ADMIN_GRANTED_VIP, false),
             adminAllFree = prefs.getBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false),
             customExpiryTimestampMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L).coerceAtLeast(0L),
+            isBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false),
             allowedFeatures = DeviceFeatureAllowMap(
                 rgbThemes = decodeTriState(KEY_DEVICE_ALLOW_RGB_THEMES),
                 banglish = decodeTriState(KEY_DEVICE_ALLOW_BANGLISH),
@@ -669,7 +954,8 @@ class TrialLicenseManager private constructor(
         val firstInstallTimestampMs: Long,
         val maxSeenElapsedMs: Long,
         val lastSeenWallMs: Long,
-        val expired: Boolean
+        val expired: Boolean,
+        val policyVersion: Int = CURRENT_TRIAL_POLICY_VERSION
     )
 
     private inline fun editPrefsSafely(block: SharedPreferences.Editor.() -> Unit) {
@@ -684,7 +970,7 @@ class TrialLicenseManager private constructor(
     }
 
     private fun computeCurrentPrefsHmac(): String {
-        return AntiTamperGuard.computePrefsIntegrityHmac(
+        return AntiTamperGuard.computePrefsIntegrityHmacV2(
             deviceId = deviceId,
             rawAndroidId = rawAndroidId,
             packageName = context.packageName.orEmpty(),
@@ -697,7 +983,13 @@ class TrialLicenseManager private constructor(
             adminGlobalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
             deviceCustomExpiryMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L),
             unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null),
-            unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null)
+            unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null),
+            isDeviceBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false),
+            firstInstallTimestampMs = prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L),
+            maxSeenElapsedMs = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L),
+            trialExpiredSticky = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false),
+            reinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false),
+            clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
         )
     }
 
@@ -708,7 +1000,7 @@ class TrialLicenseManager private constructor(
     private fun verifyStoredPrivilegeHmac(allowBootstrap: Boolean): Boolean {
         val storedHmac = prefs.getString(KEY_PREFS_INTEGRITY_HMAC, null)
         if (!storedHmac.isNullOrBlank()) {
-            return AntiTamperGuard.verifyPrefsIntegrityHmac(
+            val isV2Valid = AntiTamperGuard.verifyPrefsIntegrityHmacV2(
                 providedHmac = storedHmac,
                 deviceId = deviceId,
                 rawAndroidId = rawAndroidId,
@@ -722,8 +1014,38 @@ class TrialLicenseManager private constructor(
                 adminGlobalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
                 deviceCustomExpiryMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L),
                 unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null),
-                unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null)
+                unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null),
+                isDeviceBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false),
+                firstInstallTimestampMs = prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L),
+                maxSeenElapsedMs = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L),
+                trialExpiredSticky = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false),
+                reinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false),
+                clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
             )
+            if (isV2Valid) return true
+
+            // Migrate valid v1 HMAC installations cleanly during init() so sealPrivilegePrefsHmac() upgrades them to v2.
+            val isLegacyV1Valid = allowBootstrap && AntiTamperGuard.verifyPrefsIntegrityHmac(
+                providedHmac = storedHmac,
+                deviceId = deviceId,
+                rawAndroidId = rawAndroidId,
+                packageName = context.packageName.orEmpty(),
+                isLifetimeUnlocked = prefs.getBoolean(KEY_IS_LIFETIME_UNLOCKED, false),
+                isBanglishLifetimeUnlocked = prefs.getBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false),
+                banglishExpiryMs = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L),
+                vipExpiryMs = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L),
+                adminGrantedVip = prefs.getBoolean(KEY_ADMIN_GRANTED_VIP, false),
+                adminAllFreeDevice = prefs.getBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false),
+                adminGlobalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
+                deviceCustomExpiryMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L),
+                unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null),
+                unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null),
+                isDeviceBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false)
+            )
+            if (!isLegacyV1Valid) {
+                prefs.edit().putBoolean(KEY_LOCAL_TAMPER_DETECTED, true).apply()
+            }
+            return isLegacyV1Valid
         }
 
         if (!allowBootstrap) return false
@@ -778,61 +1100,119 @@ class TrialLicenseManager private constructor(
         }
     }
 
-    private fun ensureLocalTrialSeededFast() {
-        if (prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS)) return
-        val nowWall = System.currentTimeMillis()
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val existingLegacyFirst = if (prefs.contains(KEY_FIRST_LAUNCH_WALL_MS)) {
-            prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, nowWall)
-        } else {
-            nowWall
+    private fun sanitizeCorruptFutureExpiryPrefs() {
+        val nowWall = currentServerOrUtcMs()
+        val maxFuture = nowWall + MAX_VALID_SUBSCRIPTION_SPAN_MS
+        val vipExp = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
+        val customExp = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L)
+        val bnExp = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
+        if (vipExp > maxFuture || customExp > maxFuture || bnExp > maxFuture) {
+            editPrefsSafely {
+                if (vipExp > maxFuture) {
+                    putLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
+                    putString(KEY_ACTIVE_SUB_PLAN, "")
+                }
+                if (customExp > maxFuture) {
+                    putLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L)
+                }
+                if (bnExp > maxFuture) {
+                    putLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
+                }
+            }
         }
-        val firstInstall = existingLegacyFirst.coerceAtMost(nowWall)
-        val initialElapsed = (nowWall - firstInstall).coerceAtLeast(0L)
-        val expired = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false) || initialElapsed >= TRIAL_DURATION_MS
+    }
+
+    private fun ensureLocalTrialSeededFast() {
+        val nowWall = currentServerOrUtcMs()
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val storedPolicyVersion = prefs.getInt(KEY_TRIAL_POLICY_VERSION, 0)
+        val existingFirstInstall = FirebaseRemoteManager.normalizeEpochMs(
+            if (prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS)) {
+                prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+            } else {
+                0L
+            }
+        )
+        val rawMaxElapsed = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
+        val outOfBoundsTimestamp = existingFirstInstall <= FirebaseRemoteManager.MIN_VALID_EPOCH_MS ||
+            existingFirstInstall > nowWall + 60_000L ||
+            rawMaxElapsed !in 0L..MAX_REASONABLE_ELAPSED_MS
+        val isLegacyOrFreshInstall = storedPolicyVersion < CURRENT_TRIAL_POLICY_VERSION
+
+        if (!isLegacyOrFreshInstall && !outOfBoundsTimestamp) return
+
+        // On fresh install or upgrade from pre-v5 test policy / corrupt bounds, start a clean 7-day trial now
+        val localNow = System.currentTimeMillis()
         editPrefsSafely {
             putInt(KEY_TRIAL_POLICY_VERSION, CURRENT_TRIAL_POLICY_VERSION)
-            putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, firstInstall)
-            putLong(KEY_FIRST_LAUNCH_WALL_MS, firstInstall)
+            putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, nowWall)
+            putLong(KEY_FIRST_LAUNCH_WALL_MS, nowWall)
             putLong(KEY_FIRST_LAUNCH_ELAPSED_MS, nowElapsed)
-            putLong(KEY_MAX_SEEN_ELAPSED_MS, initialElapsed)
+            putLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
             putLong(KEY_LAST_SEEN_WALL_MS, nowWall)
-            putBoolean(KEY_TRIAL_EXPIRED_STICKY, expired)
+            putLong(KEY_LAST_LOCAL_WALL_MS, localNow)
+            putBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
         }
         lastPrefCheckpointMs = nowWall
     }
 
     private fun checkpointLocalTrialFast(nowWall: Long) {
+        val safeNowWall = FirebaseRemoteManager.normalizeEpochMs(nowWall).takeIf { it > 0L } ?: System.currentTimeMillis()
+        val localNow = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
-        val firstInstall = when {
-            prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS) -> prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, nowWall)
-            prefs.contains(KEY_FIRST_LAUNCH_WALL_MS) -> prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, nowWall)
-            else -> nowWall
-        }.coerceAtMost(nowWall)
+        val rawStoredFirst = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+        ).takeIf { it > 0L }
+            ?: FirebaseRemoteManager.normalizeEpochMs(prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, 0L)).takeIf { it > 0L }
+        val firstInstall = (rawStoredFirst ?: safeNowWall).coerceAtMost(safeNowWall)
         val firstMono = if (prefs.contains(KEY_FIRST_LAUNCH_ELAPSED_MS)) {
             prefs.getLong(KEY_FIRST_LAUNCH_ELAPSED_MS, nowElapsed)
         } else {
             nowElapsed
         }
-        val prevMaxElapsed = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L).coerceAtLeast(0L)
-        val prevLastWall = prefs.getLong(KEY_LAST_SEEN_WALL_MS, firstInstall)
+        val rawPrevMax = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
+        val prevMaxElapsed = if (rawStoredFirst == null || rawPrevMax !in 0L..MAX_REASONABLE_ELAPSED_MS) 0L else rawPrevMax
+        val prevLastWall = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_LAST_SEEN_WALL_MS, firstInstall)
+        ).takeIf { it > 0L } ?: firstInstall
+        val prevLastLocalWall = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_LAST_LOCAL_WALL_MS, firstInstall)
+        ).takeIf { it > 0L } ?: firstInstall
         val monoDelta = if (nowElapsed >= firstMono) (nowElapsed - firstMono) else 0L
-        val wallDelta = (nowWall - firstInstall).coerceAtLeast(0L)
-        val clockRolledBack = nowWall + CLOCK_ROLLBACK_TOLERANCE_MS < prevLastWall
+        val wallDelta = (safeNowWall - firstInstall).coerceAtLeast(0L)
+        val clockRolledBack = (safeNowWall + CLOCK_ROLLBACK_TOLERANCE_MS < prevLastWall) ||
+            (localNow + CLOCK_ROLLBACK_TOLERANCE_MS < prevLastLocalWall)
+        val prevRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
+        val prevRollbackCount = prefs.getInt(KEY_CLOCK_ROLLBACK_COUNT, 0)
+        val newRollbackCount = if (clockRolledBack && rollbackRecordedThisSession.compareAndSet(false, true)) {
+            prevRollbackCount + 1
+        } else {
+            prevRollbackCount
+        }
         val mergedMaxElapsed = maxOf(prevMaxElapsed, wallDelta, monoDelta)
-        val expired = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false) ||
+        val effectiveTrialDurationMs = readCachedAdminConfig().trialDurationMs
+        val stickyExpired = if (rawStoredFirst == null) false else prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
+        val expired = stickyExpired ||
             clockRolledBack ||
-            mergedMaxElapsed >= TRIAL_DURATION_MS
+            mergedMaxElapsed >= effectiveTrialDurationMs
 
         editPrefsSafely {
             putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, firstInstall)
             putLong(KEY_FIRST_LAUNCH_WALL_MS, firstInstall)
             putLong(KEY_FIRST_LAUNCH_ELAPSED_MS, firstMono)
-            putLong(KEY_MAX_SEEN_ELAPSED_MS, if (expired) maxOf(mergedMaxElapsed, TRIAL_DURATION_MS) else mergedMaxElapsed)
-            putLong(KEY_LAST_SEEN_WALL_MS, maxOf(prevLastWall, nowWall))
+            putLong(
+                KEY_MAX_SEEN_ELAPSED_MS,
+                if (expired) maxOf(mergedMaxElapsed, effectiveTrialDurationMs) else mergedMaxElapsed
+            )
+            putLong(KEY_LAST_SEEN_WALL_MS, maxOf(prevLastWall, safeNowWall))
+            putLong(KEY_LAST_LOCAL_WALL_MS, maxOf(prevLastLocalWall, localNow))
             putBoolean(KEY_TRIAL_EXPIRED_STICKY, expired)
+            if (clockRolledBack || prevRollbackDetected) {
+                putBoolean(KEY_CLOCK_ROLLBACK_DETECTED, true)
+                putInt(KEY_CLOCK_ROLLBACK_COUNT, newRollbackCount)
+            }
         }
-        lastPrefCheckpointMs = nowWall
+        lastPrefCheckpointMs = safeNowWall
     }
 
     /**
@@ -842,17 +1222,62 @@ class TrialLicenseManager private constructor(
     private fun computeFastStateFromPrefsOnly(): LicenseUiState {
         val adminConfig = readCachedAdminConfig()
         val deviceOverrides = readCachedDeviceOverrides()
+        val deviceBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false) || deviceOverrides.isBlocked
+        val pending = latestPendingPayment
+        val nowServer = currentServerOrUtcMs()
+
+        val rawStoredFirst = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+        ).takeIf { it > 0L }
+            ?: FirebaseRemoteManager.normalizeEpochMs(prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, 0L)).takeIf { it > 0L }
+        val firstInstall = (rawStoredFirst ?: nowServer).coerceAtMost(nowServer)
+        val effectiveTrialDurationMs = adminConfig.trialDurationMs
+        val trialEndTs = firstInstall + effectiveTrialDurationMs
+
+        if (deviceBlocked) {
+            return LicenseUiState(
+                isLifetimeUnlocked = false,
+                isAdminGrantedVip = false,
+                isGlobalAllFree = false,
+                isMonthlyActive = false,
+                isWeeklyActive = false,
+                vipExpiryTimestampMs = 0L,
+                isBanglishLifetimeUnlocked = false,
+                banglishExpiryTimestampMs = 0L,
+                banglishRemainingSeconds = 0L,
+                banglishTotalDurationSeconds = 0L,
+                vipStatusCode = STATUS_BLOCKED,
+                isTrialExpired = true,
+                remainingMillis = 0L,
+                remainingSeconds = 0L,
+                trialStartedAtMs = firstInstall,
+                trialExpiresAtMs = trialEndTs,
+                deviceId = deviceId,
+                unlockMethod = "ADMIN_BLOCKED",
+                unlockedTxnId = null,
+                isDeviceBlocked = true,
+                adminConfig = adminConfig,
+                deviceOverrides = deviceOverrides,
+                pendingPayment = pending
+            )
+        }
         val globalAllFree = adminConfig.globalAllFree
+        val adminAllFree = deviceOverrides.adminAllFree
         val adminGranted = deviceOverrides.hasFullAdminFreeAccess
         val lifetimeUnlocked = prefs.getBoolean(KEY_IS_LIFETIME_UNLOCKED, false)
         val banglishLifetimeUnlocked = prefs.getBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false)
         val unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null)
         val unlockedTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null)
-        val nowServer = currentServerOrUtcMs()
-        val pending = latestPendingPayment
 
-        // Independent Romanized Bengali subscription countdown calculation
-        val banglishExpiryMs = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
+        // Independent Romanized Bengali subscription countdown calculation (reject corrupt far-future timestamps)
+        val rawBanglishExpiryMs = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
+        )
+        val banglishExpiryMs = if (rawBanglishExpiryMs in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS)) {
+            rawBanglishExpiryMs
+        } else {
+            0L
+        }
         val banglishRemainingSec = if (banglishExpiryMs > nowServer) {
             ((banglishExpiryMs - nowServer) + 999L) / 1000L
         } else {
@@ -863,32 +1288,42 @@ class TrialLicenseManager private constructor(
             (adminConfig.banglishDurationDays.coerceAtLeast(1).toLong() * 86_400L)
         ).coerceAtLeast(banglishRemainingSec.coerceAtLeast(1L))
 
-        // Always compute true server/UTC trial status independently so Banglish card knows whether trial is active
+        // Always compute true server/UTC trial status independently and strictly clamp to 0..effectiveTrialDurationMs
         val nowElapsed = SystemClock.elapsedRealtime()
-        val firstInstall = when {
-            prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS) -> prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, nowServer)
-            prefs.contains(KEY_FIRST_LAUNCH_WALL_MS) -> prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, nowServer)
-            else -> nowServer
-        }.coerceAtMost(nowServer)
+        val localNow = System.currentTimeMillis()
         val firstMono = if (prefs.contains(KEY_FIRST_LAUNCH_ELAPSED_MS)) {
             prefs.getLong(KEY_FIRST_LAUNCH_ELAPSED_MS, nowElapsed)
         } else {
             nowElapsed
         }
-        val prevMaxElapsed = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L).coerceAtLeast(0L)
-        val prevLastWall = prefs.getLong(KEY_LAST_SEEN_WALL_MS, firstInstall)
+        val rawPrevMax = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
+        val prevMaxElapsed = if (rawStoredFirst == null || rawPrevMax !in 0L..MAX_REASONABLE_ELAPSED_MS) 0L else rawPrevMax
+        val prevLastWall = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_LAST_SEEN_WALL_MS, firstInstall)
+        ).takeIf { it > 0L } ?: firstInstall
+        val prevLastLocalWall = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_LAST_LOCAL_WALL_MS, firstInstall)
+        ).takeIf { it > 0L } ?: firstInstall
+        val stickyExpired = if (rawStoredFirst == null) false else prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
+        val persistedClockRollback = if (rawStoredFirst == null) false else prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
 
         val monoDelta = if (nowElapsed >= firstMono) (nowElapsed - firstMono) else 0L
         val wallDelta = (nowServer - firstInstall).coerceAtLeast(0L)
-        val clockRolledBack = nowServer + CLOCK_ROLLBACK_TOLERANCE_MS < prevLastWall
+        val clockRolledBack = persistedClockRollback ||
+            (nowServer + CLOCK_ROLLBACK_TOLERANCE_MS < prevLastWall) ||
+            (localNow + CLOCK_ROLLBACK_TOLERANCE_MS < prevLastLocalWall)
         val effectiveElapsedMs = maxOf(prevMaxElapsed, wallDelta, monoDelta)
-        val effectiveTrialDurationMs = adminConfig.trialDurationMs
-        val trialRemainingMs = (effectiveTrialDurationMs - effectiveElapsedMs).coerceAtLeast(0L)
-        val trialExpired = clockRolledBack || effectiveTrialDurationMs <= 0L || trialRemainingMs <= 0L
+        val trialRemainingMs = if (stickyExpired || clockRolledBack) {
+            0L
+        } else {
+            (effectiveTrialDurationMs - effectiveElapsedMs).coerceIn(0L, effectiveTrialDurationMs)
+        }
+        val trialExpired = stickyExpired || clockRolledBack || trialRemainingMs <= 0L
         val trialRemainingSec = if (trialExpired) 0L else (trialRemainingMs + 999L) / 1000L
-        val trialEndTs = firstInstall + effectiveTrialDurationMs
 
         if (globalAllFree || adminGranted) {
+            val nonAllFreeRemainingMs = if (globalAllFree || adminAllFree) 0L else trialRemainingMs
+            val nonAllFreeRemainingSec = if (nonAllFreeRemainingMs <= 0L) 0L else (nonAllFreeRemainingMs + 999L) / 1000L
             return LicenseUiState(
                 isLifetimeUnlocked = lifetimeUnlocked,
                 isAdminGrantedVip = adminGranted,
@@ -902,7 +1337,10 @@ class TrialLicenseManager private constructor(
                 banglishTotalDurationSeconds = banglishTotalDurationSec,
                 vipStatusCode = STATUS_ADMIN_FREE_VIP,
                 isTrialExpired = false,
-                remainingSeconds = 0L,
+                remainingMillis = nonAllFreeRemainingMs,
+                remainingSeconds = nonAllFreeRemainingSec,
+                trialStartedAtMs = firstInstall,
+                trialExpiresAtMs = trialEndTs,
                 deviceId = deviceId,
                 unlockMethod = unlockMethod ?: if (globalAllFree) "GLOBAL_ALL_FREE" else "ADMIN_REMOTE_VIP",
                 unlockedTxnId = unlockedTxnId,
@@ -926,7 +1364,10 @@ class TrialLicenseManager private constructor(
                 banglishTotalDurationSeconds = banglishTotalDurationSec,
                 vipStatusCode = STATUS_LIFETIME_VIP,
                 isTrialExpired = trialExpired,
-                remainingSeconds = trialRemainingSec,
+                remainingMillis = 0L,
+                remainingSeconds = 0L,
+                trialStartedAtMs = firstInstall,
+                trialExpiresAtMs = trialEndTs,
                 deviceId = deviceId,
                 unlockMethod = unlockMethod,
                 unlockedTxnId = unlockedTxnId,
@@ -936,11 +1377,16 @@ class TrialLicenseManager private constructor(
             )
         }
 
-        val customOverrideExpiryMs = deviceOverrides.customExpiryTimestampMs
-        val subExpiryMs = maxOf(prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L), customOverrideExpiryMs)
+        val customOverrideExpiryMs = FirebaseRemoteManager.normalizeEpochMs(deviceOverrides.customExpiryTimestampMs)
+            .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+        val localVipExpiryMs = FirebaseRemoteManager.normalizeEpochMs(prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L))
+            .takeIf { it in 1L..(nowServer + MAX_VALID_SUBSCRIPTION_SPAN_MS) } ?: 0L
+        val subExpiryMs = maxOf(localVipExpiryMs, customOverrideExpiryMs)
         if (subExpiryMs > nowServer) {
-            val remSec = ((subExpiryMs - nowServer) + 999L) / 1000L
-            val isFromCustomOverride = customOverrideExpiryMs > prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
+            // Strictly clamp remainingMillis to 0..(trialDays * 86_400_000L) whenever lifetime != true && globalAllFree != true && adminAllFree != true
+            val clampedSubRemainingMs = (subExpiryMs - nowServer).coerceIn(0L, effectiveTrialDurationMs)
+            val clampedSubRemainingSec = if (clampedSubRemainingMs <= 0L) 0L else (clampedSubRemainingMs + 999L) / 1000L
+            val isFromCustomOverride = customOverrideExpiryMs > localVipExpiryMs
             val subPlan = prefs.getString(KEY_ACTIVE_SUB_PLAN, RemoteAdminConfig.PLAN_MONTHLY).orEmpty()
             val isWeekly = !isFromCustomOverride && subPlan.equals(RemoteAdminConfig.PLAN_WEEKLY, ignoreCase = true)
             val statusCode = when {
@@ -962,7 +1408,10 @@ class TrialLicenseManager private constructor(
                 banglishTotalDurationSeconds = banglishTotalDurationSec,
                 vipStatusCode = statusCode,
                 isTrialExpired = trialExpired,
-                remainingSeconds = remSec,
+                remainingMillis = clampedSubRemainingMs,
+                remainingSeconds = clampedSubRemainingSec,
+                trialStartedAtMs = firstInstall,
+                trialExpiresAtMs = trialEndTs,
                 deviceId = deviceId,
                 unlockMethod = if (isFromCustomOverride) "ADMIN_CUSTOM_EXPIRY" else (unlockMethod ?: "UPI_TIMED"),
                 unlockedTxnId = unlockedTxnId,
@@ -985,7 +1434,10 @@ class TrialLicenseManager private constructor(
             banglishTotalDurationSeconds = banglishTotalDurationSec,
             vipStatusCode = if (trialExpired) STATUS_EXPIRED else STATUS_TRIAL,
             isTrialExpired = trialExpired,
+            remainingMillis = trialRemainingMs,
             remainingSeconds = trialRemainingSec,
+            trialStartedAtMs = firstInstall,
+            trialExpiresAtMs = trialEndTs,
             deviceId = deviceId,
             adminConfig = adminConfig,
             deviceOverrides = deviceOverrides,
@@ -996,31 +1448,44 @@ class TrialLicenseManager private constructor(
     /**
      * Runs strictly on `Dispatchers.IO`.
      * Reconciles `SharedPreferences` with encrypted `Documents/.ai_keyboard_trial.dat` (and
-     * `context.filesDir` fallback). Always takes the earliest `first_install_timestamp` and
+     * `context.filesDir` fallback). Always takes the earliest valid `first_install_timestamp` and
      * largest `max_seen_elapsed_ms` so reinstall or clock tampering cannot reset the 7-day trial.
      */
     private fun reconcileAndPersistTrialStateOnIo(forcePersistToDocuments: Boolean): TrialRecord {
-        val nowWall = System.currentTimeMillis()
+        val nowWall = currentServerOrUtcMs()
         val nowElapsed = SystemClock.elapsedRealtime()
 
         val diskRecord = readEncryptedTrialRecord()?.takeIf {
-            it.deviceId.equals(deviceId, ignoreCase = true)
+            it.deviceId.equals(deviceId, ignoreCase = true) &&
+                FirebaseRemoteManager.normalizeEpochMs(it.firstInstallTimestampMs) > 0L
+        }?.let { rec ->
+            val cleanFirst = FirebaseRemoteManager.normalizeEpochMs(rec.firstInstallTimestampMs)
+            val cleanMax = if (rec.maxSeenElapsedMs in 0L..MAX_REASONABLE_ELAPSED_MS) rec.maxSeenElapsedMs else 0L
+            val cleanLast = FirebaseRemoteManager.normalizeEpochMs(rec.lastSeenWallMs).takeIf { it > 0L } ?: cleanFirst
+            rec.copy(
+                firstInstallTimestampMs = cleanFirst,
+                maxSeenElapsedMs = cleanMax,
+                lastSeenWallMs = cleanLast
+            )
         }
 
-        val hasLocalFirst = prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS) || prefs.contains(KEY_FIRST_LAUNCH_WALL_MS)
-        val localFirst = when {
-            prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS) -> prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, nowWall)
-            prefs.contains(KEY_FIRST_LAUNCH_WALL_MS) -> prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, nowWall)
-            else -> nowWall
-        }
-        val localMaxElapsed = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L).coerceAtLeast(0L)
-        val localLastWall = prefs.getLong(KEY_LAST_SEEN_WALL_MS, localFirst)
+        val normalizedLocalFirst = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+        ).takeIf { it > 0L }
+            ?: FirebaseRemoteManager.normalizeEpochMs(prefs.getLong(KEY_FIRST_LAUNCH_WALL_MS, 0L)).takeIf { it > 0L }
+        val hasLocalFirst = normalizedLocalFirst != null
+        val localFirst = normalizedLocalFirst ?: nowWall
+        val rawLocalMax = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
+        val localMaxElapsed = if (hasLocalFirst && rawLocalMax in 0L..MAX_REASONABLE_ELAPSED_MS) rawLocalMax else 0L
+        val localLastWall = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_LAST_SEEN_WALL_MS, localFirst)
+        ).takeIf { it > 0L } ?: localFirst
         val localFirstMono = if (prefs.contains(KEY_FIRST_LAUNCH_ELAPSED_MS)) {
             prefs.getLong(KEY_FIRST_LAUNCH_ELAPSED_MS, nowElapsed)
         } else {
             nowElapsed
         }
-        val localExpired = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
+        val localExpired = if (hasLocalFirst) prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false) else false
 
         val mergedFirstInstall = when {
             diskRecord != null && hasLocalFirst -> minOf(diskRecord.firstInstallTimestampMs, localFirst)
@@ -1033,24 +1498,51 @@ class TrialLicenseManager private constructor(
             localLastWall
         )
 
+        val localNow = System.currentTimeMillis()
+        val localLastLocalWall = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_LAST_LOCAL_WALL_MS, localFirst)
+        ).takeIf { it > 0L } ?: localFirst
+        val detectedReinstallFromDisk = !hadLocalPriorInstallOnBoot && diskRecord != null
+        val prevReinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false)
+        val prevReinstallCount = prefs.getInt(KEY_REINSTALL_COUNT, 0)
+        val newReinstallCount = if (detectedReinstallFromDisk && reinstallRecordedThisSession.compareAndSet(false, true)) {
+            prevReinstallCount + 1
+        } else {
+            prevReinstallCount
+        }
+
         val monoDelta = if (nowElapsed >= localFirstMono) (nowElapsed - localFirstMono) else 0L
         val wallDelta = (nowWall - mergedFirstInstall).coerceAtLeast(0L)
-        val clockRolledBack = nowWall + CLOCK_ROLLBACK_TOLERANCE_MS < mergedLastWall
+        val clockRolledBack = (nowWall + CLOCK_ROLLBACK_TOLERANCE_MS < mergedLastWall) ||
+            (localNow + CLOCK_ROLLBACK_TOLERANCE_MS < localLastLocalWall)
+        val prevRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
+        val prevRollbackCount = prefs.getInt(KEY_CLOCK_ROLLBACK_COUNT, 0)
+        val newRollbackCount = if (clockRolledBack && rollbackRecordedThisSession.compareAndSet(false, true)) {
+            prevRollbackCount + 1
+        } else {
+            prevRollbackCount
+        }
 
         val previousMaxElapsed = maxOf(diskRecord?.maxSeenElapsedMs ?: 0L, localMaxElapsed)
         val mergedMaxElapsed = maxOf(previousMaxElapsed, wallDelta, monoDelta)
 
+        val effectiveTrialDurationMs = readCachedAdminConfig().trialDurationMs
         val isExpired = localExpired ||
             (diskRecord?.expired == true) ||
             clockRolledBack ||
-            mergedMaxElapsed >= TRIAL_DURATION_MS
+            mergedMaxElapsed >= effectiveTrialDurationMs
 
         val updatedLastWall = maxOf(mergedLastWall, nowWall)
+        val updatedLastLocalWall = maxOf(localLastLocalWall, localNow)
 
         val record = TrialRecord(
             deviceId = deviceId,
             firstInstallTimestampMs = mergedFirstInstall,
-            maxSeenElapsedMs = if (isExpired) maxOf(mergedMaxElapsed, TRIAL_DURATION_MS) else mergedMaxElapsed,
+            maxSeenElapsedMs = if (isExpired) {
+                maxOf(mergedMaxElapsed, effectiveTrialDurationMs)
+            } else {
+                mergedMaxElapsed
+            },
             lastSeenWallMs = updatedLastWall,
             expired = isExpired
         )
@@ -1062,7 +1554,16 @@ class TrialLicenseManager private constructor(
             putLong(KEY_FIRST_LAUNCH_ELAPSED_MS, localFirstMono)
             putLong(KEY_MAX_SEEN_ELAPSED_MS, record.maxSeenElapsedMs)
             putLong(KEY_LAST_SEEN_WALL_MS, record.lastSeenWallMs)
+            putLong(KEY_LAST_LOCAL_WALL_MS, updatedLastLocalWall)
             putBoolean(KEY_TRIAL_EXPIRED_STICKY, record.expired)
+            if (detectedReinstallFromDisk || prevReinstallDetected) {
+                putBoolean(KEY_REINSTALL_DETECTED, true)
+                putInt(KEY_REINSTALL_COUNT, newReinstallCount)
+            }
+            if (clockRolledBack || prevRollbackDetected) {
+                putBoolean(KEY_CLOCK_ROLLBACK_DETECTED, true)
+                putInt(KEY_CLOCK_ROLLBACK_COUNT, newRollbackCount)
+            }
         }
         lastPrefCheckpointMs = nowWall
 
@@ -1238,7 +1739,7 @@ class TrialLicenseManager private constructor(
 
     private fun buildCleanUpiUri(amountFormatted: String): String {
         return "upi://pay" +
-            "?pa=${Uri.encode(MERCHANT_UPI_ID)}" +
+            "?pa=$MERCHANT_UPI_ID" +
             "&pn=${Uri.encode(MERCHANT_NAME)}" +
             "&am=$amountFormatted" +
             "&cu=INR"
@@ -1357,8 +1858,9 @@ class TrialLicenseManager private constructor(
             return UpiVerificationResult.Failed("ResponseCode=$responseCode")
         }
 
-        val verifiedId = listOf(txnId, approvalRef).firstOrNull { isAuthenticTxnIdentifier(it) }
-            ?: return UpiVerificationResult.Failed("Missing valid txnId / ApprovalRefNo")
+        val verifiedId = listOf(txnId, approvalRef, returnedTxnRef, expectedTxnRef.orEmpty())
+            .firstOrNull { isAuthenticTxnIdentifier(it) }
+            ?: "UPI_${System.currentTimeMillis()}"
 
         val normalizedScope = normalizePlanScope(planScope)
         val currentAdminCfg = readCachedAdminConfig()
@@ -1433,6 +1935,7 @@ class TrialLicenseManager private constructor(
         txnId: String
     ) {
         val now = currentServerOrUtcMs()
+        lastLocalPurchaseAtMs = now
         val existingExpiry = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L)
         val baseTime = maxOf(now, existingExpiry)
         val newExpiry = baseTime + durationMs
@@ -1448,23 +1951,25 @@ class TrialLicenseManager private constructor(
 
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
-        syncDeviceToFirebase(state = updated, force = true)
+        syncDeviceToFirebase(state = updated, force = true, isPurchaseEvent = true)
     }
 
     private fun markBanglishLifetimeUnlocked(
         method: String,
         txnId: String
     ) {
+        val now = currentServerOrUtcMs()
+        lastLocalPurchaseAtMs = now
         editPrefsSafely {
             putBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, true)
             putString(KEY_UNLOCK_METHOD, method)
             putString(KEY_UNLOCK_TXN_ID, txnId)
-            putLong(KEY_UNLOCKED_AT_MS, currentServerOrUtcMs())
+            putLong(KEY_UNLOCKED_AT_MS, now)
         }
 
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
-        syncDeviceToFirebase(state = updated, force = true)
+        syncDeviceToFirebase(state = updated, force = true, isPurchaseEvent = true)
     }
 
     private fun markTimedSubscriptionUnlocked(
@@ -1474,6 +1979,7 @@ class TrialLicenseManager private constructor(
         txnId: String
     ) {
         val now = currentServerOrUtcMs()
+        lastLocalPurchaseAtMs = now
         val existingExpiry = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L)
         val baseTime = maxOf(now, existingExpiry)
         val newExpiry = baseTime + durationMs
@@ -1488,7 +1994,7 @@ class TrialLicenseManager private constructor(
 
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
-        syncDeviceToFirebase(state = updated, force = true)
+        syncDeviceToFirebase(state = updated, force = true, isPurchaseEvent = true)
     }
 
     private fun markLifetimeUnlocked(
@@ -1496,17 +2002,19 @@ class TrialLicenseManager private constructor(
         txnId: String,
         writeLicenseFile: Boolean
     ) {
+        val now = currentServerOrUtcMs()
+        lastLocalPurchaseAtMs = now
         editPrefsSafely {
             putBoolean(KEY_IS_LIFETIME_UNLOCKED, true)
             putBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
             putString(KEY_UNLOCK_METHOD, method)
             putString(KEY_UNLOCK_TXN_ID, txnId)
-            putLong(KEY_UNLOCKED_AT_MS, currentServerOrUtcMs())
+            putLong(KEY_UNLOCKED_AT_MS, now)
         }
 
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
-        syncDeviceToFirebase(state = updated, force = true)
+        syncDeviceToFirebase(state = updated, force = true, isPurchaseEvent = true)
 
         if (writeLicenseFile) {
             ioScope.launch {
@@ -1580,7 +2088,8 @@ class TrialLicenseManager private constructor(
             record.maxSeenElapsedMs,
             record.expired
         )
-        val plain = "v=1\n" +
+        val plain = "v=5\n" +
+            "policy_version=${record.policyVersion}\n" +
             "deviceId=${record.deviceId}\n" +
             "first_install_timestamp=${record.firstInstallTimestampMs}\n" +
             "max_seen_elapsed_ms=${record.maxSeenElapsedMs}\n" +
@@ -1593,6 +2102,12 @@ class TrialLicenseManager private constructor(
     private fun readEncryptedTrialRecord(): TrialRecord? {
         val raw = readRawDocumentText(HIDDEN_TRIAL_FILENAME) ?: return null
         val plain = decryptWithAes(raw, deriveDeviceAesKey(deviceId), "AIKB_TRIAL_V1:") ?: return null
+        val policyVersion = extractPlainField(plain, "policy_version").toIntOrNull()
+            ?: extractPlainField(plain, "v").toIntOrNull()
+            ?: 1
+        if (policyVersion < CURRENT_TRIAL_POLICY_VERSION) {
+            return null
+        }
         val dev = extractPlainField(plain, "deviceId")
         val firstInstall = extractPlainField(plain, "first_install_timestamp").toLongOrNull() ?: return null
         val maxElapsed = extractPlainField(plain, "max_seen_elapsed_ms").toLongOrNull() ?: 0L
@@ -1603,12 +2118,16 @@ class TrialLicenseManager private constructor(
         if (!MessageDigest.isEqual(sig.toByteArray(Charsets.UTF_8), expectedSig.toByteArray(Charsets.UTF_8))) {
             return null
         }
+        if (firstInstall <= FirebaseRemoteManager.MIN_VALID_EPOCH_MS || maxElapsed !in 0L..MAX_REASONABLE_ELAPSED_MS) {
+            return null
+        }
         return TrialRecord(
             deviceId = dev,
             firstInstallTimestampMs = firstInstall,
             maxSeenElapsedMs = maxElapsed.coerceAtLeast(0L),
             lastSeenWallMs = lastWall,
-            expired = expired
+            expired = expired,
+            policyVersion = policyVersion
         )
     }
 
@@ -1818,16 +2337,19 @@ class TrialLicenseManager private constructor(
         const val STATUS_LIFETIME_VIP = "lifetime_vip"
         const val STATUS_ADMIN_FREE_VIP = "admin_free_vip"
         const val STATUS_EXPIRED = "expired"
+        const val STATUS_BLOCKED = "blocked"
 
         private const val HIDDEN_LICENSE_FILENAME = ".ai_keyboard_vip.lic"
         private const val LEGACY_LICENSE_FILENAME = ".rakib_official_vip.lic"
         private const val HIDDEN_TRIAL_FILENAME = ".ai_keyboard_trial.dat"
         private const val LICENSE_SECRET_SALT = "RAKIB_QUALITY_FOODS_2026_SECRET"
-        private const val CURRENT_TRIAL_POLICY_VERSION = 4
+        private const val CURRENT_TRIAL_POLICY_VERSION = 5
         private const val CLOCK_ROLLBACK_TOLERANCE_MS = 120_000L
+        private const val MAX_REASONABLE_ELAPSED_MS = 3650L * 86_400_000L
+        private const val MAX_VALID_SUBSCRIPTION_SPAN_MS = 366L * 86_400_000L
         private const val TRIAL_DISK_SYNC_INTERVAL_MS = 60_000L
         private const val PREF_CHECKPOINT_INTERVAL_MS = 10_000L
-        private const val FIREBASE_SYNC_MIN_INTERVAL_MS = 45_000L
+        private const val FIREBASE_SYNC_MIN_INTERVAL_MS = 25_000L
 
         private const val PREFS_NAME = "rakib_trial_license_prefs"
         private const val KEY_TRIAL_POLICY_VERSION = "trial_policy_version"
@@ -1845,6 +2367,7 @@ class TrialLicenseManager private constructor(
         private const val KEY_ADMIN_GRANTED_VIP = "admin_granted_vip"
         private const val KEY_ADMIN_ALL_FREE_DEVICE = "admin_all_free_device"
         private const val KEY_ADMIN_GLOBAL_ALL_FREE = "admin_global_all_free"
+        private const val KEY_DEVICE_BLOCKED = "device_blocked"
         private const val KEY_DEVICE_CUSTOM_EXPIRY_MS = "device_custom_expiry_ms"
         private const val KEY_VIP_EXPIRY_TIMESTAMP_MS = "vip_expiry_timestamp_ms"
         private const val KEY_ACTIVE_SUB_PLAN = "active_sub_plan"
@@ -1875,12 +2398,23 @@ class TrialLicenseManager private constructor(
         private const val KEY_ADMIN_BANNER2_IMAGE = "admin_banner2_image"
         private const val KEY_ADMIN_BANNER2_TITLE = "admin_banner2_title"
         private const val KEY_ADMIN_BANNER2_SUBTITLE = "admin_banner2_subtitle"
+        private const val KEY_ADMIN_FREE_THEME_IDS_CSV = "admin_free_theme_ids_csv"
+        private const val KEY_ADMIN_OFFER_TITLE = "admin_offer_title"
+        private const val KEY_ADMIN_OFFER_MSG_BN = "admin_offer_msg_bn"
+        private const val KEY_ADMIN_OFFER_MSG_EN = "admin_offer_msg_en"
+        private const val KEY_ADMIN_OFFER_INTERVAL_DAYS = "admin_offer_interval_days"
         private const val KEY_DEVICE_ALLOW_RGB_THEMES = "device_allow_rgb_themes"
         private const val KEY_DEVICE_ALLOW_BANGLISH = "device_allow_banglish"
         private const val KEY_DEVICE_ALLOW_CALL_BAR = "device_allow_call_bar"
         private const val KEY_DEVICE_ALLOW_RGB_STICKER = "device_allow_rgb_sticker"
         private const val KEY_DEVICE_ALLOW_STYLISH_FONTS = "device_allow_stylish_fonts"
         private const val KEY_DEVICE_ALLOW_AI_HUB = "device_allow_ai_hub"
+        private const val KEY_LAST_LOCAL_WALL_MS = "last_local_wall_ms"
+        private const val KEY_REINSTALL_DETECTED = "reinstall_detected"
+        private const val KEY_REINSTALL_COUNT = "reinstall_count"
+        private const val KEY_CLOCK_ROLLBACK_DETECTED = "clock_rollback_detected"
+        private const val KEY_CLOCK_ROLLBACK_COUNT = "clock_rollback_count"
+        private const val KEY_LOCAL_TAMPER_DETECTED = "local_tamper_detected"
         private const val KEY_PREFS_INTEGRITY_HMAC = "prefs_integrity_hmac"
 
         @Volatile

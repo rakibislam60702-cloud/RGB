@@ -469,12 +469,13 @@ object RgbLightingEngine {
                     val distinct = if (touchEffect == TouchTypingEffect.TOUCH_SPARK) {
                         distinctNeonColorForKey("k$row$col", row * 17 + col * 31)
                     } else {
-                        lerp(primary, secondary, ((sin(timeSec * 24f) + 1f) * 0.5f))
+                        lerp(primary, secondary, ((sin(timeSec * 3.2f) + 1f) * 0.5f))
                     }
-                    lerp(distinct, Color.White, fade * 0.35f)
-                        .copy(alpha = (0.38f + fade * 0.62f) * glowIntensity)
+                    val smoothFade = fade * fade * (2.2f - 1.2f * fade)
+                    lerp(distinct, Color.White, smoothFade * 0.22f)
+                        .copy(alpha = (0.28f + smoothFade * 0.56f) * glowIntensity)
                 } else if (touchEffect != TouchTypingEffect.TOUCH_SPARK && dr == 0 && dc == 1) {
-                    secondary.copy(alpha = (fade * 0.42f * glowIntensity).coerceIn(0f, 1f))
+                    secondary.copy(alpha = (fade * 0.34f * glowIntensity).coerceIn(0f, 1f))
                 } else Color.Transparent
             }
 
@@ -518,12 +519,13 @@ object RgbLightingEngine {
             }
 
             TouchEffectVisualStyle.RISING_EMBER -> {
+                val flicker = 0.85f + 0.15f * sin(timeSec * 4.5f + col * 0.9f)
                 if (dr == 0 && dc == 0) {
-                    lerp(primary, secondary, fade).copy(alpha = (0.42f + fade * 0.58f) * glowIntensity)
+                    lerp(primary, secondary, fade).copy(alpha = ((0.38f + fade * 0.52f) * flicker * glowIntensity).coerceIn(0f, 1f))
                 } else if (col == curCol && row == (curRow - 1).coerceAtLeast(0)) {
-                    secondary.copy(alpha = (fade * 0.75f * glowIntensity).coerceIn(0f, 1f))
+                    lerp(primary, secondary, 0.72f).copy(alpha = (fade * 0.68f * flicker * glowIntensity).coerceIn(0f, 1f))
                 } else if (dc == 1 && row == (curRow - 1).coerceAtLeast(0)) {
-                    primary.copy(alpha = (fade * 0.36f * glowIntensity).coerceIn(0f, 1f))
+                    primary.copy(alpha = (fade * 0.34f * flicker * glowIntensity).coerceIn(0f, 1f))
                 } else Color.Transparent
             }
 
@@ -574,13 +576,13 @@ object RgbLightingEngine {
 
             TouchEffectVisualStyle.CHRONO_ORBIT -> {
                 when {
-                    dr == 0 && dc == 0 -> lerp(primary, Color.White, 0.3f)
-                        .copy(alpha = (0.45f + fade * 0.55f) * glowIntensity)
+                    dr == 0 && dc == 0 -> lerp(primary, Color.White, 0.24f)
+                        .copy(alpha = (0.40f + fade * 0.48f) * glowIntensity)
                     dr <= 1 && dc <= 1 -> {
                         val angle = atan2((row - curRow).toDouble(), (col - curCol).toDouble()).toFloat()
-                        val orbit = ((sin(angle * 2f - timeSec * 8f) + 1f) * 0.5f)
+                        val orbit = ((sin(angle * 2f - timeSec * 3.2f) + 1f) * 0.5f)
                         lerp(primary, secondary, orbit)
-                            .copy(alpha = ((0.35f + orbit * 0.65f) * fade * glowIntensity).coerceIn(0f, 1f))
+                            .copy(alpha = ((0.30f + orbit * 0.58f) * fade * glowIntensity).coerceIn(0f, 1f))
                     }
                     else -> Color.Transparent
                 }

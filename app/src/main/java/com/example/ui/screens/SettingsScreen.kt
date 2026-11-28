@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
+import com.example.ui.components.BlueVerifiedBadge
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -468,6 +469,12 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (licenseState.isVipActive) {
+                        BlueVerifiedBadge(
+                            size = 17.dp,
+                            contentDescription = "VIP Verified"
+                        )
+                    }
                     Text(
                         text = statusLabel,
                         fontFamily = FontFamily.Default,

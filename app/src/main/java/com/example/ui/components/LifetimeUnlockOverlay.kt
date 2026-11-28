@@ -88,7 +88,9 @@ import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NotoSansBengaliFamily
 import com.example.ui.theme.OrbitronFamily
+import com.example.ui.theme.PlusJakartaSansFamily
 import com.example.ui.theme.RoyalGold
+import com.example.ui.theme.SpaceGroteskFamily
 import com.example.ui.theme.luminousGlassCard
 import com.example.ui.theme.midnightNavyIndigoWallpaper
 import com.google.zxing.BarcodeFormat
@@ -162,6 +164,18 @@ fun LifetimeUnlockScreen(
         }
     }
 
+    // Automatically close paywall when remote/UPI verification marks a pending payment as approved while open
+    val initialApprovedTxnRef = remember {
+        licenseState.pendingPayment?.takeIf { it.isApproved }?.txnRef
+    }
+    LaunchedEffect(licenseState.pendingPayment?.isApproved, licenseState.pendingPayment?.txnRef) {
+        val approvedPayment = licenseState.pendingPayment?.takeIf { it.isApproved } ?: return@LaunchedEffect
+        if (approvedPayment.txnRef.isNotBlank() && approvedPayment.txnRef != initialApprovedTxnRef) {
+            Toast.makeText(context, "✅ পেমেন্ট সফল! প্ল্যান আনলক হয়েছে", Toast.LENGTH_SHORT).show()
+            onDismiss()
+        }
+    }
+
     val vipQrPayload = remember(adminConfig.vipPrice, adminConfig.vipDurationDays, vipDiscountedAmount) {
         buildUpiQrPayload(
             TrialLicenseManager.PLAN_SCOPE_VIP_FEATURES,
@@ -204,7 +218,7 @@ fun LifetimeUnlockScreen(
                 paymentStatusMessage = context.getString(R.string.bn_upi_pending)
             }
             is UpiVerificationResult.Failed -> {
-                paymentStatusMessage = context.getString(R.string.bn_upi_failed)
+                paymentStatusMessage = "⏳ পেমেন্ট সম্পন্ন হয়ে থাকলে কয়েক সেকেন্ডের মধ্যে অটো ভেরিফাই হয়ে যাবে — অথবা PhonePe/GPay দিয়ে আবার চেষ্টা করুন।"
             }
         }
     }
@@ -421,6 +435,55 @@ fun LifetimeUnlockScreen(
                     )
                 }
 
+                // Server-driven Offer Notice Card (from Firebase /admin_config/offer)
+                val hasOfferNotice = adminConfig.offerTitle.isNotBlank() ||
+                    adminConfig.offerMessageBn.isNotBlank() ||
+                    adminConfig.offerMessageEn.isNotBlank()
+                if (hasOfferNotice) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFF281808), Color(0xFF10253A))
+                                )
+                            )
+                            .border(1.dp, FlagshipGoldCyanBrush, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .testTag("server_offer_notice_card"),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        if (adminConfig.offerTitle.isNotBlank()) {
+                            Text(
+                                text = adminConfig.offerTitle,
+                                fontFamily = SpaceGroteskFamily,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = RoyalGold
+                            )
+                        }
+                        if (adminConfig.offerMessageBn.isNotBlank()) {
+                            Text(
+                                text = adminConfig.offerMessageBn,
+                                fontFamily = NotoSansBengaliFamily,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                color = Color.White
+                            )
+                        }
+                        if (adminConfig.offerMessageEn.isNotBlank()) {
+                            Text(
+                                text = adminConfig.offerMessageEn,
+                                fontFamily = PlusJakartaSansFamily,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                                color = NeonCyan
+                            )
+                        }
+                    }
+                }
+
                 // =========================================================================
                 // CARD 1: ✨ RGB & VIP Features (Excludes Romanized Bengali) — Independent Pay + QR
                 // =========================================================================
@@ -599,7 +662,7 @@ private fun IndependentVipFeaturesCard(
                     color = Color.White.copy(alpha = 0.88f)
                 )
                 Text(
-                    text = "(Romanized Bengali আলাদা প্ল্যান)",
+                    text = "(Special Feature • Rumi / Nice Bengali আলাদা প্ল্যান)",
                     fontFamily = NotoSansBengaliFamily,
                     fontSize = 10.5.sp,
                     color = NeonAmber.copy(alpha = 0.92f)
@@ -655,10 +718,9 @@ private fun IndependentVipFeaturesCard(
                     .testTag("btn_pay_vip_features")
             ) {
                 if (licenseState.isLifetimeUnlocked || licenseState.isGlobalOrAdminAllFree) {
-                    Icon(
-                        imageVector = Icons.Filled.Verified,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                    BlueVerifiedBadge(
+                        size = 17.dp,
+                        contentDescription = "VIP Verified"
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -766,16 +828,16 @@ private fun IndependentBanglishCard(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = "🇮🇳 Romanized Bengali",
+                    text = "🇮🇳 Special Feature • Nice Bengali (Rumi)",
                     fontFamily = NotoSansBengaliFamily,
-                    fontSize = 15.5.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = RoyalGold
                 )
                 Text(
-                    text = "বাংলা → English অক্ষর ইঞ্জিন (আলাদা সাবস্ক্রিপশন)",
+                    text = "বাংলা → Romanized English ইঞ্জিন (Lifetime VIP-তে ফ্রি নয় — আলাদা প্ল্যান)",
                     fontFamily = NotoSansBengaliFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.9f)
                 )
             }
@@ -886,10 +948,9 @@ private fun IndependentBanglishCard(
                     .testTag("btn_pay_banglish")
             ) {
                 if (isPermanent) {
-                    Icon(
-                        imageVector = Icons.Filled.Verified,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                    BlueVerifiedBadge(
+                        size = 17.dp,
+                        contentDescription = "VIP Verified"
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(

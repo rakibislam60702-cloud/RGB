@@ -161,7 +161,8 @@ object AntiTamperGuard {
         adminGlobalAllFree: Boolean,
         deviceCustomExpiryMs: Long,
         unlockMethod: String?,
-        unlockTxnId: String?
+        unlockTxnId: String?,
+        isDeviceBlocked: Boolean = false
     ): String {
         val secretKeyMaterial = "$deviceId|$rawAndroidId|$packageName|$HMAC_DOMAIN_SALT"
         val keyHash = MessageDigest.getInstance("SHA-256")
@@ -180,7 +181,66 @@ object AntiTamperGuard {
             append(adminGlobalAllFree).append('|')
             append(deviceCustomExpiryMs).append('|')
             append(unlockMethod.orEmpty()).append('|')
-            append(unlockTxnId.orEmpty())
+            append(unlockTxnId.orEmpty()).append('|')
+            append(isDeviceBlocked)
+        }
+
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(keyHash, "HmacSHA256"))
+        val raw = mac.doFinal(payload.toByteArray(Charsets.UTF_8))
+        return raw.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Hardened v2 HMAC covering BOTH VIP/Admin privileges AND local trial timestamps,
+     * sticky expiry, and security anti-tamper flags so XML edits to trial start/expiry
+     * or rollback counters are caught immediately.
+     */
+    fun computePrefsIntegrityHmacV2(
+        deviceId: String,
+        rawAndroidId: String,
+        packageName: String,
+        isLifetimeUnlocked: Boolean,
+        isBanglishLifetimeUnlocked: Boolean,
+        banglishExpiryMs: Long,
+        vipExpiryMs: Long,
+        adminGrantedVip: Boolean,
+        adminAllFreeDevice: Boolean,
+        adminGlobalAllFree: Boolean,
+        deviceCustomExpiryMs: Long,
+        unlockMethod: String?,
+        unlockTxnId: String?,
+        isDeviceBlocked: Boolean,
+        firstInstallTimestampMs: Long,
+        maxSeenElapsedMs: Long,
+        trialExpiredSticky: Boolean,
+        reinstallDetected: Boolean,
+        clockRollbackDetected: Boolean
+    ): String {
+        val secretKeyMaterial = "$deviceId|$rawAndroidId|$packageName|$HMAC_DOMAIN_SALT"
+        val keyHash = MessageDigest.getInstance("SHA-256")
+            .digest(secretKeyMaterial.toByteArray(Charsets.UTF_8))
+
+        val payload = buildString {
+            append("v2|")
+            append(deviceId).append('|')
+            append(packageName).append('|')
+            append(isLifetimeUnlocked).append('|')
+            append(isBanglishLifetimeUnlocked).append('|')
+            append(banglishExpiryMs).append('|')
+            append(vipExpiryMs).append('|')
+            append(adminGrantedVip).append('|')
+            append(adminAllFreeDevice).append('|')
+            append(adminGlobalAllFree).append('|')
+            append(deviceCustomExpiryMs).append('|')
+            append(unlockMethod.orEmpty()).append('|')
+            append(unlockTxnId.orEmpty()).append('|')
+            append(isDeviceBlocked).append('|')
+            append(firstInstallTimestampMs).append('|')
+            append(maxSeenElapsedMs).append('|')
+            append(trialExpiredSticky).append('|')
+            append(reinstallDetected).append('|')
+            append(clockRollbackDetected)
         }
 
         val mac = Mac.getInstance("HmacSHA256")
@@ -203,7 +263,8 @@ object AntiTamperGuard {
         adminGlobalAllFree: Boolean,
         deviceCustomExpiryMs: Long,
         unlockMethod: String?,
-        unlockTxnId: String?
+        unlockTxnId: String?,
+        isDeviceBlocked: Boolean = false
     ): Boolean {
         val actual = providedHmac?.trim().orEmpty()
         if (actual.isEmpty()) return false
@@ -220,12 +281,84 @@ object AntiTamperGuard {
             adminGlobalAllFree = adminGlobalAllFree,
             deviceCustomExpiryMs = deviceCustomExpiryMs,
             unlockMethod = unlockMethod,
-            unlockTxnId = unlockTxnId
+            unlockTxnId = unlockTxnId,
+            isDeviceBlocked = isDeviceBlocked
         )
         return MessageDigest.isEqual(
             actual.toByteArray(Charsets.UTF_8),
             expected.toByteArray(Charsets.UTF_8)
         )
+    }
+
+    fun verifyPrefsIntegrityHmacV2(
+        providedHmac: String?,
+        deviceId: String,
+        rawAndroidId: String,
+        packageName: String,
+        isLifetimeUnlocked: Boolean,
+        isBanglishLifetimeUnlocked: Boolean,
+        banglishExpiryMs: Long,
+        vipExpiryMs: Long,
+        adminGrantedVip: Boolean,
+        adminAllFreeDevice: Boolean,
+        adminGlobalAllFree: Boolean,
+        deviceCustomExpiryMs: Long,
+        unlockMethod: String?,
+        unlockTxnId: String?,
+        isDeviceBlocked: Boolean,
+        firstInstallTimestampMs: Long,
+        maxSeenElapsedMs: Long,
+        trialExpiredSticky: Boolean,
+        reinstallDetected: Boolean,
+        clockRollbackDetected: Boolean
+    ): Boolean {
+        val actual = providedHmac?.trim().orEmpty()
+        if (actual.isEmpty()) return false
+        val expected = computePrefsIntegrityHmacV2(
+            deviceId = deviceId,
+            rawAndroidId = rawAndroidId,
+            packageName = packageName,
+            isLifetimeUnlocked = isLifetimeUnlocked,
+            isBanglishLifetimeUnlocked = isBanglishLifetimeUnlocked,
+            banglishExpiryMs = banglishExpiryMs,
+            vipExpiryMs = vipExpiryMs,
+            adminGrantedVip = adminGrantedVip,
+            adminAllFreeDevice = adminAllFreeDevice,
+            adminGlobalAllFree = adminGlobalAllFree,
+            deviceCustomExpiryMs = deviceCustomExpiryMs,
+            unlockMethod = unlockMethod,
+            unlockTxnId = unlockTxnId,
+            isDeviceBlocked = isDeviceBlocked,
+            firstInstallTimestampMs = firstInstallTimestampMs,
+            maxSeenElapsedMs = maxSeenElapsedMs,
+            trialExpiredSticky = trialExpiredSticky,
+            reinstallDetected = reinstallDetected,
+            clockRollbackDetected = clockRollbackDetected
+        )
+        return MessageDigest.isEqual(
+            actual.toByteArray(Charsets.UTF_8),
+            expected.toByteArray(Charsets.UTF_8)
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    fun getSigningCertSha256Prefix(context: Context): String {
+        return runCatching {
+            val pm = context.packageManager
+            val certBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                val signers = info.signingInfo?.apkContentsSigners
+                    ?: info.signingInfo?.signingCertificateHistory
+                signers?.firstOrNull()?.toByteArray()
+            } else {
+                val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+                info.signatures?.firstOrNull()?.toByteArray()
+            } ?: return "unknown"
+            MessageDigest.getInstance("SHA-256")
+                .digest(certBytes)
+                .joinToString("") { "%02x".format(it) }
+                .take(16)
+        }.getOrDefault("unknown")
     }
 
     @Suppress("DEPRECATION")

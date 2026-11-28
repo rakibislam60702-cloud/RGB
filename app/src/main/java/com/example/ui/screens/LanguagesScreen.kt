@@ -212,7 +212,11 @@ fun LanguagesScreen(
                                     shape = RoundedCornerShape(12.dp)
                                 )
                                 .clickable {
-                                    if (isVipLocked) onOpenUnlockScreen() else onSelectLanguage(pack.catalog.id)
+                                    if (isVipLocked) {
+                                        if (pack.catalog.isVipOnly) onOpenBanglishVip() else onOpenUnlockScreen()
+                                    } else {
+                                        onSelectLanguage(pack.catalog.id)
+                                    }
                                 }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .testTag("globe_cycle_chip_${pack.catalog.id}"),

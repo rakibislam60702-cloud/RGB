@@ -22,10 +22,16 @@ class PermissionRequestActivity : Activity() {
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
-        if (alreadyGranted) {
+        val permPrefs = getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE)
+        if (alreadyGranted || permPrefs.getBoolean(KEY_MIC_ACTIVITY_PROMPTED_ONCE, false)) {
             finishQuietly()
             return
         }
+
+        permPrefs.edit()
+            .putBoolean(KEY_MIC_PROMPTED_ONCE, true)
+            .putBoolean(KEY_MIC_ACTIVITY_PROMPTED_ONCE, true)
+            .apply()
 
         ActivityCompat.requestPermissions(
             this,
@@ -51,5 +57,8 @@ class PermissionRequestActivity : Activity() {
 
     companion object {
         private const val REQ_RECORD_AUDIO = 4091
+        private const val PREFS_PERMISSIONS = "rakib_permissions_prefs"
+        private const val KEY_MIC_PROMPTED_ONCE = "mic_permission_prompted_once"
+        private const val KEY_MIC_ACTIVITY_PROMPTED_ONCE = "mic_activity_prompted_once"
     }
 }

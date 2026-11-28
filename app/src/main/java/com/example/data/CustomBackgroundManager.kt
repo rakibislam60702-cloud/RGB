@@ -16,6 +16,9 @@ import android.util.Base64
 import androidx.annotation.DrawableRes
 import androidx.compose.runtime.Immutable
 import com.example.R
+import com.example.model.TouchEffectCategory
+import com.example.model.TouchEffectVisualStyle
+import com.example.model.TouchTypingEffect
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -63,8 +66,8 @@ object BannerPresetCatalog {
     const val PRESET_AURORA_LIGHTS = "aurora_lights"
     const val PRESET_FIREFLY_NIGHT = "firefly_night"
 
-    /** Section 3: 10 Pure Static HD Photo Banners (No Animation). */
-    val staticBannerPresets: List<BannerThemePreset> = listOf(
+    /** Section 3: 104 Curated Static HD Photo Banners (10 flagship + 94 procedural studio scenes). */
+    private val baseStaticBannerPresets: List<BannerThemePreset> = listOf(
         BannerThemePreset(
             id = PRESET_SUNSET_GLOW,
             title = "Sunset Beach",
@@ -136,6 +139,105 @@ object BannerPresetCatalog {
             previewColors = listOf(0xFFFF6B00, 0xFF2B3A67, 0xFF0D1B3E)
         )
     )
+
+    private val expandedHdPhotoPresets: List<BannerThemePreset> = listOf(
+        BannerThemePreset("hd_crimson_eclipse", "Crimson Eclipse", "Deep ruby halo dusk", null, listOf(0xFFFF2A55, 0xFF7C1034, 0xFF14060F)),
+        BannerThemePreset("hd_glacier_mint", "Glacier Mint", "Arctic frosted teal", null, listOf(0xFF00F5D4, 0xFF0E7490, 0xFF061923)),
+        BannerThemePreset("hd_obsidian_gold", "Obsidian Gold", "24K luxury dark vein", null, listOf(0xFFFFD166, 0xFF8C6214, 0xFF0D0B09)),
+        BannerThemePreset("hd_lavender_cloud", "Lavender Cloud", "Soft pastel horizon", null, listOf(0xFFC084FC, 0xFF6366F1, 0xFF1B1438)),
+        BannerThemePreset("hd_tokyo_rain", "Tokyo Rain", "Neon reflections midnight", null, listOf(0xFF00E5FF, 0xFFFF2A85, 0xFF0A1024)),
+        BannerThemePreset("hd_sahara_dusk", "Sahara Dusk", "Warm amber desert sky", null, listOf(0xFFFF9E00, 0xFFB45309, 0xFF1F1006)),
+        BannerThemePreset("hd_emerald_velvet", "Emerald Velvet", "Royal deep forest silk", null, listOf(0xFF10B981, 0xFF065F46, 0xFF041712)),
+        BannerThemePreset("hd_cobalt_wave", "Cobalt Wave", "Oceanic twilight swell", null, listOf(0xFF3B82F6, 0xFF1D4ED8, 0xFF07112B)),
+        BannerThemePreset("hd_peach_sorbet", "Peach Sorbet", "Warm coral glow pastel", null, listOf(0xFFFF758F, 0xFFFFB347, 0xFF2F1426)),
+        BannerThemePreset("hd_cyber_violet", "Cyber Violet", "Synthwave laser mist", null, listOf(0xFFA855F7, 0xFFEC4899, 0xFF14092B)),
+        BannerThemePreset("hd_platinum_mesh", "Platinum Mesh", "Brushed titanium weave", null, listOf(0xFFCBD5E1, 0xFF475569, 0xFF0F172A)),
+        BannerThemePreset("hd_arctic_aurora", "Arctic Aurora", "Polar sky emerald ribbon", null, listOf(0xFF2DD4BF, 0xFF38BDF8, 0xFF071929)),
+        BannerThemePreset("hd_amethyst_silk", "Amethyst Silk", "Velvet royal gemstone", null, listOf(0xFFD946EF, 0xFF7E22CE, 0xFF180828)),
+        BannerThemePreset("hd_bronze_marble", "Bronze Marble", "Warm espresso stone", null, listOf(0xFFD97706, 0xFF78350F, 0xFF170D07)),
+        BannerThemePreset("hd_aqua_lagoon", "Aqua Lagoon", "Crystal reef horizon", null, listOf(0xFF22D3EE, 0xFF0284C7, 0xFF051829)),
+        BannerThemePreset("hd_neon_cherry", "Neon Cherry", "Vibrant blossom night", null, listOf(0xFFF43F5E, 0xFFBE185D, 0xFF1D0818)),
+        BannerThemePreset("hd_indigo_storm", "Indigo Storm", "Electric thunder sky", null, listOf(0xFF6366F1, 0xFF312E81, 0xFF090922)),
+        BannerThemePreset("hd_golden_honeycomb", "Golden Hive", "Warm luxury amber", null, listOf(0xFFFBBF24, 0xFFD97706, 0xFF1C1206)),
+        BannerThemePreset("hd_mint_macaron", "Mint Macaron", "Dreamy pastel jade", null, listOf(0xFF6EE7B7, 0xFF0D9488, 0xFF092422)),
+        BannerThemePreset("hd_stellar_slate", "Stellar Slate", "Deep cosmos graphite", null, listOf(0xFF60A5FA, 0xFF1E293B, 0xFF080C17)),
+        BannerThemePreset("hd_candy_floss", "Candy Floss", "Cotton sky pink-blue", null, listOf(0xFFF472B6, 0xFF60A5FA, 0xFF24163D)),
+        BannerThemePreset("hd_jade_dragon", "Jade Dragon", "Imperial green glow", null, listOf(0xFF00FF88, 0xFF047857, 0xFF031710)),
+        BannerThemePreset("hd_ruby_velvet", "Ruby Velvet", "Deep garnet luxury", null, listOf(0xFFE11D48, 0xFF881337, 0xFF19060D)),
+        BannerThemePreset("hd_moonlit_sand", "Moonlit Sand", "Silver dune twilight", null, listOf(0xFFE2E8F0, 0xFF64748B, 0xFF111827)),
+        BannerThemePreset("hd_cyber_lime", "Cyber Lime", "Acid neon gridglow", null, listOf(0xFFA3E635, 0xFF16A34A, 0xFF07190C)),
+        BannerThemePreset("hd_royal_plum", "Royal Plum", "Majestic orchid silk", null, listOf(0xFFC026D3, 0xFF6B21A8, 0xFF160726)),
+        BannerThemePreset("hd_tropical_dusk", "Tropical Dusk", "Mango teal sunset", null, listOf(0xFFFB923C, 0xFF14B8A6, 0xFF14182B)),
+        BannerThemePreset("hd_frost_diamond", "Frost Diamond", "Icy white sapphire", null, listOf(0xFFBAE6FD, 0xFF0EA5E9, 0xFF091B2E)),
+        BannerThemePreset("hd_espresso_gold", "Espresso Gold", "Roast velvet bronze", null, listOf(0xFFF59E0B, 0xFF451A03, 0xFF120A05)),
+        BannerThemePreset("hd_pixel_dawn", "Pixel Dawn", "Retro vapor horizon", null, listOf(0xFFFF7EB3, 0xFF7B2FFF, 0xFF110A2E)),
+        BannerThemePreset("hd_cyan_katana", "Cyan Katana", "Sharp samurai neon", null, listOf(0xFF00F0FF, 0xFF0EA5E9, 0xFF050E1C)),
+        BannerThemePreset("hd_blush_pearl", "Blush Pearl", "Iridescent rose mist", null, listOf(0xFFFBCFE8, 0xFFF472B6, 0xFF2B1226)),
+        BannerThemePreset("hd_deep_abyss", "Deep Abyss", "Mariana blue depth", null, listOf(0xFF38BDF8, 0xFF1E3A8A, 0xFF040B1A)),
+        BannerThemePreset("hd_solar_citrus", "Solar Citrus", "Tangerine gold burst", null, listOf(0xFFFACC15, 0xFFEA580C, 0xFF1F0F06)),
+        BannerThemePreset("hd_titanium_blue", "Titanium Blue", "Metallic midnight sheen", null, listOf(0xFF93C5FD, 0xFF1E40AF, 0xFF0A1124)),
+        BannerThemePreset("hd_berry_aurora", "Berry Aurora", "Cranberry sky light", null, listOf(0xFFFB7185, 0xFF9333EA, 0xFF180A26)),
+        BannerThemePreset("hd_jade_bamboo", "Jade Bamboo", "Zen emerald mist", null, listOf(0xFF34D399, 0xFF15803D, 0xFF061B11)),
+        BannerThemePreset("hd_champagne_silk", "Champagne Silk", "Soft ivory gold", null, listOf(0xFFFDE68A, 0xFFB45309, 0xFF1F160B)),
+        BannerThemePreset("hd_hyper_magenta", "Hyper Magenta", "Hot neon studio glow", null, listOf(0xFFFF00E5, 0xFF7C3AED, 0xFF170526)),
+        BannerThemePreset("hd_ocean_foam", "Ocean Foam", "Seafoam turquoise haze", null, listOf(0xFF5EEAD4, 0xFF0369A1, 0xFF061A26)),
+        BannerThemePreset("hd_copper_forge", "Copper Forge", "Molten bronze metallic", null, listOf(0xFFFB923C, 0xFF9A3412, 0xFF1A0B06)),
+        BannerThemePreset("hd_lilac_dream", "Lilac Dream", "Dreamy violet pastel", null, listOf(0xFFD8B4FE, 0xFF7E22CE, 0xFF1C1033)),
+        BannerThemePreset("hd_cobalt_laser", "Cobalt Laser", "Electric sapphire beams", null, listOf(0xFF00D4FF, 0xFF2563EB, 0xFF060E26)),
+        BannerThemePreset("hd_coral_reef", "Coral Reef", "Warm coral & sea teal", null, listOf(0xFFFF6B6B, 0xFF0D9488, 0xFF121826)),
+        BannerThemePreset("hd_onyx_silver", "Onyx Silver", "Stealth chrome gloss", null, listOf(0xFFE2E8F0, 0xFF334155, 0xFF090D16)),
+        BannerThemePreset("hd_amber_horizon", "Amber Horizon", "Sunset gold reflection", null, listOf(0xFFFBBF24, 0xFFDC2626, 0xFF1E0B09)),
+        BannerThemePreset("hd_orchid_night", "Orchid Night", "Moonlit magenta bloom", null, listOf(0xFFE879F9, 0xFF4C1D95, 0xFF130826)),
+        BannerThemePreset("hd_teal_carbon", "Teal Carbon", "Sport fiber aqua", null, listOf(0xFF14B8A6, 0xFF115E59, 0xFF061617)),
+        BannerThemePreset("hd_starlight_blue", "Starlight Blue", "Clear night constellations", null, listOf(0xFF7DD3FC, 0xFF1D4ED8, 0xFF060E24)),
+        BannerThemePreset("hd_rosewood_glow", "Rosewood Glow", "Warm mahogany satin", null, listOf(0xFFF43F5E, 0xFF9F1239, 0xFF1C0810)),
+        BannerThemePreset("hd_electric_teal", "Electric Teal", "High-volt aqua stream", null, listOf(0xFF00F5D4, 0xFF06B6D4, 0xFF051822)),
+        BannerThemePreset("hd_sunflower_dusk", "Sunflower Dusk", "Warm honey twilight", null, listOf(0xFFFDE047, 0xFFCA8A04, 0xFF1B1506)),
+        BannerThemePreset("hd_neon_orchid", "Neon Orchid", "Vivid purple-cyan mist", null, listOf(0xFFC084FC, 0xFF00E5FF, 0xFF120C2B)),
+        BannerThemePreset("hd_graphite_flame", "Graphite Flame", "Charcoal ember trace", null, listOf(0xFFFF4D00, 0xFF334155, 0xFF0A0D14)),
+        BannerThemePreset("hd_pastel_mint", "Pastel Mint", "Fresh spring breeze", null, listOf(0xFFA7F3D0, 0xFF059669, 0xFF082219)),
+        BannerThemePreset("hd_midnight_ruby", "Midnight Ruby", "Dark crimson shimmer", null, listOf(0xFFFB7185, 0xFF7F1D1D, 0xFF17050A)),
+        BannerThemePreset("hd_sky_marshmallow", "Sky Marshmallow", "Fluffy cloud daydream", null, listOf(0xFF93C5FD, 0xFFF9A8D4, 0xFF261E4A)),
+        BannerThemePreset("hd_gold_circuit", "Gold Circuit", "Luxury cyber microchip", null, listOf(0xFFFFD166, 0xFF00F5D4, 0xFF0F1420)),
+        BannerThemePreset("hd_aurora_rose", "Aurora Rose", "Pink northern lights", null, listOf(0xFFF472B6, 0xFF2DD4BF, 0xFF160E29)),
+        BannerThemePreset("hd_sapphire_ink", "Sapphire Ink", "Rich fountain pen blue", null, listOf(0xFF60A5FA, 0xFF1E3A8A, 0xFF060D21)),
+        BannerThemePreset("hd_velvet_cocoa", "Velvet Cocoa", "Silky chocolate cream", null, listOf(0xFFD6A87C, 0xFF78350F, 0xFF160C07)),
+        BannerThemePreset("hd_laser_lime", "Laser Lime", "Racing neon green", null, listOf(0xFF4ADE80, 0xFF00E5FF, 0xFF071A17)),
+        BannerThemePreset("hd_cosmos_pearl", "Cosmos Pearl", "Milky way opal glow", null, listOf(0xFFE0E7FF, 0xFF818CF8, 0xFF0D1029)),
+        BannerThemePreset("hd_sunset_cherry", "Sunset Cherry", "Crimson tangerine glow", null, listOf(0xFFFF5E7E, 0xFFFF9E00, 0xFF1E0B1A)),
+        BannerThemePreset("hd_iceberg_cyan", "Iceberg Cyan", "Crystal glacial ridge", null, listOf(0xFF67E8F9, 0xFF0E7490, 0xFF061822)),
+        BannerThemePreset("hd_bronze_lotus", "Bronze Lotus", "Antique rose copper", null, listOf(0xFFFDA4AF, 0xFFB45309, 0xFF1E0F12)),
+        BannerThemePreset("hd_cyber_phoenix", "Cyber Phoenix", "Neon flame feather", null, listOf(0xFFFF3D00, 0xFFFF00E5, 0xFF18071E)),
+        BannerThemePreset("hd_emerald_wave", "Emerald Wave", "Deep jade ocean glow", null, listOf(0xFF00FF88, 0xFF0EA5E9, 0xFF051A1C)),
+        BannerThemePreset("hd_royal_indigo", "Royal Indigo", "Velvet midnight crown", null, listOf(0xFF818CF8, 0xFF4338CA, 0xFF0A0B24)),
+        BannerThemePreset("hd_peach_blossom", "Peach Blossom", "Soft sakura morning", null, listOf(0xFFFECDD3, 0xFFFB7185, 0xFF28121E)),
+        BannerThemePreset("hd_neon_cobalt", "Neon Cobalt", "High contrast blue", null, listOf(0xFF00E5FF, 0xFF1D4ED8, 0xFF060E24)),
+        BannerThemePreset("hd_golden_dusk", "Golden Dusk", "Autumn amber breeze", null, listOf(0xFFF59E0B, 0xFF9333EA, 0xFF1A0F22)),
+        BannerThemePreset("hd_frost_violet", "Frost Violet", "Icy lavender crystal", null, listOf(0xFFC4B5FD, 0xFF06B6D4, 0xFF13112B)),
+        BannerThemePreset("hd_obsidian_cyan", "Obsidian Cyan", "Matte black aqua rim", null, listOf(0xFF22D3EE, 0xFF1E293B, 0xFF070B12)),
+        BannerThemePreset("hd_ruby_flare", "Ruby Flare", "Radiant scarlet prism", null, listOf(0xFFEF4444, 0xFFEC4899, 0xFF1A0710)),
+        BannerThemePreset("hd_jade_eclipse", "Jade Eclipse", "Glowing green corona", null, listOf(0xFF10B981, 0xFF3B82F6, 0xFF06161E)),
+        BannerThemePreset("hd_plum_horizon", "Plum Horizon", "Dusk berry gradient", null, listOf(0xFFA855F7, 0xFFF43F5E, 0xFF1A0A21)),
+        BannerThemePreset("hd_silver_frost", "Silver Frost", "Clean frosted mirror", null, listOf(0xFFF1F5F9, 0xFF64748B, 0xFF0F172A)),
+        BannerThemePreset("hd_tangerine_pop", "Tangerine Pop", "Vibrant citrus neon", null, listOf(0xFFFF7A00, 0xFFFF2A85, 0xFF1E0B14)),
+        BannerThemePreset("hd_aqua_nebula", "Aqua Nebula", "Deep teal galaxy haze", null, listOf(0xFF2DD4BF, 0xFF6366F1, 0xFF081426)),
+        BannerThemePreset("hd_velvet_gold", "Velvet Gold", "Black tie golden mist", null, listOf(0xFFFFD166, 0xFF475569, 0xFF0B0E14)),
+        BannerThemePreset("hd_bubblegum_sky", "Bubblegum Sky", "Cheerful candy pastel", null, listOf(0xFFFF85B3, 0xFF38BDF8, 0xFF21163B)),
+        BannerThemePreset("hd_neon_jade", "Neon Jade", "Bright cyber emerald", null, listOf(0xFF00FFAA, 0xFF10B981, 0xFF041713)),
+        BannerThemePreset("hd_twilight_rose", "Twilight Rose", "Romantic evening dusk", null, listOf(0xFFFB7185, 0xFF6366F1, 0xFF19102D)),
+        BannerThemePreset("hd_electric_amber", "Electric Amber", "High-volt gold flash", null, listOf(0xFFFBBF24, 0xFF00E5FF, 0xFF121520)),
+        BannerThemePreset("hd_arctic_slate", "Arctic Slate", "Nordic ice charcoal", null, listOf(0xFF94A3B8, 0xFF0EA5E9, 0xFF0B1320)),
+        BannerThemePreset("hd_crimson_tide", "Crimson Tide", "Ruby ocean surge", null, listOf(0xFFE11D48, 0xFF2563EB, 0xFF120B21)),
+        BannerThemePreset("hd_pastel_rainbow", "Pastel Rainbow", "Soft prism cloud mist", null, listOf(0xFFF9A8D4, 0xFFA7F3D0, 0xFF312E81)),
+        BannerThemePreset("hd_obsidian_rose", "Obsidian Rose", "Dark satin pink rim", null, listOf(0xFFF472B6, 0xFF1F2937, 0xFF0B0D14)),
+        BannerThemePreset("hd_deep_emerald", "Deep Emerald", "Lush forest night", null, listOf(0xFF34D399, 0xFF064E3B, 0xFF041410)),
+        BannerThemePreset("hd_cyber_sapphire", "Cyber Sapphire", "Holographic blue sheen", null, listOf(0xFF38BDF8, 0xFFA855F7, 0xFF0A1026)),
+        BannerThemePreset("hd_honey_quartz", "Honey Quartz", "Warm amber crystal", null, listOf(0xFFFCD34D, 0xFFF472B6, 0xFF21121D)),
+        BannerThemePreset("hd_midnight_teal", "Midnight Teal", "Sleek dark turquoise", null, listOf(0xFF14B8A6, 0xFF0F172A, 0xFF050B14)),
+        BannerThemePreset("hd_ultra_violet", "Ultra Violet", "Pure electric purple", null, listOf(0xFF8B5CF6, 0xFFEC4899, 0xFF120726))
+    )
+
+    val staticBannerPresets: List<BannerThemePreset> = baseStaticBannerPresets + expandedHdPhotoPresets
 
     /** Additional rich HD artwork backgrounds powering Section 1 Combos. */
     private val comboArtworkPresets: List<BannerThemePreset> = listOf(
@@ -214,6 +316,60 @@ object BannerPresetCatalog {
     val allPresets: List<BannerThemePreset> = staticBannerPresets + comboArtworkPresets
 
     fun findById(id: String?): BannerThemePreset? = allPresets.firstOrNull { it.id == id }
+
+    /**
+     * Maps every Touch Response to a harmonious matching default built-in Banner preset so
+     * selecting a Touch Response automatically pairs it with a matching backdrop cleanly.
+     */
+    fun defaultBannerForTouchEffect(touchEffect: TouchTypingEffect): String {
+        return when (touchEffect) {
+            TouchTypingEffect.NONE -> PRESET_DARK_CARBON
+            TouchTypingEffect.TOUCH_SHOCKWAVE_RING -> PRESET_CUTE_CARTOON
+            TouchTypingEffect.TOUCH_SPARK -> PRESET_VICE_NEON_DRIVE
+            TouchTypingEffect.TOUCH_ELECTRIC_CROSS,
+            TouchTypingEffect.PHOTON_LASER_ARC,
+            TouchTypingEffect.THUNDER_SPARK,
+            TouchTypingEffect.VOLT_STRIKE -> PRESET_THUNDER_STORM
+            TouchTypingEffect.TOUCH_MAGMA_EMBER,
+            TouchTypingEffect.SOLAR_FLARE,
+            TouchTypingEffect.INFERNO_RING,
+            TouchTypingEffect.PHOENIX_FEATHER,
+            TouchTypingEffect.LAVA_CORE -> PRESET_CYBER_DRAGON_FIRE
+            TouchTypingEffect.TOUCH_FROST_FREEZE,
+            TouchTypingEffect.CRYO_SHARD,
+            TouchTypingEffect.ARCTIC_GLACIER -> "hd_glacier_mint"
+            TouchTypingEffect.TOUCH_COMET_TRAIL,
+            TouchTypingEffect.NEBULA_FLARE,
+            TouchTypingEffect.STARLIGHT_DRIFT -> PRESET_GALAXY_NEBULA
+            TouchTypingEffect.TOUCH_DIAMOND_FLASH,
+            TouchTypingEffect.HOLOGRAM_PRISM_BURST,
+            TouchTypingEffect.PRISM_SHATTER -> PRESET_ABSTRACT_RGB
+            TouchTypingEffect.ROSE_QUARTZ_SHINE,
+            TouchTypingEffect.SYNAPTIC_BLOOM -> PRESET_ROSE_GOLD_MARBLE
+            TouchTypingEffect.MATRIX_CODE_BURST,
+            TouchTypingEffect.BIO_TOXIC_GLOW -> PRESET_EMERALD_MATRIX
+            TouchTypingEffect.ROYAL_CROWN_GLINT -> PRESET_GOLDEN_ROYAL_TIGER
+            TouchTypingEffect.AURORA_MIST -> PRESET_AURORA_LIGHTS
+            else -> when (touchEffect.visualStyle) {
+                TouchEffectVisualStyle.RISING_EMBER -> PRESET_CYBER_DRAGON_FIRE
+                TouchEffectVisualStyle.FROST_CRYSTAL -> "hd_glacier_mint"
+                TouchEffectVisualStyle.ELECTRIC_CROSS -> PRESET_THUNDER_STORM
+                TouchEffectVisualStyle.COMET_STREAK -> PRESET_VICE_SUNSET_PALMS
+                TouchEffectVisualStyle.PRISM_SHATTER -> PRESET_ABSTRACT_RGB
+                TouchEffectVisualStyle.GRAVITY_IMPLOSION -> PRESET_GALAXY_NEBULA
+                TouchEffectVisualStyle.CHRONO_ORBIT -> PRESET_AURORA_LIGHTS
+                TouchEffectVisualStyle.GLITCH_PULSE -> PRESET_NEON_CYBER
+                TouchEffectVisualStyle.RADIAL_SHOCKWAVE -> when (touchEffect.category) {
+                    TouchEffectCategory.QUANTUM_SPACE -> PRESET_GALAXY_NEBULA
+                    TouchEffectCategory.PLASMA_ELEMENTAL -> PRESET_SUNSET_GLOW
+                    TouchEffectCategory.PRISM_CHRONO -> PRESET_SAKURA_NIGHT
+                    else -> PRESET_CUTE_CARTOON
+                }
+                TouchEffectVisualStyle.NEURAL_SYNAPSE -> PRESET_NEON_CYBER
+                TouchEffectVisualStyle.NONE -> PRESET_DARK_CARBON
+            }
+        }
+    }
 }
 
 @Immutable
@@ -322,6 +478,13 @@ class CustomBackgroundManager private constructor(
 
     fun getCurrentTheme(): CustomPhotoTheme = readCurrentState()
 
+    fun reloadFromPrefs(): CustomPhotoTheme {
+        val fresh = readCurrentState()
+        _theme.value = fresh
+        _downloadedThemeIds.value = scanDownloadedThemeIds()
+        return fresh
+    }
+
     fun selectPreset(presetId: String) {
         if (BannerPresetCatalog.findById(presetId) == null) return
         val now = System.currentTimeMillis()
@@ -331,6 +494,7 @@ class CustomBackgroundManager private constructor(
             .putString(KEY_PRESET_ID, presetId)
             .putFloat(KEY_BG_DIM, currentDim)
             .putLong(KEY_BG_UPDATED_AT, now)
+            .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
             .apply()
         _theme.value = readCurrentState()
     }
@@ -344,6 +508,7 @@ class CustomBackgroundManager private constructor(
             .putString(KEY_PRESET_ID, presetId)
             .putFloat(KEY_BG_DIM, clampedDim)
             .putLong(KEY_BG_UPDATED_AT, now)
+            .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
             .apply()
         _theme.value = readCurrentState()
     }
@@ -359,9 +524,75 @@ class CustomBackgroundManager private constructor(
             .putString(KEY_BG_PATH, file.absolutePath)
             .putFloat(KEY_BG_DIM, currentDim)
             .putLong(KEY_BG_UPDATED_AT, now)
+            .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
             .apply()
         _theme.value = readCurrentState()
         return true
+    }
+
+    /**
+     * Activates Cute Cartoon Sky on initial new-device VIP trial once if user hasn't picked a backdrop yet.
+     */
+    fun seedTrialDefaultPresetIfUnset(presetId: String = BannerPresetCatalog.PRESET_CUTE_CARTOON) {
+        if (prefs.getBoolean(KEY_TRIAL_PRESET_SEEDED_V1, false)) return
+        val current = readCurrentState()
+        if (current.hasPhoto) {
+            prefs.edit().putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true).apply()
+            return
+        }
+        if (BannerPresetCatalog.findById(presetId) == null) return
+        prefs.edit()
+            .remove(KEY_DOWNLOADED_THEME_ID)
+            .putString(KEY_PRESET_ID, presetId)
+            .putFloat(KEY_BG_DIM, DEFAULT_DIM_ALPHA)
+            .putLong(KEY_BG_UPDATED_AT, System.currentTimeMillis())
+            .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
+            .apply()
+        _theme.value = readCurrentState()
+    }
+
+    fun resetPostTrialVisualRevertFlag() {
+        if (prefs.getBoolean(KEY_POST_TRIAL_VISUAL_REVERTED_V1, false)) {
+            prefs.edit().putBoolean(KEY_POST_TRIAL_VISUAL_REVERTED_V1, false).apply()
+        }
+    }
+
+    /**
+     * When free trial expires without active VIP/override: reverts built-in presets/combos to Classic Black,
+     * while preserving the user's own Custom Gallery Photo (`hasCustomGalleryPhoto`) permanently free.
+     */
+    fun revertPaidVisualsOnTrialExpiryPreservingGalleryPhoto() {
+        if (prefs.getBoolean(KEY_POST_TRIAL_VISUAL_REVERTED_V1, false)) return
+        val current = readCurrentState()
+        if (current.hasCustomGalleryPhoto) {
+            prefs.edit().putBoolean(KEY_POST_TRIAL_VISUAL_REVERTED_V1, true).apply()
+            return
+        }
+        prefs.edit()
+            .remove(KEY_BG_PATH)
+            .remove(KEY_PRESET_ID)
+            .remove(KEY_DOWNLOADED_THEME_ID)
+            .putLong(KEY_BG_UPDATED_AT, System.currentTimeMillis())
+            .putBoolean(KEY_POST_TRIAL_VISUAL_REVERTED_V1, true)
+            .apply()
+        _theme.value = readCurrentState()
+    }
+
+    /**
+     * Immediately strips any built-in banner preset or downloaded combo theme when VIP is expired,
+     * while strictly preserving the user's own Custom Gallery Photo (`hasCustomGalleryPhoto`).
+     */
+    fun clearBuiltInPresetOrComboPreservingGalleryPhoto() {
+        val current = readCurrentState()
+        if (current.hasCustomGalleryPhoto) return
+        if (!current.hasPreset && !current.hasDownloadedCombo && current.photoPath.isNullOrBlank()) return
+        prefs.edit()
+            .remove(KEY_BG_PATH)
+            .remove(KEY_PRESET_ID)
+            .remove(KEY_DOWNLOADED_THEME_ID)
+            .putLong(KEY_BG_UPDATED_AT, System.currentTimeMillis())
+            .apply()
+        _theme.value = readCurrentState()
     }
 
     /**
@@ -655,6 +886,7 @@ class CustomBackgroundManager private constructor(
                 .putString(KEY_BG_PATH, targetFile.absolutePath)
                 .putFloat(KEY_BG_DIM, currentDim)
                 .putLong(KEY_BG_UPDATED_AT, now)
+                .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
                 .apply()
 
             val updated = CustomPhotoTheme(
@@ -691,6 +923,7 @@ class CustomBackgroundManager private constructor(
                 .putString(KEY_BG_PATH, targetFile.absolutePath)
                 .putFloat(KEY_BG_DIM, clampedDim)
                 .putLong(KEY_BG_UPDATED_AT, now)
+                .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
                 .apply()
 
             val updated = CustomPhotoTheme(
@@ -743,6 +976,7 @@ class CustomBackgroundManager private constructor(
             .remove(KEY_PRESET_ID)
             .remove(KEY_DOWNLOADED_THEME_ID)
             .putLong(KEY_BG_UPDATED_AT, System.currentTimeMillis())
+            .putBoolean(KEY_TRIAL_PRESET_SEEDED_V1, true)
             .apply()
         _theme.value = readCurrentState()
     }
@@ -1130,8 +1364,8 @@ class CustomBackgroundManager private constructor(
                 canvas.drawRect(0f, 0f, wf, hf, paint)
             }
 
-            else -> {
-                // Emerald Matrix default procedural grid
+            BannerPresetCatalog.PRESET_EMERALD_MATRIX -> {
+                // Emerald Matrix procedural grid
                 paint.shader = LinearGradient(
                     0f, 0f, wf, hf,
                     intArrayOf(Color.parseColor("#031510"), Color.parseColor("#063B2C"), Color.parseColor("#041914")),
@@ -1158,6 +1392,85 @@ class CustomBackgroundManager private constructor(
                 while (gy <= hf) {
                     canvas.drawLine(0f, gy, wf, gy, gridPaint)
                     gy += 48f
+                }
+            }
+
+            else -> {
+                // Curated multi-stop procedural HD artwork driven by preset colors & seed
+                val colors = BannerPresetCatalog.findById(presetId)?.previewColors?.map { it.toInt() }.orEmpty()
+                val c0 = colors.getOrElse(0) { Color.parseColor("#00E5FF") }
+                val c1 = colors.getOrElse(1) { Color.parseColor("#7B2FFF") }
+                val c2 = colors.getOrElse(2) { Color.parseColor("#0A1022") }
+                val seed = kotlin.math.abs(presetId.hashCode())
+
+                paint.shader = LinearGradient(
+                    0f, 0f, wf, hf,
+                    intArrayOf(c2, blendColor(c2, c1, 0.58f), blendColor(c1, c0, 0.42f), c2),
+                    floatArrayOf(0f, 0.38f, 0.72f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(0f, 0f, wf, hf, paint)
+
+                val focusX = wf * (0.22f + (seed % 56) / 100f)
+                val focusY = hf * (0.25f + ((seed / 11) % 50) / 100f)
+                paint.shader = RadialGradient(
+                    focusX, focusY, wf * 0.56f,
+                    intArrayOf(setAlpha(c0, 185), setAlpha(c1, 95), Color.TRANSPARENT),
+                    floatArrayOf(0f, 0.48f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(0f, 0f, wf, hf, paint)
+
+                paint.shader = RadialGradient(
+                    wf - focusX, hf - focusY, wf * 0.46f,
+                    intArrayOf(setAlpha(c1, 155), Color.TRANSPARENT),
+                    null, Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(0f, 0f, wf, hf, paint)
+                paint.shader = null
+
+                when (seed % 3) {
+                    0 -> {
+                        // Flowing silk ribbons + subtle stars
+                        paint.style = Paint.Style.STROKE
+                        paint.strokeCap = Paint.Cap.ROUND
+                        for (i in 0..5) {
+                            val ribbon = Path()
+                            val y0 = hf * (0.14f + i * 0.14f)
+                            ribbon.moveTo(-16f, y0)
+                            ribbon.cubicTo(wf * 0.32f, y0 - 36f, wf * 0.68f, y0 + 36f, wf + 16f, y0 - 12f)
+                            paint.strokeWidth = 6f - i * 0.6f
+                            paint.color = setAlpha(if (i % 2 == 0) c0 else c1, 110)
+                            canvas.drawPath(ribbon, paint)
+                        }
+                    }
+                    1 -> {
+                        // Dreamy bokeh & sparkle highlights
+                        paint.style = Paint.Style.FILL
+                        for (b in 0..14) {
+                            val bx = ((b * 179 + seed) % w).toFloat()
+                            val by = ((b * 113 + seed) % h).toFloat()
+                            paint.color = setAlpha(if (b % 2 == 0) c0 else c1, 56)
+                            canvas.drawCircle(bx, by, 22f + (b % 5) * 16f, paint)
+                        }
+                    }
+                    else -> {
+                        // Diagonal architectural prism streaks
+                        paint.style = Paint.Style.STROKE
+                        paint.strokeWidth = 3f
+                        for (d in 0..7) {
+                            val xStart = ((d * 140 + seed % 90) % (w + 180)) - 90f
+                            paint.color = setAlpha(if (d % 2 == 0) c0 else Color.WHITE, 64)
+                            canvas.drawLine(xStart, hf, xStart + 180f, 0f, paint)
+                        }
+                    }
+                }
+                paint.style = Paint.Style.FILL
+                for (s in 0..14) {
+                    val sx = ((s * 197 + seed * 3) % w).toFloat()
+                    val sy = ((s * 97 + seed) % h).toFloat()
+                    paint.color = setAlpha(Color.WHITE, 190)
+                    drawSparkleStar(canvas, sx, sy, 6f + (s % 4) * 2.5f, paint)
                 }
             }
         }
@@ -1231,6 +1544,8 @@ class CustomBackgroundManager private constructor(
         private const val KEY_DOWNLOADED_THEME_ID = "downloaded_theme_id"
         private const val KEY_BG_DIM = "custom_bg_dim"
         private const val KEY_BG_UPDATED_AT = "custom_bg_updated_at"
+        private const val KEY_TRIAL_PRESET_SEEDED_V1 = "trial_preset_seeded_v1"
+        private const val KEY_POST_TRIAL_VISUAL_REVERTED_V1 = "post_trial_visual_reverted_v1"
         private const val BG_FILE_NAME = "custom_bg.jpg"
         private const val THEMES_DIR_NAME = "themes"
         const val DEFAULT_DIM_ALPHA = 0.24f

@@ -27,13 +27,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -59,7 +58,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,8 +74,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -96,8 +92,10 @@ import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.LicenseUiState
 import com.example.engine.RgbLightingEngine
+import com.example.model.AppUiLanguage
 import com.example.model.KeyboardSettings
 import com.example.model.KeycapStyle
+import com.example.model.LocalAppStrings
 import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.model.TouchEffectCategory
@@ -179,9 +177,8 @@ fun EffectsScreen(
     modifier: Modifier = Modifier
 ) {
     var timeSec by remember { mutableFloatStateOf(0f) }
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
-    var previewAnchorY by remember { mutableIntStateOf(0) }
 
     var selectedTouchCatName by rememberSaveable { mutableStateOf(TouchEffectCategory.ALL.name) }
     val selectedTouchCategory = remember(selectedTouchCatName) {
@@ -203,13 +200,10 @@ fun EffectsScreen(
         listOf(
             StudioEffectsCategory.TOUCH_RESPONSES,
             StudioEffectsCategory.THEMES,
-            StudioEffectsCategory.ANIMATIONS
+            StudioEffectsCategory.ANIMATIONS,
+            StudioEffectsCategory.PHOTOS
         )
     }
-    val initialEnginePage = remember(selectedCategory) {
-        unifiedEngineCategories.indexOf(selectedCategory).let { if (it >= 0) it else 0 }
-    }
-    val enginePagerState = rememberPagerState(initialPage = initialEnginePage, pageCount = { 3 })
 
     // Step-by-step hierarchical Back navigation inside EffectsScreen
     BackHandler(enabled = selectedCategory != StudioEffectsCategory.TOUCH_RESPONSES && !showAdvancedStudio && customizerTarget == null && backdropEditTarget == null) {
@@ -223,22 +217,6 @@ fun EffectsScreen(
     }
     BackHandler(enabled = backdropEditTarget != null) {
         backdropEditTarget = null
-    }
-
-    LaunchedEffect(selectedCategory) {
-        val targetIdx = unifiedEngineCategories.indexOf(selectedCategory)
-        if (targetIdx >= 0 && enginePagerState.currentPage != targetIdx) {
-            enginePagerState.animateScrollToPage(targetIdx)
-        }
-    }
-
-    LaunchedEffect(enginePagerState.currentPage, selectedCategory) {
-        if (selectedCategory in unifiedEngineCategories) {
-            val pagedCategory = unifiedEngineCategories[enginePagerState.currentPage]
-            if (pagedCategory != selectedCategory) {
-                onSelectCategory(pagedCategory)
-            }
-        }
     }
 
     val filteredTouchEffects = remember(selectedTouchCategory) {
@@ -270,116 +248,114 @@ fun EffectsScreen(
 
     // Smoothly scroll to the Live Keyboard Preview + Selected Section when triggered from Home or category card tap
     LaunchedEffect(categoryJumpTrigger) {
-        if (categoryJumpTrigger > 0 && previewAnchorY > 0) {
-            scrollState.animateScrollTo(previewAnchorY)
+        if (categoryJumpTrigger > 0) {
+            listState.animateScrollToItem(2)
         }
     }
 
     val themesLocked = !licenseState.isRgbThemesUnlocked
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState),
-        horizontalAlignment = Alignment.CenterHorizontally
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
-        Column(
+        LazyColumn(
+            state = listState,
             modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 680.dp)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
+                .fillMaxSize()
+                .widthIn(max = 680.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             // 1. Bold Luxury Studio Header + Quick Customizer Trigger
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Luxury Studio",
-                        fontFamily = OrbitronFamily,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Curate HD photos, banners, live RGB motion & 56 touch engines",
-                        fontFamily = PlusJakartaSansFamily,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        color = Color.White.copy(alpha = 0.84f)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                OutlinedButton(
-                    onClick = {
-                        customizerTarget = CustomizerTarget(
-                            title = "Active Keyboard Theme",
-                            subtitle = "Live full Gboard preview · Toggle Key borders & test keys",
-                            badge = "CUSTOMIZE",
-                            bannerPresetId = customPhotoTheme.presetId,
-                            effect = settings.effect,
-                            touchEffect = settings.touchEffect,
-                            palette = settings.palette,
-                            isLocked = !licenseState.isThemeItemUnlocked(settings.effect.id, !settings.effect.isVipEffect)
-                        )
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag("btn_open_active_customizer")
+            item(key = "studio_header") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Tune,
-                        contentDescription = stringResource(R.string.effects_header),
-                        tint = NeonCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Customize",
-                        fontFamily = SpaceGroteskFamily,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Luxury Studio",
+                            fontFamily = OrbitronFamily,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Curate HD photos, banners, live RGB motion & ${TouchTypingEffect.byCategory(TouchEffectCategory.ALL).size} touch engines",
+                            fontFamily = PlusJakartaSansFamily,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            color = Color.White.copy(alpha = 0.84f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    OutlinedButton(
+                        onClick = {
+                            customizerTarget = CustomizerTarget(
+                                title = "Active Keyboard Theme",
+                                subtitle = "Live full Gboard preview · Toggle Key borders & test keys",
+                                badge = "CUSTOMIZE",
+                                bannerPresetId = customPhotoTheme.presetId,
+                                effect = settings.effect,
+                                touchEffect = settings.touchEffect,
+                                palette = settings.palette,
+                                isLocked = !licenseState.isThemeItemUnlocked(settings.effect.id, !settings.effect.isVipEffect)
+                            )
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("btn_open_active_customizer")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Tune,
+                            contentDescription = stringResource(R.string.effects_header),
+                            tint = NeonCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Customize",
+                            fontFamily = SpaceGroteskFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
             }
 
             // 2. Five Large Luxury Category Cards with Direct Tap Navigation & Clear Badges
-            val adminBannersCount = listOf(
-                licenseState.adminConfig.banners.resolvedBanner1Image,
-                licenseState.adminConfig.banners.resolvedBanner2Image
-            ).count { it.isNotBlank() }
+            item(key = "category_grid") {
+                val adminBannersCount = listOf(
+                    licenseState.adminConfig.banners.resolvedBanner1Image,
+                    licenseState.adminConfig.banners.resolvedBanner2Image
+                ).count { it.isNotBlank() }
 
-            LuxuryStudioCategoryGrid(
-                selectedCategory = selectedCategory,
-                photosBadge = "Gallery + ${BannerPresetCatalog.staticBannerPresets.size} HD",
-                bannersBadge = "${BannerPresetCatalog.staticBannerPresets.size + adminBannersCount} Featured",
-                animationsBadge = "${RgbEffect.ambientPhysicsEffects.size} Live RGB",
-                touchResponsesBadge = "${TouchTypingEffect.byCategory(TouchEffectCategory.ALL).size} AI FX",
-                themesBadge = "${allCombos.size} Packs",
-                onSelectCategory = { category ->
-                    onSelectCategory(category)
-                    if (previewAnchorY > 0) {
+                LuxuryStudioCategoryGrid(
+                    selectedCategory = selectedCategory,
+                    photosBadge = "Gallery + ${BannerPresetCatalog.staticBannerPresets.size} HD",
+                    bannersBadge = "${BannerPresetCatalog.staticBannerPresets.size + adminBannersCount} Featured",
+                    animationsBadge = "${RgbEffect.ambientPhysicsEffects.size} Live RGB",
+                    touchResponsesBadge = "${TouchTypingEffect.byCategory(TouchEffectCategory.ALL).size} AI FX",
+                    themesBadge = "${allCombos.size} Packs",
+                    onSelectCategory = { category ->
+                        onSelectCategory(category)
                         coroutineScope.launch {
-                            scrollState.animateScrollTo(previewAnchorY)
+                            listState.animateScrollToItem(2)
                         }
                     }
-                }
-            )
+                )
+            }
 
             // 3. Live Interactive Full-Width Gboard Preview Anchor
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onGloballyPositioned { coords ->
-                        previewAnchorY = coords.positionInParent().y.roundToInt()
-                    },
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            item(key = "live_preview") {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                 FullMiniKeyboardPreview(
                     settings = settings,
                     timeSec = timeSec,
@@ -508,281 +484,275 @@ fun EffectsScreen(
                     }
                 }
             }
+            }
 
             // VIP Expired Lock Notice + Unlock CTA
             if (themesLocked) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .luminousGlassCard(
-                            shape = RoundedCornerShape(20.dp),
-                            borderBrush = FlagshipGoldCyanBrush,
-                            borderWidth = 1.5.dp,
-                            glowColor = RoyalGold,
-                            glowElevation = 14.dp
-                        )
-                        .padding(16.dp)
-                        .testTag("effects_live_demo_banner"),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "VIP Themes & Touch FX Preview — Unlock to save to your live system keyboard",
-                        fontFamily = SpaceGroteskFamily,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Button(
-                        onClick = onApplyVipToKeyboard,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonMagenta,
-                            contentColor = Color.White
-                        ),
+                item(key = "vip_notice") {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .testTag("btn_unlock_vip_themes")
+                            .luminousGlassCard(
+                                shape = RoundedCornerShape(20.dp),
+                                borderBrush = FlagshipGoldCyanBrush,
+                                borderWidth = 1.5.dp,
+                                glowColor = RoyalGold,
+                                glowElevation = 14.dp
+                            )
+                            .padding(16.dp)
+                            .testTag("effects_live_demo_banner"),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
-                            text = stringResource(R.string.bn_btn_apply_to_real_keyboard),
+                            text = "VIP Themes & Touch FX Preview — Unlock to save to your live system keyboard",
                             fontFamily = SpaceGroteskFamily,
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
+                        Button(
+                            onClick = onApplyVipToKeyboard,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NeonMagenta,
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("btn_unlock_vip_themes")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.bn_btn_apply_to_real_keyboard),
+                                fontFamily = SpaceGroteskFamily,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
             }
 
-            // 4. Unified Section Selector + Swipeable RGB / Themes / Touch Bar
-            if (selectedCategory in unifiedEngineCategories) {
+            // 4. Unified 4-Way Section Selector Bar (Touch FX | Themes | RGB Design | Photos)
+            item(key = "unified_section_bar") {
                 val unifiedLabels = listOf(
-                    "Touch FX (${TouchTypingEffect.byCategory(TouchEffectCategory.ALL).size})",
-                    "Themes (${allCombos.size})",
-                    "RGB Design (${RgbEffect.ambientPhysicsEffects.size})"
+                    "Touch FX",
+                    "Themes",
+                    "RGB Design",
+                    "Photos"
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(GlassCardInner)
-                            .border(1.dp, GlassBorderStrong, RoundedCornerShape(16.dp))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        unifiedLabels.forEachIndexed { idx, label ->
-                            val isActiveTab = enginePagerState.currentPage == idx
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 46.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isActiveTab) GlassCardSelected else Color.Transparent)
-                                    .border(
-                                        width = if (isActiveTab) 1.3.dp else 0.dp,
-                                        brush = if (isActiveTab) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable {
-                                        onSelectCategory(unifiedEngineCategories[idx])
-                                    }
-                                    .padding(horizontal = 6.dp, vertical = 8.dp)
-                                    .testTag("effects_unified_bar_$idx"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontFamily = SpaceGroteskFamily,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (isActiveTab) NeonCyan else Color.White.copy(alpha = 0.80f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(GlassCardInner)
+                        .border(1.dp, GlassBorderStrong, RoundedCornerShape(16.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    unifiedLabels.forEachIndexed { idx, label ->
+                        val isActiveTab = selectedCategory == unifiedEngineCategories[idx]
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 46.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isActiveTab) GlassCardSelected else Color.Transparent)
+                                .border(
+                                    width = if (isActiveTab) 1.3.dp else 0.dp,
+                                    brush = if (isActiveTab) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                                    shape = RoundedCornerShape(12.dp)
                                 )
-                            }
-                        }
-                    }
-
-                    HorizontalPager(
-                        state = enginePagerState,
-                        beyondViewportPageCount = 1,
-                        verticalAlignment = Alignment.Top,
-                        modifier = Modifier.fillMaxWidth()
-                    ) { page ->
-                        val shouldRender = page == enginePagerState.currentPage || enginePagerState.isScrollInProgress
-                        if (!shouldRender) {
-                            Spacer(modifier = Modifier.fillMaxWidth().height(1.dp))
-                        } else {
-                            when (page) {
-                                0 -> TouchResponsesLuxurySection(
-                                    settings = settings,
-                                    licenseState = licenseState,
-                                    timeProvider = { timeSec },
-                                    selectedCategory = selectedTouchCategory,
-                                    filteredEffects = filteredTouchEffects,
-                                    onSelectCategory = { selectedTouchCatName = it.name },
-                                    onTurnOffTouch = onClearAnimationsPreservingBackdrop,
-                                    onQuickApplyTouchEffect = { fx ->
-                                        val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
-                                        if (isLocked) onApplyVipToKeyboard() else onSelectTouchEffect(fx)
-                                    },
-                                    onOpenTouchCustomizer = { fx ->
-                                        val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
-                                        customizerTarget = CustomizerTarget(
-                                            title = fx.displayName,
-                                            subtitle = fx.description,
-                                            badge = fx.badge,
-                                            bannerPresetId = customPhotoTheme.presetId,
-                                            effect = RgbEffect.NORMAL_DEFAULT,
-                                            touchEffect = fx,
-                                            palette = settings.palette,
-                                            allowBackdropSwitch = true,
-                                            forceDefaultBlackBackdrop = !customPhotoTheme.hasPhoto,
-                                            isLocked = isLocked
-                                        )
-                                    }
-                                )
-
-                                1 -> ThemesLuxurySection(
-                                    settings = settings,
-                                    customPhotoTheme = customPhotoTheme,
-                                    licenseState = licenseState,
-                                    downloadedThemeIds = downloadedThemeIds,
-                                    downloadingThemeIds = downloadingThemeIds,
-                                    timeProvider = { timeSec },
-                                    selectedCategory = selectedComboCategory,
-                                    filteredCombos = filteredCombos,
-                                    onSelectCategory = { selectedComboCatName = it.name },
-                                    onOpenComboCustomizer = { combo ->
-                                        val isLocked = !licenseState.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
-                                        customizerTarget = CustomizerTarget(
-                                            title = combo.title,
-                                            subtitle = combo.subtitle,
-                                            badge = combo.badge,
-                                            bannerPresetId = combo.bannerPresetId,
-                                            combo = combo,
-                                            effect = combo.effect,
-                                            touchEffect = TouchTypingEffect.NONE,
-                                            palette = combo.palette,
-                                            previewColors = combo.previewColors,
-                                            remoteImageUrl = combo.remoteImageUrl,
-                                            isLocked = isLocked
-                                        )
-                                    },
-                                    onQuickApplyCombo = { combo ->
-                                        val isLocked = !licenseState.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
-                                        if (isLocked) {
-                                            onApplyVipToKeyboard()
-                                        } else {
-                                            onApplyComboTheme(combo)
-                                        }
-                                    }
-                                )
-
-                                else -> AnimationsLuxurySection(
-                                    settings = settings,
-                                    licenseState = licenseState,
-                                    timeProvider = { timeSec },
-                                    onSelectStaticClean = { onSelectEffect(RgbEffect.NORMAL_DEFAULT) },
-                                    onSelectAmbientEffect = { fx ->
-                                        val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
-                                        if (isLocked) {
-                                            onApplyVipToKeyboard()
-                                        } else {
-                                            onSelectEffect(fx)
-                                        }
-                                    },
-                                    onApplyCloudAnimation = { anim ->
-                                        val isLocked = !licenseState.isThemeItemUnlocked(anim.id, isPermanentlyFree = anim.isFree)
-                                        if (isLocked) onApplyVipToKeyboard() else onApplyCloudAnimation(anim)
-                                    }
-                                )
-                            }
+                                .clickable {
+                                    onSelectCategory(unifiedEngineCategories[idx])
+                                }
+                                .padding(horizontal = 4.dp, vertical = 8.dp)
+                                .testTag("effects_unified_bar_$idx"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                fontFamily = SpaceGroteskFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isActiveTab) NeonCyan else Color.White.copy(alpha = 0.80f),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
-            } else {
-                when (selectedCategory) {
-                    StudioEffectsCategory.PHOTOS -> {
-                        PhotosLuxurySection(
-                            settings = settings,
-                            customPhotoTheme = customPhotoTheme,
-                            licenseState = licenseState,
-                            onSelectDefaultBlack = onApplyDefaultBlackPreservingTouch,
-                            onPickPhotoClick = {
-                                val photoLocked = !licenseState.isThemeItemUnlocked("custom_gallery_photo", isPermanentlyFree = false)
-                                if (photoLocked) {
-                                    onApplyVipToKeyboard()
-                                } else {
-                                    photoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                }
-                            },
-                            onRemoveCustomPhoto = onRemoveCustomPhoto,
-                            onSelectHdPhoto = { preset ->
-                                val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
-                                if (isLocked) {
-                                    onApplyVipToKeyboard()
-                                } else {
-                                    backdropEditTarget = BackdropEditTarget.BannerPreset(preset)
-                                }
-                            }
-                        )
-                    }
+            }
 
-                    StudioEffectsCategory.BANNERS -> {
-                        BannersLuxurySection(
-                            settings = settings,
-                            customPhotoTheme = customPhotoTheme,
-                            licenseState = licenseState,
-                            onOpenBannerCustomizer = { preset ->
-                                val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
-                                if (isLocked) {
-                                    customizerTarget = CustomizerTarget(
-                                        title = preset.title,
-                                        subtitle = preset.subtitle.ifBlank { "Featured Banner Wallpaper" },
-                                        badge = "BANNER",
-                                        bannerPresetId = preset.id,
-                                        effect = RgbEffect.NORMAL_DEFAULT,
-                                        touchEffect = settings.touchEffect,
-                                        palette = settings.palette,
-                                        previewColors = preset.previewColors,
-                                        isLocked = true
-                                    )
-                                } else {
-                                    backdropEditTarget = BackdropEditTarget.BannerPreset(preset)
-                                }
-                            },
-                            onQuickApplyBanner = { preset ->
-                                val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
-                                if (isLocked) {
-                                    onApplyVipToKeyboard()
-                                } else {
-                                    onApplyBannerPhotoPreservingTouch(preset.id)
-                                }
-                            },
-                            onOpenRemoteBannerCustomizer = { title, subtitle, url ->
-                                if (themesLocked) {
-                                    onApplyVipToKeyboard()
-                                } else {
-                                    backdropEditTarget = BackdropEditTarget.RemoteBanner(
-                                        title = title,
-                                        subtitle = subtitle,
-                                        imageSource = url
-                                    )
-                                }
-                            }
-                        )
-                    }
+            when (selectedCategory) {
+                StudioEffectsCategory.TOUCH_RESPONSES -> {
+                    touchResponsesLuxuryItems(
+                        settings = settings,
+                        licenseState = licenseState,
+                        timeProvider = { timeSec },
+                        selectedCategory = selectedTouchCategory,
+                        filteredEffects = filteredTouchEffects,
+                        onSelectCategory = { selectedTouchCatName = it.name },
+                        onTurnOffTouch = onClearAnimationsPreservingBackdrop,
+                        onQuickApplyTouchEffect = { fx ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
+                            if (isLocked) onApplyVipToKeyboard() else onSelectTouchEffect(fx)
+                        },
+                        onOpenTouchCustomizer = { fx ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
+                            customizerTarget = CustomizerTarget(
+                                title = fx.displayName,
+                                subtitle = fx.description,
+                                badge = fx.badge,
+                                bannerPresetId = customPhotoTheme.presetId,
+                                effect = RgbEffect.NORMAL_DEFAULT,
+                                touchEffect = fx,
+                                palette = settings.palette,
+                                allowBackdropSwitch = true,
+                                forceDefaultBlackBackdrop = !customPhotoTheme.hasPhoto,
+                                isLocked = isLocked
+                            )
+                        }
+                    )
+                }
 
-                    else -> Unit
+                StudioEffectsCategory.THEMES -> {
+                    themesLuxuryItems(
+                        settings = settings,
+                        customPhotoTheme = customPhotoTheme,
+                        licenseState = licenseState,
+                        downloadedThemeIds = downloadedThemeIds,
+                        downloadingThemeIds = downloadingThemeIds,
+                        timeProvider = { timeSec },
+                        selectedCategory = selectedComboCategory,
+                        filteredCombos = filteredCombos,
+                        onSelectCategory = { selectedComboCatName = it.name },
+                        onOpenComboCustomizer = { combo ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+                            customizerTarget = CustomizerTarget(
+                                title = combo.title,
+                                subtitle = combo.subtitle,
+                                badge = combo.badge,
+                                bannerPresetId = combo.bannerPresetId,
+                                combo = combo,
+                                effect = combo.effect,
+                                touchEffect = TouchTypingEffect.NONE,
+                                palette = combo.palette,
+                                previewColors = combo.previewColors,
+                                remoteImageUrl = combo.remoteImageUrl,
+                                isLocked = isLocked
+                            )
+                        },
+                        onQuickApplyCombo = { combo ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+                            if (isLocked) {
+                                onApplyVipToKeyboard()
+                            } else {
+                                onApplyComboTheme(combo)
+                            }
+                        }
+                    )
+                }
+
+                StudioEffectsCategory.ANIMATIONS -> {
+                    animationsLuxuryItems(
+                        settings = settings,
+                        licenseState = licenseState,
+                        timeProvider = { timeSec },
+                        onSelectStaticClean = { onSelectEffect(RgbEffect.NORMAL_DEFAULT) },
+                        onSelectAmbientEffect = { fx ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
+                            if (isLocked) {
+                                onApplyVipToKeyboard()
+                            } else {
+                                onSelectEffect(fx)
+                            }
+                        },
+                        onApplyCloudAnimation = { anim ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(anim.id, isPermanentlyFree = anim.isFree)
+                            if (isLocked) onApplyVipToKeyboard() else onApplyCloudAnimation(anim)
+                        }
+                    )
+                }
+
+                StudioEffectsCategory.PHOTOS -> {
+                    photosLuxuryItems(
+                        settings = settings,
+                        customPhotoTheme = customPhotoTheme,
+                        licenseState = licenseState,
+                        onSelectDefaultBlack = onApplyDefaultBlackPreservingTouch,
+                        onPickPhotoClick = {
+                            val photoLocked = !licenseState.isThemeItemUnlocked("custom_gallery_photo", isPermanentlyFree = true)
+                            if (photoLocked) {
+                                onApplyVipToKeyboard()
+                            } else {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }
+                        },
+                        onRemoveCustomPhoto = onRemoveCustomPhoto,
+                        onSelectHdPhoto = { preset ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+                            if (isLocked) {
+                                onApplyVipToKeyboard()
+                            } else {
+                                backdropEditTarget = BackdropEditTarget.BannerPreset(preset)
+                            }
+                        }
+                    )
+                }
+
+                StudioEffectsCategory.BANNERS -> {
+                    bannersLuxuryItems(
+                        settings = settings,
+                        customPhotoTheme = customPhotoTheme,
+                        licenseState = licenseState,
+                        onOpenBannerCustomizer = { preset ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+                            if (isLocked) {
+                                customizerTarget = CustomizerTarget(
+                                    title = preset.title,
+                                    subtitle = preset.subtitle.ifBlank { "Featured Banner Wallpaper" },
+                                    badge = "BANNER",
+                                    bannerPresetId = preset.id,
+                                    effect = RgbEffect.NORMAL_DEFAULT,
+                                    touchEffect = settings.touchEffect,
+                                    palette = settings.palette,
+                                    previewColors = preset.previewColors,
+                                    isLocked = true
+                                )
+                            } else {
+                                backdropEditTarget = BackdropEditTarget.BannerPreset(preset)
+                            }
+                        },
+                        onQuickApplyBanner = { preset ->
+                            val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+                            if (isLocked) {
+                                onApplyVipToKeyboard()
+                            } else {
+                                onApplyBannerPhotoPreservingTouch(preset.id)
+                            }
+                        },
+                        onOpenRemoteBannerCustomizer = { title, subtitle, url ->
+                            if (themesLocked) {
+                                onApplyVipToKeyboard()
+                            } else {
+                                backdropEditTarget = BackdropEditTarget.RemoteBanner(
+                                    title = title,
+                                    subtitle = subtitle,
+                                    imageSource = url
+                                )
+                            }
+                        }
+                    )
                 }
             }
 
             // 5. Collapsible Color Palette, Keycap Style & Gboard Optical Tuning Studio
-            Column(
+            item(key = "advanced_studio") {
+                Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .luminousGlassCard(
@@ -1008,8 +978,11 @@ fun EffectsScreen(
                     }
                 }
             }
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            item(key = "bottom_spacer") {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
         }
     }
 
@@ -1108,8 +1081,7 @@ private fun LuxurySectionHeader(
     }
 }
 
-@Composable
-private fun PhotosLuxurySection(
+private fun LazyListScope.photosLuxuryItems(
     settings: KeyboardSettings,
     customPhotoTheme: CustomPhotoTheme,
     licenseState: LicenseUiState,
@@ -1118,24 +1090,27 @@ private fun PhotosLuxurySection(
     onRemoveCustomPhoto: () -> Unit,
     onSelectHdPhoto: (BannerThemePreset) -> Unit
 ) {
-    val photoLocked = !licenseState.isThemeItemUnlocked("custom_gallery_photo", isPermanentlyFree = false)
+    val photoLocked = !licenseState.isThemeItemUnlocked("custom_gallery_photo", isPermanentlyFree = true)
     val isDefaultBlackActive = !customPhotoTheme.hasPhoto && settings.effect == RgbEffect.NORMAL_DEFAULT
-    val customBitmap = remember(customPhotoTheme.cacheKey) {
-        val path = customPhotoTheme.photoPath
-        if (customPhotoTheme.hasCustomGalleryPhoto && !path.isNullOrBlank() && File(path).exists()) {
-            runCatching {
-                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-                BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
-            }.getOrNull()
-        } else null
-    }
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    item(key = "photos_header") {
         LuxurySectionHeader(
             title = "Photos",
             subtitle = "Gallery & HD Photo Backgrounds (preserves active touch response)",
             countBadge = "Gallery + ${BannerPresetCatalog.staticBannerPresets.size} HD"
         )
+    }
+
+    item(key = "photos_gallery_hero") {
+        val customBitmap = remember(customPhotoTheme.cacheKey) {
+            val path = customPhotoTheme.photoPath
+            if (customPhotoTheme.hasCustomGalleryPhoto && !path.isNullOrBlank() && File(path).exists()) {
+                runCatching {
+                    val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                    BitmapFactory.decodeFile(path, opts)?.asImageBitmap()
+                }.getOrNull()
+            } else null
+        }
 
         // Large Upload Custom Photo Hero Card
         Row(
@@ -1205,7 +1180,7 @@ private fun PhotosLuxurySection(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    if (photoLocked) VipCornerPill(text = "VIP")
+                    if (photoLocked) VipCornerPill(text = "VIP") else FreeCornerPill(text = "FREE")
                 }
                 Text(
                     text = "Set any personal portrait or wallpaper behind frosted Gboard keys",
@@ -1253,7 +1228,9 @@ private fun PhotosLuxurySection(
                 }
             }
         }
+    }
 
+    item(key = "photos_classic_black") {
         // Large Default Black Card (Always Free)
         Row(
             modifier = Modifier
@@ -1298,85 +1275,87 @@ private fun PhotosLuxurySection(
             }
             FreeCornerPill(text = if (isDefaultBlackActive) "ACTIVE ✓" else "FREE")
         }
+    }
 
-        // Spacious 2-Column HD Photo Backgrounds
-        BannerPresetCatalog.staticBannerPresets.chunked(2).forEach { rowPresets ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                rowPresets.forEach { preset ->
-                    val selected = customPhotoTheme.presetId == preset.id
-                    val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 188.dp)
-                            .luminousGlassCard(
-                                shape = RoundedCornerShape(18.dp),
-                                borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
-                                borderWidth = if (selected) 1.7.dp else 1.dp,
-                                glowColor = NeonCyan,
-                                glowElevation = if (selected) 14.dp else 6.dp,
-                                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
-                            )
-                            .clickable { onSelectHdPhoto(preset) }
-                            .padding(12.dp)
-                            .testTag("banner_card_${preset.id}"),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            MiniKeyboardEffectPreview(
-                                bannerPresetId = preset.id,
-                                gradientColors = preset.previewColors,
-                                showKeyBorders = settings.showKeyBorders,
-                                showTopStrip = false,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(98.dp)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(6.dp)
-                            ) {
-                                when {
-                                    isLocked -> VipCornerPill(text = "VIP")
-                                    selected -> FreeCornerPill(text = "ACTIVE ✓")
-                                }
+    val photoRows = BannerPresetCatalog.staticBannerPresets.chunked(2)
+    items(
+        items = photoRows,
+        key = { row -> "photo_row_${row.first().id}" }
+    ) { rowPresets ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            rowPresets.forEach { preset ->
+                val selected = customPhotoTheme.presetId == preset.id
+                val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 188.dp)
+                        .luminousGlassCard(
+                            shape = RoundedCornerShape(18.dp),
+                            borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                            borderWidth = if (selected) 1.7.dp else 1.dp,
+                            glowColor = NeonCyan,
+                            glowElevation = if (selected) 14.dp else 6.dp,
+                            surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+                        )
+                        .clickable { onSelectHdPhoto(preset) }
+                        .padding(12.dp)
+                        .testTag("banner_card_${preset.id}"),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        MiniKeyboardEffectPreview(
+                            bannerPresetId = preset.id,
+                            gradientColors = preset.previewColors,
+                            showKeyBorders = settings.showKeyBorders,
+                            showTopStrip = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(98.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                        ) {
+                            when {
+                                isLocked -> VipCornerPill(text = "VIP")
+                                selected -> FreeCornerPill(text = "ACTIVE ✓")
                             }
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                text = preset.title,
-                                fontFamily = SpaceGroteskFamily,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = preset.subtitle.ifBlank { "HD Wallpaper" },
-                                fontFamily = PlusJakartaSansFamily,
-                                fontSize = 11.5.sp,
-                                color = Color.White.copy(alpha = 0.78f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = preset.title,
+                            fontFamily = SpaceGroteskFamily,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = preset.subtitle.ifBlank { "HD Wallpaper" },
+                            fontFamily = PlusJakartaSansFamily,
+                            fontSize = 11.5.sp,
+                            color = Color.White.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
-                if (rowPresets.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+            }
+            if (rowPresets.size == 1) {
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
-@Composable
-private fun BannersLuxurySection(
+private fun LazyListScope.bannersLuxuryItems(
     settings: KeyboardSettings,
     customPhotoTheme: CustomPhotoTheme,
     licenseState: LicenseUiState,
@@ -1384,171 +1363,174 @@ private fun BannersLuxurySection(
     onQuickApplyBanner: (BannerThemePreset) -> Unit,
     onOpenRemoteBannerCustomizer: (title: String, subtitle: String, imageUrl: String) -> Unit
 ) {
-    val adminBanners = remember(licenseState.adminConfig.banners) {
-        buildList {
-            val b1 = licenseState.adminConfig.banners
-            if (b1.resolvedBanner1Image.isNotBlank()) {
-                add(Triple(b1.banner1Title, b1.banner1Subtitle, b1.resolvedBanner1Image))
-            }
-            if (b1.resolvedBanner2Image.isNotBlank()) {
-                add(Triple(b1.banner2Title, b1.banner2Subtitle, b1.resolvedBanner2Image))
-            }
+    val bCfg = licenseState.adminConfig.banners
+    val adminBanners = buildList {
+        if (bCfg.resolvedBanner1Image.isNotBlank()) {
+            add(Triple(bCfg.banner1Title, bCfg.banner1Subtitle, bCfg.resolvedBanner1Image))
+        }
+        if (bCfg.resolvedBanner2Image.isNotBlank()) {
+            add(Triple(bCfg.banner2Title, bCfg.banner2Subtitle, bCfg.resolvedBanner2Image))
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    item(key = "banners_header") {
         LuxurySectionHeader(
             title = "Banners",
             subtitle = "Featured Banner Wallpapers — full-bleed widescreen studio art",
             countBadge = "${BannerPresetCatalog.staticBannerPresets.size + adminBanners.size} Featured"
         )
+    }
 
-        adminBanners.forEachIndexed { idx, (title, subtitle, imageUrl) ->
-            Column(
+    items(
+        items = adminBanners.mapIndexed { idx, triple -> idx to triple },
+        key = { (idx, _) -> "admin_banner_$idx" }
+    ) { (idx, itemData) ->
+        val (title, subtitle, imageUrl) = itemData
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .luminousGlassCard(
+                    shape = RoundedCornerShape(20.dp),
+                    borderBrush = FlagshipGoldCyanBrush,
+                    borderWidth = 1.4.dp,
+                    glowColor = RoyalGold,
+                    glowElevation = 10.dp
+                )
+                .clickable { onOpenRemoteBannerCustomizer(title, subtitle, imageUrl) }
+                .padding(14.dp)
+                .testTag("featured_admin_banner_$idx"),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .luminousGlassCard(
-                        shape = RoundedCornerShape(20.dp),
-                        borderBrush = FlagshipGoldCyanBrush,
-                        borderWidth = 1.4.dp,
-                        glowColor = RoyalGold,
-                        glowElevation = 10.dp
-                    )
-                    .clickable { onOpenRemoteBannerCustomizer(title, subtitle, imageUrl) }
-                    .padding(14.dp)
-                    .testTag("featured_admin_banner_$idx"),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .height(114.dp)
             ) {
-                Box(
+                MiniKeyboardEffectPreview(
+                    remoteImageUrl = imageUrl,
+                    gradientColors = listOf(0xFF141826, 0xFF28193A),
+                    showKeyBorders = settings.showKeyBorders,
+                    showTopStrip = true,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                    FreeCornerPill(text = "FEATURED")
+                }
+            }
+            Text(
+                text = title,
+                fontFamily = SpaceGroteskFamily,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.80f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+
+    items(
+        items = BannerPresetCatalog.staticBannerPresets,
+        key = { "banner_preset_card_${it.id}" }
+    ) { preset ->
+        val selected = customPhotoTheme.presetId == preset.id
+        val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 184.dp)
+                .luminousGlassCard(
+                    shape = RoundedCornerShape(20.dp),
+                    borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimGoldSubtle,
+                    borderWidth = if (selected) 1.7.dp else 1.1.dp,
+                    glowColor = if (selected) NeonCyan else RoyalGold,
+                    glowElevation = if (selected) 14.dp else 8.dp,
+                    surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+                )
+                .clickable { onOpenBannerCustomizer(preset) }
+                .padding(14.dp)
+                .testTag("banner_card_${preset.id}"),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                MiniKeyboardEffectPreview(
+                    bannerPresetId = preset.id,
+                    gradientColors = preset.previewColors,
+                    showKeyBorders = settings.showKeyBorders,
+                    showTopStrip = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(114.dp)
+                        .height(112.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
                 ) {
-                    MiniKeyboardEffectPreview(
-                        remoteImageUrl = imageUrl,
-                        gradientColors = listOf(0xFF141826, 0xFF28193A),
-                        showKeyBorders = settings.showKeyBorders,
-                        showTopStrip = true,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Box(modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-                        FreeCornerPill(text = "FEATURED")
+                    when {
+                        isLocked -> VipCornerPill(text = "VIP")
+                        selected -> FreeCornerPill(text = "ACTIVE ✓")
+                        else -> FreeCornerPill(text = "HD BANNER")
                     }
                 }
-                Text(
-                    text = title,
-                    fontFamily = SpaceGroteskFamily,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = subtitle,
-                    fontFamily = PlusJakartaSansFamily,
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.80f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
-        }
 
-        // Large Featured Banner Cards (Full-Width Mini-Keyboard Showcase)
-        BannerPresetCatalog.staticBannerPresets.forEach { preset ->
-            val selected = customPhotoTheme.presetId == preset.id
-            val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 184.dp)
-                    .luminousGlassCard(
-                        shape = RoundedCornerShape(20.dp),
-                        borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimGoldSubtle,
-                        borderWidth = if (selected) 1.7.dp else 1.1.dp,
-                        glowColor = if (selected) NeonCyan else RoyalGold,
-                        glowElevation = if (selected) 14.dp else 8.dp,
-                        surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
-                    )
-                    .clickable { onOpenBannerCustomizer(preset) }
-                    .padding(14.dp)
-                    .testTag("banner_card_${preset.id}"),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    MiniKeyboardEffectPreview(
-                        bannerPresetId = preset.id,
-                        gradientColors = preset.previewColors,
-                        showKeyBorders = settings.showKeyBorders,
-                        showTopStrip = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(112.dp)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = preset.title,
+                        fontFamily = SpaceGroteskFamily,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                    ) {
-                        when {
-                            isLocked -> VipCornerPill(text = "VIP")
-                            selected -> FreeCornerPill(text = "ACTIVE ✓")
-                            else -> FreeCornerPill(text = "HD BANNER")
-                        }
-                    }
+                    Text(
+                        text = preset.subtitle.ifBlank { "Featured Banner Wallpaper" },
+                        fontFamily = PlusJakartaSansFamily,
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.80f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) NeonEmerald else NeonCyan)
+                        .clickable { onQuickApplyBanner(preset) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = preset.title,
-                            fontFamily = SpaceGroteskFamily,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = preset.subtitle.ifBlank { "Featured Banner Wallpaper" },
-                            fontFamily = PlusJakartaSansFamily,
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.80f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Box(
-                        modifier = Modifier
-                            .heightIn(min = 40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selected) NeonEmerald else NeonCyan)
-                            .clickable { onQuickApplyBanner(preset) }
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (selected) "Active ✓" else "Apply",
-                            fontFamily = SpaceGroteskFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF061020)
-                        )
-                    }
+                    Text(
+                        text = if (selected) "Active ✓" else "Apply",
+                        fontFamily = SpaceGroteskFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF061020)
+                    )
                 }
             }
         }
     }
 }
 
-@Composable
-private fun AnimationsLuxurySection(
+private fun LazyListScope.animationsLuxuryItems(
     settings: KeyboardSettings,
     licenseState: LicenseUiState,
     timeProvider: () -> Float,
@@ -1558,14 +1540,15 @@ private fun AnimationsLuxurySection(
 ) {
     val staticSelected = settings.effect == RgbEffect.NORMAL_DEFAULT
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    item(key = "animations_header") {
         LuxurySectionHeader(
             title = "Animations",
             subtitle = "Live Ambient & Motion Effects — layer seamlessly with any photo",
             countBadge = "${RgbEffect.ambientPhysicsEffects.size} Live RGB"
         )
+    }
 
-        // Static Clean Toggle Card
+    item(key = "animations_static_clean") {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1602,148 +1585,154 @@ private fun AnimationsLuxurySection(
             Spacer(modifier = Modifier.width(10.dp))
             FreeCornerPill(text = if (staticSelected) "ACTIVE ✓" else "FREE")
         }
+    }
 
-        // Firebase Cloud Animations
-        if (licenseState.adminConfig.cloudAnimations.isNotEmpty()) {
+    if (licenseState.adminConfig.cloudAnimations.isNotEmpty()) {
+        item(key = "animations_cloud_header") {
             SectionTitle(title = "Cloud Motion Effects")
-            licenseState.adminConfig.cloudAnimations.forEach { anim ->
-                val isLocked = !licenseState.isThemeItemUnlocked(anim.id, isPermanentlyFree = anim.isFree)
+        }
+        items(
+            items = licenseState.adminConfig.cloudAnimations,
+            key = { "cloud_anim_${it.id}" }
+        ) { anim ->
+            val isLocked = !licenseState.isThemeItemUnlocked(anim.id, isPermanentlyFree = anim.isFree)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 76.dp)
+                    .luminousGlassCard(
+                        shape = RoundedCornerShape(16.dp),
+                        borderBrush = FlagshipCyanMagentaBrush,
+                        borderWidth = 1.1.dp,
+                        glowColor = NeonCyan,
+                        glowElevation = 8.dp
+                    )
+                    .clickable { onApplyCloudAnimation(anim) }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 76.dp)
-                        .luminousGlassCard(
-                            shape = RoundedCornerShape(16.dp),
-                            borderBrush = FlagshipCyanMagentaBrush,
-                            borderWidth = 1.1.dp,
-                            glowColor = NeonCyan,
-                            glowElevation = 8.dp
-                        )
-                        .clickable { onApplyCloudAnimation(anim) }
-                        .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    MiniKeyboardEffectPreview(
+                        effect = RgbEffect.fromSavedName(anim.baseEffectId),
+                        palette = settings.palette,
+                        glowIntensity = settings.glowIntensity,
+                        animationSpeed = settings.animationSpeed,
+                        timeProvider = timeProvider,
+                        showKeyBorders = settings.showKeyBorders,
+                        showTopStrip = false,
+                        modifier = Modifier.size(width = 88.dp, height = 52.dp)
+                    )
+                    Column {
+                        Text(
+                            text = anim.title,
+                            fontFamily = SpaceGroteskFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Synced Cloud RGB Animation",
+                            fontFamily = PlusJakartaSansFamily,
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.75f)
+                        )
+                    }
+                }
+                if (isLocked) VipCornerPill(text = "VIP") else FreeCornerPill(text = "CLOUD")
+            }
+        }
+    }
+
+    val animRows = RgbEffect.ambientPhysicsEffects.chunked(2)
+    items(
+        items = animRows,
+        key = { row -> "anim_row_${row.first().id}" }
+    ) { pair ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            pair.forEach { effect ->
+                val selected = settings.effect == effect
+                val isLocked = !licenseState.isThemeItemUnlocked(effect.id, isPermanentlyFree = !effect.isVipEffect)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 192.dp)
+                        .luminousGlassCard(
+                            shape = RoundedCornerShape(18.dp),
+                            borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                            borderWidth = if (selected) 1.7.dp else 1.dp,
+                            glowColor = NeonCyan,
+                            glowElevation = if (selected) 14.dp else 8.dp,
+                            surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+                        )
+                        .clickable { onSelectAmbientEffect(effect) }
+                        .padding(12.dp)
+                        .testTag("ambient_effect_card_${effect.id}"),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
                         MiniKeyboardEffectPreview(
-                            effect = RgbEffect.fromSavedName(anim.baseEffectId),
+                            effect = effect,
                             palette = settings.palette,
+                            keycapStyle = settings.keycapStyle,
                             glowIntensity = settings.glowIntensity,
                             animationSpeed = settings.animationSpeed,
                             timeProvider = timeProvider,
                             showKeyBorders = settings.showKeyBorders,
-                            showTopStrip = false,
-                            modifier = Modifier.size(width = 88.dp, height = 52.dp)
+                            showTopStrip = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(88.dp)
                         )
-                        Column {
-                            Text(
-                                text = anim.title,
-                                fontFamily = SpaceGroteskFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Synced Cloud RGB Animation",
-                                fontFamily = PlusJakartaSansFamily,
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.75f)
-                            )
-                        }
-                    }
-                    if (isLocked) VipCornerPill(text = "VIP") else FreeCornerPill(text = "CLOUD")
-                }
-            }
-        }
-
-        // 20 Live Ambient Physics RGB Mini-Keyboard Cards (2-Column Grid)
-        RgbEffect.ambientPhysicsEffects.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                pair.forEach { effect ->
-                    val selected = settings.effect == effect
-                    val isLocked = !licenseState.isThemeItemUnlocked(effect.id, isPermanentlyFree = false)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 192.dp)
-                            .luminousGlassCard(
-                                shape = RoundedCornerShape(18.dp),
-                                borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
-                                borderWidth = if (selected) 1.7.dp else 1.dp,
-                                glowColor = NeonCyan,
-                                glowElevation = if (selected) 14.dp else 8.dp,
-                                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
-                            )
-                            .clickable { onSelectAmbientEffect(effect) }
-                            .padding(12.dp)
-                            .testTag("ambient_effect_card_${effect.id}"),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            MiniKeyboardEffectPreview(
-                                effect = effect,
-                                palette = settings.palette,
-                                keycapStyle = settings.keycapStyle,
-                                glowIntensity = settings.glowIntensity,
-                                animationSpeed = settings.animationSpeed,
-                                timeProvider = timeProvider,
-                                showKeyBorders = settings.showKeyBorders,
-                                showTopStrip = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(88.dp)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(6.dp)
-                            ) {
-                                when {
-                                    isLocked -> VipCornerPill(text = "VIP")
-                                    selected -> FreeCornerPill(text = "ACTIVE ✓")
-                                }
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                        ) {
+                            when {
+                                isLocked -> VipCornerPill(text = "VIP")
+                                selected -> FreeCornerPill(text = "ACTIVE ✓")
                             }
                         }
+                    }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                text = effect.shortLabel,
-                                fontFamily = SpaceGroteskFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = effect.description,
-                                fontFamily = PlusJakartaSansFamily,
-                                fontSize = 11.5.sp,
-                                lineHeight = 15.sp,
-                                color = Color.White.copy(alpha = 0.78f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = effect.shortLabel,
+                            fontFamily = SpaceGroteskFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = effect.description,
+                            fontFamily = PlusJakartaSansFamily,
+                            fontSize = 11.5.sp,
+                            lineHeight = 15.sp,
+                            color = Color.White.copy(alpha = 0.78f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
-                if (pair.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+            }
+            if (pair.size == 1) {
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
-@Composable
-private fun TouchResponsesLuxurySection(
+private fun LazyListScope.touchResponsesLuxuryItems(
     settings: KeyboardSettings,
     licenseState: LicenseUiState,
     timeProvider: () -> Float,
@@ -1756,14 +1745,15 @@ private fun TouchResponsesLuxurySection(
 ) {
     val offSelected = settings.touchEffect == TouchTypingEffect.NONE
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    item(key = "touch_header") {
         LuxurySectionHeader(
             title = "Touch Responses",
-            subtitle = "50+ AI & Physics Key-Tap Effects — tap any card to test live above",
+            subtitle = "100+ AI & Physics Key-Tap Effects — tap any card to test live above",
             countBadge = "${TouchTypingEffect.byCategory(TouchEffectCategory.ALL).size} AI FX"
         )
+    }
 
-        // Clean Off Card
+    item(key = "touch_off_card") {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1800,8 +1790,9 @@ private fun TouchResponsesLuxurySection(
             Spacer(modifier = Modifier.width(10.dp))
             FreeCornerPill(text = if (offSelected) "ACTIVE ✓" else "FREE")
         }
+    }
 
-        // Spacious Category Filter Pills
+    item(key = "touch_filter_pills") {
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 2.dp)
@@ -1832,104 +1823,130 @@ private fun TouchResponsesLuxurySection(
                 }
             }
         }
+    }
 
-        // Spacious 2-Column Luxury Touch Response Cards (56 Effects)
-        filteredEffects.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                pair.forEach { fx ->
-                    val selected = settings.touchEffect == fx
-                    val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 212.dp)
-                            .luminousGlassCard(
-                                shape = RoundedCornerShape(18.dp),
-                                borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
-                                borderWidth = if (selected) 1.7.dp else 1.dp,
-                                glowColor = Color(fx.primaryHex),
-                                glowElevation = if (selected) 14.dp else 8.dp,
-                                surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
-                            )
-                            .clickable { onQuickApplyTouchEffect(fx) }
-                            .padding(12.dp)
-                            .testTag("touch_effect_card_${fx.id}"),
-                        verticalArrangement = Arrangement.spacedBy(9.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            MiniKeyboardEffectPreview(
-                                touchEffect = fx,
-                                palette = settings.palette,
-                                glowIntensity = settings.glowIntensity,
-                                timeProvider = timeProvider,
-                                showKeyBorders = settings.showKeyBorders,
-                                showTopStrip = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(88.dp)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(6.dp)
-                            ) {
-                                if (isLocked) {
-                                    VipCornerPill(text = "VIP")
-                                } else if (selected) {
-                                    FreeCornerPill(text = "ACTIVE ✓")
-                                }
+    val touchRows = filteredEffects.chunked(2)
+    items(
+        items = touchRows,
+        key = { row -> "touch_row_${row.first().id}" }
+    ) { pair ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            pair.forEach { fx ->
+                val selected = settings.touchEffect == fx
+                val isLocked = !licenseState.isThemeItemUnlocked(fx.id, isPermanentlyFree = !fx.isVipEffect)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 212.dp)
+                        .luminousGlassCard(
+                            shape = RoundedCornerShape(18.dp),
+                            borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                            borderWidth = if (selected) 1.7.dp else 1.dp,
+                            glowColor = Color(fx.primaryHex),
+                            glowElevation = if (selected) 14.dp else 8.dp,
+                            surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+                        )
+                        .clickable { onQuickApplyTouchEffect(fx) }
+                        .padding(12.dp)
+                        .testTag("touch_effect_card_${fx.id}"),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        MiniKeyboardEffectPreview(
+                            touchEffect = fx,
+                            palette = settings.palette,
+                            glowIntensity = settings.glowIntensity,
+                            timeProvider = timeProvider,
+                            showKeyBorders = settings.showKeyBorders,
+                            bannerPresetId = BannerPresetCatalog.defaultBannerForTouchEffect(fx),
+                            dimAlpha = 0.44f,
+                            showTopStrip = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(88.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                        ) {
+                            if (isLocked) {
+                                VipCornerPill(text = "VIP")
+                            } else if (selected) {
+                                FreeCornerPill(text = "ACTIVE ✓")
                             }
                         }
+                    }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                text = fx.shortLabel,
-                                fontFamily = SpaceGroteskFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = fx.description,
-                                fontFamily = PlusJakartaSansFamily,
-                                fontSize = 11.5.sp,
-                                lineHeight = 15.sp,
-                                color = Color.White.copy(alpha = 0.78f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = fx.shortLabel,
+                            fontFamily = SpaceGroteskFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = fx.description,
+                            fontFamily = PlusJakartaSansFamily,
+                            fontSize = 11.5.sp,
+                            lineHeight = 15.sp,
+                            color = Color.White.copy(alpha = 0.78f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = fx.badge,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(fx.primaryHex),
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = fx.badge,
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(fx.primaryHex),
-                                maxLines = 1,
-                                modifier = Modifier.weight(1f)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF132238))
+                                    .border(0.9.dp, NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                                    .clickable { onOpenTouchCustomizer(fx) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Tune,
+                                    contentDescription = "Customize ${fx.shortLabel}",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                             Box(
                                 modifier = Modifier
                                     .heightIn(min = 34.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(if (selected) NeonEmerald else NeonCyan)
-                                    .clickable { onOpenTouchCustomizer(fx) }
+                                    .clickable { onQuickApplyTouchEffect(fx) }
                                     .padding(horizontal = 10.dp, vertical = 5.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (selected) "Active ✓" else "Preview",
+                                    text = if (selected) "Active ✓" else "Apply",
                                     fontFamily = SpaceGroteskFamily,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
@@ -1939,16 +1956,15 @@ private fun TouchResponsesLuxurySection(
                         }
                     }
                 }
-                if (pair.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+            }
+            if (pair.size == 1) {
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
-@Composable
-private fun ThemesLuxurySection(
+private fun LazyListScope.themesLuxuryItems(
     settings: KeyboardSettings,
     customPhotoTheme: CustomPhotoTheme,
     licenseState: LicenseUiState,
@@ -1961,13 +1977,15 @@ private fun ThemesLuxurySection(
     onOpenComboCustomizer: (ComboThemePreset) -> Unit,
     onQuickApplyCombo: (ComboThemePreset) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    item(key = "themes_header") {
         LuxurySectionHeader(
             title = "Themes",
             subtitle = "Complete Luxury Keyboard Themes — paired HD art + ambient RGB",
             countBadge = "${filteredCombos.size} Packs"
         )
+    }
 
+    item(key = "themes_filter_pills") {
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 2.dp)
@@ -1998,145 +2016,148 @@ private fun ThemesLuxurySection(
                 }
             }
         }
+    }
 
-        // Spacious 2-Column Complete Luxury Theme Cards
-        filteredCombos.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                pair.forEach { combo ->
-                    val isDownloading = combo.id in downloadingThemeIds
-                    val isActive = (customPhotoTheme.downloadedThemeId == combo.id ||
-                        (!combo.bannerPresetId.isNullOrBlank() && customPhotoTheme.presetId == combo.bannerPresetId)) &&
-                        settings.effect == combo.effect &&
-                        settings.palette == combo.palette
-                    val isLocked = !licenseState.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+    val comboRows = filteredCombos.chunked(2)
+    items(
+        items = comboRows,
+        key = { row -> "combo_row_${row.first().id}" }
+    ) { pair ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            pair.forEach { combo ->
+                val isDownloading = combo.id in downloadingThemeIds
+                val isActive = (customPhotoTheme.downloadedThemeId == combo.id ||
+                    (!combo.bannerPresetId.isNullOrBlank() && customPhotoTheme.presetId == combo.bannerPresetId)) &&
+                    settings.effect == combo.effect &&
+                    settings.palette == combo.palette
+                val isLocked = !licenseState.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
 
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 216.dp)
-                            .luminousGlassCard(
-                                shape = RoundedCornerShape(18.dp),
-                                borderBrush = if (isActive) FlagshipGoldCyanBrush else FlagshipGlassRimSubtle,
-                                borderWidth = if (isActive) 1.7.dp else 1.dp,
-                                glowColor = RoyalGold,
-                                glowElevation = if (isActive) 14.dp else 8.dp,
-                                surfaceColor = if (isActive) GlassCardSelected else GlassCardSurface
-                            )
-                            .clickable { onQuickApplyCombo(combo) }
-                            .padding(12.dp)
-                            .testTag("combo_card_${combo.id}"),
-                        verticalArrangement = Arrangement.spacedBy(9.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            MiniKeyboardEffectPreview(
-                                effect = combo.effect,
-                                palette = combo.palette,
-                                keycapStyle = settings.keycapStyle,
-                                glowIntensity = settings.glowIntensity,
-                                animationSpeed = settings.animationSpeed,
-                                timeProvider = timeProvider,
-                                showKeyBorders = settings.showKeyBorders,
-                                bannerPresetId = combo.bannerPresetId,
-                                remoteImageUrl = combo.remoteImageUrl,
-                                gradientColors = combo.previewColors,
-                                showTopStrip = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(92.dp)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(6.dp)
-                            ) {
-                                when {
-                                    isLocked -> VipCornerPill(text = "VIP")
-                                    isActive -> FreeCornerPill(text = "ACTIVE ✓")
-                                    combo.isCloudFree -> FreeCornerPill(text = "FREE")
-                                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 216.dp)
+                        .luminousGlassCard(
+                            shape = RoundedCornerShape(18.dp),
+                            borderBrush = if (isActive) FlagshipGoldCyanBrush else FlagshipGlassRimSubtle,
+                            borderWidth = if (isActive) 1.7.dp else 1.dp,
+                            glowColor = RoyalGold,
+                            glowElevation = if (isActive) 14.dp else 8.dp,
+                            surfaceColor = if (isActive) GlassCardSelected else GlassCardSurface
+                        )
+                        .clickable { onQuickApplyCombo(combo) }
+                        .padding(12.dp)
+                        .testTag("combo_card_${combo.id}"),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        MiniKeyboardEffectPreview(
+                            effect = combo.effect,
+                            palette = combo.palette,
+                            keycapStyle = settings.keycapStyle,
+                            glowIntensity = settings.glowIntensity,
+                            animationSpeed = settings.animationSpeed,
+                            timeProvider = timeProvider,
+                            showKeyBorders = settings.showKeyBorders,
+                            bannerPresetId = combo.bannerPresetId,
+                            remoteImageUrl = combo.remoteImageUrl,
+                            gradientColors = combo.previewColors,
+                            showTopStrip = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(92.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                        ) {
+                            when {
+                                isLocked -> VipCornerPill(text = "VIP")
+                                isActive -> FreeCornerPill(text = "ACTIVE ✓")
+                                combo.isCloudFree -> FreeCornerPill(text = "FREE")
                             }
                         }
+                    }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                text = combo.title,
-                                fontFamily = SpaceGroteskFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = combo.subtitle,
-                                fontFamily = PlusJakartaSansFamily,
-                                fontSize = 11.5.sp,
-                                lineHeight = 15.sp,
-                                color = Color.White.copy(alpha = 0.78f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = combo.title,
+                            fontFamily = SpaceGroteskFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = combo.subtitle,
+                            fontFamily = PlusJakartaSansFamily,
+                            fontSize = 11.5.sp,
+                            lineHeight = 15.sp,
+                            color = Color.White.copy(alpha = 0.78f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = combo.effect.shortLabel,
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 9.5.sp,
+                            color = NeonCyan,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = combo.effect.shortLabel,
-                                fontFamily = JetBrainsMonoFamily,
-                                fontSize = 9.5.sp,
-                                color = NeonCyan,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF132238))
+                                    .border(0.9.dp, NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                                    .clickable { onOpenComboCustomizer(combo) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(0xFF132238))
-                                        .border(0.9.dp, NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-                                        .clickable { onOpenComboCustomizer(combo) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Tune,
-                                        contentDescription = "Customize ${combo.title}",
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                if (isDownloading) {
-                                    CircularProgressIndicator(
-                                        color = NeonCyan,
-                                        strokeWidth = 2.dp,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                } else if (isActive) {
-                                    Icon(
-                                        imageVector = Icons.Filled.CheckCircle,
-                                        contentDescription = "Active",
-                                        tint = NeonEmerald,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Filled.Tune,
+                                    contentDescription = "Customize ${combo.title}",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            if (isDownloading) {
+                                CircularProgressIndicator(
+                                    color = NeonCyan,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            } else if (isActive) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = "Active",
+                                    tint = NeonEmerald,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                         }
                     }
                 }
-                if (pair.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+            }
+            if (pair.size == 1) {
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }

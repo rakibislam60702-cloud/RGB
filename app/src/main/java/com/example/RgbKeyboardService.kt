@@ -71,6 +71,8 @@ import com.example.model.EmojiCatalog
 import com.example.model.KeyboardHeightPreset
 import com.example.model.KeyboardSettings
 import com.example.model.LanguageCatalog
+import com.example.model.RgbEffect
+import com.example.model.TouchTypingEffect
 import com.example.rgbkeyboard.RgbKeyboardView
 import com.example.security.AntiTamperGuard
 import kotlinx.coroutines.CoroutineScope
@@ -256,8 +258,9 @@ class RgbKeyboardService : InputMethodService() {
         trialLicenseManager = TrialLicenseManager.getInstance(applicationContext)
         clipboardManager = ClipboardHistoryManager.getInstance(applicationContext)
         feedbackEngine = MechanicalFeedbackEngine(applicationContext)
-        currentPhotoTheme = customBackgroundManager.getCurrentTheme()
-        currentLicenseState = trialLicenseManager.refreshState()
+        currentSettings = preferencesRepository.getCachedSettingsSnapshot()
+        currentPhotoTheme = customBackgroundManager.reloadFromPrefs()
+        currentLicenseState = trialLicenseManager.syncNowOnLaunchOrServiceStart()
 
         SmartWordPredictor.init(applicationContext)
         bengaliTypeface = runCatching {
@@ -672,8 +675,13 @@ class RgbKeyboardService : InputMethodService() {
         super.onStartInputView(info, restarting)
         isTypingWindowVisible = true
         clearBanglishBuffer(finishComposing = false)
+        clipboardManager.pruneExpiredClips()
         clipboardManager.captureCurrentPrimaryClip()
-        // Keep DataStore activeLanguageId as single source of truth so Bangla ('bn') never reverts to English!
+        // Synchronously load saved settings, language, and photo wallpaper before drawing so IME switches never flash defaults
+        currentLicenseState = trialLicenseManager.refreshState()
+        currentSettings = preferencesRepository.getCachedSettingsSnapshot()
+        currentPhotoTheme = customBackgroundManager.reloadFromPrefs()
+        applySettingsToViews(currentSettings)
         keyboardView?.setActiveLanguage(currentSettings.activeLanguageId)
         val rawInputType = info?.inputType ?: 0
         val inputClass = rawInputType and InputType.TYPE_MASK_CLASS
@@ -686,14 +694,66 @@ class RgbKeyboardService : InputMethodService() {
         keyboardView?.setNumberPadMode(isNumericField)
         val actionId = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         keyboardView?.setSearchAction(actionId == EditorInfo.IME_ACTION_SEARCH)
-        keyboardView?.updatePhotoTheme(customBackgroundManager.getCurrentTheme())
+        keyboardView?.updatePhotoTheme(currentPhotoTheme)
+        keyboardView?.updateSettings(currentSettings)
         keyboardView?.resumeAnimations()
-        currentLicenseState = trialLicenseManager.refreshState()
         lastVipSyncMs = SystemClock.uptimeMillis()
+        syncTrialVisualStateFromService(currentLicenseState)
+        com.example.notifications.VipNotificationHelper.evaluateAndNotify(this, currentLicenseState)
         registerCallStateListenerIfPermitted()
         applyTrialLockState()
         updateCallBannerVisibility()
         refreshSuggestions(immediate = true)
+    }
+
+    private fun syncTrialVisualStateFromService(state: LicenseUiState) {
+        if (!state.isDeviceBlocked && state.isVipActive) {
+            serviceScope.launch(Dispatchers.IO) {
+                preferencesRepository.resetPostTrialRevertFlag()
+                customBackgroundManager.resetPostTrialVisualRevertFlag()
+                if (!state.isTrialExpired) {
+                    preferencesRepository.seedInitialTrialTouchDefaultsIfNeeded()
+                    customBackgroundManager.seedTrialDefaultPresetIfUnset(
+                        com.example.data.BannerPresetCatalog.PRESET_CUTE_CARTOON
+                    )
+                }
+            }
+        } else if (state.isFreeStandardMode) {
+            var revertedSettings = currentSettings
+            var didModifySettings = false
+            if (revertedSettings.effect != RgbEffect.NORMAL_DEFAULT &&
+                !state.isThemeItemUnlocked(revertedSettings.effect.id, isPermanentlyFree = !revertedSettings.effect.isVipEffect)
+            ) {
+                revertedSettings = revertedSettings.copy(effect = RgbEffect.NORMAL_DEFAULT)
+                didModifySettings = true
+            }
+            if (revertedSettings.touchEffect != TouchTypingEffect.NONE &&
+                !state.isThemeItemUnlocked(revertedSettings.touchEffect.id, isPermanentlyFree = !revertedSettings.touchEffect.isVipEffect)
+            ) {
+                revertedSettings = revertedSettings.copy(touchEffect = TouchTypingEffect.NONE)
+                didModifySettings = true
+            }
+            if (didModifySettings) {
+                currentSettings = revertedSettings
+                keyboardView?.updateSettings(revertedSettings)
+            }
+            if (!currentPhotoTheme.hasCustomGalleryPhoto && currentPhotoTheme.hasPhoto) {
+                val itemId = currentPhotoTheme.downloadedThemeId ?: currentPhotoTheme.presetId.orEmpty()
+                if (itemId.isBlank() || !state.isThemeItemUnlocked(itemId, isPermanentlyFree = false)) {
+                    customBackgroundManager.clearBuiltInPresetOrComboPreservingGalleryPhoto()
+                    currentPhotoTheme = customBackgroundManager.getCurrentTheme()
+                    keyboardView?.updatePhotoTheme(currentPhotoTheme)
+                }
+            }
+            serviceScope.launch(Dispatchers.IO) {
+                preferencesRepository.revertToFreeStandardDefaultsOnce()
+                customBackgroundManager.revertPaidVisualsOnTrialExpiryPreservingGalleryPhoto()
+                if (didModifySettings) {
+                    preferencesRepository.updateEffect(revertedSettings.effect)
+                    preferencesRepository.updateTouchEffect(revertedSettings.touchEffect)
+                }
+            }
+        }
     }
 
     override fun onWindowShown() {
@@ -706,13 +766,21 @@ class RgbKeyboardService : InputMethodService() {
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        val elapsedSinceCallAccept = SystemClock.elapsedRealtime() - lastKeyboardCallAcceptMs
+        val keepFocusAfterAccept = elapsedSinceCallAccept in 0L..3_500L &&
+            currentCallState == TelephonyManager.CALL_STATE_OFFHOOK &&
+            currentInputConnection != null
         isTypingWindowVisible = false
         keyboardView?.pauseAnimations()
         isEmojiBackspaceRepeating = false
         uiHandler.removeCallbacks(emojiBackspaceRepeatRunnable)
         uiHandler.removeCallbacks(micHoldLockRunnable)
         uiHandler.removeCallbacks(callTimerRunnable)
-        callBannerBar?.visibility = View.GONE
+        if (keepFocusAfterAccept) {
+            uiHandler.post { ensureKeyboardStaysFocusedAfterCallAccept() }
+        } else {
+            callBannerBar?.visibility = View.GONE
+        }
     }
 
     override fun onUpdateSelection(
@@ -1171,10 +1239,18 @@ class RgbKeyboardService : InputMethodService() {
     }
 
     /**
-     * Launches a tiny transparent PermissionRequestActivity ONLY when RECORD_AUDIO is missing.
-     * NEVER launches MainActivity when voice typing is triggered from the keyboard.
+     * Launches a tiny transparent PermissionRequestActivity ONLY ONCE when RECORD_AUDIO is missing.
+     * Never re-prompts or redirects to system settings once prompted.
      */
     private fun launchAudioPermissionRequest() {
+        val permPrefs = getSharedPreferences(PREFS_PERMISSIONS, Context.MODE_PRIVATE)
+        if (permPrefs.getBoolean(KEY_MIC_PROMPTED_ONCE, false)) {
+            voiceBar?.visibility = View.VISIBLE
+            tvVoiceStatus?.setTextColor(Color.parseColor("#FFB300"))
+            tvVoiceStatus?.text = "🎙️ মাইক পারমিশন নেই (১ বার অনুরোধ করা হয়েছে)"
+            return
+        }
+        permPrefs.edit().putBoolean(KEY_MIC_PROMPTED_ONCE, true).apply()
         val intent = Intent(this, PermissionRequestActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         }
@@ -1266,7 +1342,7 @@ class RgbKeyboardService : InputMethodService() {
     ) {
         val container = suggestionContainer ?: return
         val effectiveSuggestions = if (smartEnabled) prediction.suggestions else emptyList()
-        val isBanglishMode = langId == LanguageCatalog.BANGLISH_ID
+        val isBanglishMode = langId == LanguageCatalog.BANGLISH_ID && currentLicenseState.isBanglishUnlocked
 
         val activeConvertPreview = when {
             selectedBanglaConverted.isNotEmpty() -> selectedBanglaConverted
@@ -1641,6 +1717,12 @@ class RgbKeyboardService : InputMethodService() {
         cursorConverted: String,
         clipConverted: String
     ) {
+        val latestLicense = trialLicenseManager.refreshState()
+        currentLicenseState = latestLicense
+        if (!latestLicense.isBanglishUnlocked) {
+            handleOpenUnlockScreen()
+            return
+        }
         if (selectedConverted.isNotEmpty()) {
             withSafeInputConnection { ic ->
                 ic.commitText(selectedConverted, 1)
@@ -2516,9 +2598,19 @@ class RgbKeyboardService : InputMethodService() {
                     state.isCallBarUnlocked != currentLicenseState.isCallBarUnlocked
                 currentLicenseState = state
                 if (changed) {
+                    syncTrialVisualStateFromService(state)
                     applyTrialLockState()
                 }
             }
+        }
+    }
+
+    private fun dismissOneTimeClipChips() {
+        if (clipboardManager.hasFreshTextClip.value) {
+            clipboardManager.dismissFreshTextClip()
+        }
+        if (clipboardManager.latestScreenshotClip.value != null) {
+            clipboardManager.dismissScreenshotClip()
         }
     }
 
@@ -2547,6 +2639,7 @@ class RgbKeyboardService : InputMethodService() {
 
         // Switch active keyboard layout synchronously on the spot (zero lag waiting for DataStore disk I/O)
         currentSettings = currentSettings.copy(activeLanguageId = nextLangId)
+        preferencesRepository.cacheActiveLanguageSync(nextLangId)
         updateKeyboardHeightForLanguage(nextLangId)
         keyboardView?.setActiveLanguage(nextLangId)
         refreshSuggestions(immediate = true)
@@ -2655,6 +2748,7 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun handleCommitText(text: String) {
         syncVipVisualsQuietly()
+        dismissOneTimeClipChips()
         val isBanglishVip = isBanglishVipActive()
         var learnInput: String? = null
 
@@ -2727,6 +2821,7 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun handleBackspace() {
         syncVipVisualsQuietly()
+        dismissOneTimeClipChips()
         withSafeInputConnection { ic ->
             if (isBanglishVipActive() && banglishRawBengaliBuffer.isNotEmpty()) {
                 banglishRawBengaliBuffer.deleteCharAt(banglishRawBengaliBuffer.length - 1)
@@ -2764,6 +2859,7 @@ class RgbKeyboardService : InputMethodService() {
      */
     private fun handleDeletePreviousWord() {
         syncVipVisualsQuietly()
+        dismissOneTimeClipChips()
         withSafeInputConnection { ic ->
             if (isBanglishVipActive() && banglishRawBengaliBuffer.isNotEmpty()) {
                 banglishRawBengaliBuffer.clear()
@@ -2796,6 +2892,7 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun handleSpace() {
         syncVipVisualsQuietly()
+        dismissOneTimeClipChips()
         var learnInput: String? = null
         withSafeInputConnection { ic ->
             val now = System.currentTimeMillis()
@@ -2848,6 +2945,7 @@ class RgbKeyboardService : InputMethodService() {
 
     private fun handleEnter() {
         syncVipVisualsQuietly()
+        dismissOneTimeClipChips()
         var learnInput: String? = null
         withSafeInputConnection { ic ->
             // Flush & transliterate any live or pending Bengali word in Banglish (BN-EN) mode before Enter/Send
@@ -2997,6 +3095,11 @@ class RgbKeyboardService : InputMethodService() {
             } else if (state == TelephonyManager.CALL_STATE_IDLE) {
                 callOffhookStartMs = 0L
             }
+            if (state == TelephonyManager.CALL_STATE_OFFHOOK &&
+                (SystemClock.elapsedRealtime() - lastKeyboardCallAcceptMs) in 0L..3_500L
+            ) {
+                uiHandler.post { ensureKeyboardStaysFocusedAfterCallAccept() }
+            }
             updateCallBannerVisibility()
         }
     }
@@ -3068,19 +3171,33 @@ class RgbKeyboardService : InputMethodService() {
                 callOffhookStartMs = SystemClock.elapsedRealtime()
             }
             updateCallBannerVisibility()
-            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 240L)
-            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 620L)
-            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 1100L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 120L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 350L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 700L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 1200L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 1900L)
+            uiHandler.postDelayed({ ensureKeyboardStaysFocusedAfterCallAccept() }, 2600L)
         }
     }
 
     private fun ensureKeyboardStaysFocusedAfterCallAccept() {
         val elapsedSinceAccept = SystemClock.elapsedRealtime() - lastKeyboardCallAcceptMs
-        if (elapsedSinceAccept > 1_800L) return
+        if (elapsedSinceAccept > 3_500L) return
         val editorInfo = currentInputEditorInfo ?: return
         val inputClass = editorInfo.inputType and InputType.TYPE_MASK_CLASS
-        if (!isInputViewShown && currentInputConnection != null && inputClass != InputType.TYPE_NULL) {
-            runCatching { requestShowSelf(0) }
+        if (currentInputConnection != null && inputClass != InputType.TYPE_NULL) {
+            isTypingWindowVisible = true
+            if (!isInputViewShown) {
+                val shown = runCatching {
+                    @Suppress("DEPRECATION")
+                    requestShowSelf(android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+                    true
+                }.getOrDefault(false)
+                if (!shown) {
+                    runCatching { requestShowSelf(0) }
+                }
+            }
+            updateCallBannerVisibility()
         }
     }
 
@@ -3098,6 +3215,8 @@ class RgbKeyboardService : InputMethodService() {
     }
 
     companion object {
+        private const val PREFS_PERMISSIONS = "rakib_permissions_prefs"
+        private const val KEY_MIC_PROMPTED_ONCE = "mic_permission_prompted_once"
         private const val VOICE_LOCK_HOLD_MS = 600L
         private const val VIP_SYNC_INTERVAL_MS = 30_000L
         private const val BACKSPACE_INITIAL_DELAY_MS = 300L

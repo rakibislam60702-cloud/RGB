@@ -10,6 +10,7 @@ import android.view.inputmethod.InputMethodManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.RgbKeyboardService
+import com.example.data.BannerPresetCatalog
 import com.example.data.ClipboardHistoryManager
 import com.example.data.CloudAnimationConfig
 import com.example.data.ComboThemePreset
@@ -36,6 +37,7 @@ import com.example.model.RgbEffect
 import com.example.model.RgbPalette
 import com.example.model.SwitchSoundProfile
 import com.example.model.TouchTypingEffect
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +62,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     val customPhotoTheme: StateFlow<CustomPhotoTheme> = customBackgroundManager.theme
     val downloadedThemeIds: StateFlow<Set<String>> = customBackgroundManager.downloadedThemeIds
     val licenseState: StateFlow<LicenseUiState> = trialLicenseManager.licenseState
+    val isFirebaseConnected: StateFlow<Boolean> = trialLicenseManager.isFirebaseConnected
+    val lastFirebaseSyncMs: StateFlow<Long> = trialLicenseManager.lastFirebaseSyncTimestampMs
+    val appVersionLabel: String = trialLicenseManager.getAppVersionLabel()
 
     private val _downloadingThemeIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingThemeIds: StateFlow<Set<String>> = _downloadingThemeIds.asStateFlow()
@@ -67,7 +72,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     val settings: StateFlow<KeyboardSettings> = repository.settingsFlow.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000L),
-        initialValue = KeyboardSettings()
+        initialValue = repository.getCachedSettingsSnapshot()
     )
 
     private val _downloadingIds = MutableStateFlow<Set<String>>(emptySet())
@@ -148,24 +153,77 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     init {
         SmartWordPredictor.init(application)
         viewModelScope.launch { repository.ensureSoundDefaultMigrated() }
+        trialLicenseManager.syncNowOnLaunchOrServiceStart()
         trialLicenseManager.syncStorageInBackground(forcePersistToDocuments = false)
         refreshImeStatus()
+        refreshLicenseState()
         startTrialCountdownTicker()
     }
 
     private fun startTrialCountdownTicker() {
         viewModelScope.launch {
             while (isActive) {
-                val state = trialLicenseManager.refreshState()
-                enforceBanglishVipLockIfExpired(state)
                 delay(15_000L)
+                val state = trialLicenseManager.refreshState()
+                syncLicenseVisualLifecycle(state)
             }
         }
     }
 
     fun refreshLicenseState() {
         val state = trialLicenseManager.refreshState()
+        syncLicenseVisualLifecycle(state)
+    }
+
+    fun refreshAndGetLicenseState(): LicenseUiState {
+        val state = trialLicenseManager.refreshState()
+        syncLicenseVisualLifecycle(state)
+        return state
+    }
+
+    fun syncDeviceInfoOnResume() {
+        val state = trialLicenseManager.syncNowOnLaunchOrServiceStart()
+        syncLicenseVisualLifecycle(state)
+    }
+
+    private fun syncLicenseVisualLifecycle(state: LicenseUiState) {
         enforceBanglishVipLockIfExpired(state)
+        if (!state.isDeviceBlocked && state.isVipActive) {
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.resetPostTrialRevertFlag()
+                customBackgroundManager.resetPostTrialVisualRevertFlag()
+                if (!state.isTrialExpired) {
+                    repository.seedInitialTrialTouchDefaultsIfNeeded()
+                    customBackgroundManager.seedTrialDefaultPresetIfUnset(
+                        BannerPresetCatalog.PRESET_CUTE_CARTOON
+                    )
+                }
+            }
+        } else if (state.isFreeStandardMode) {
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.revertToFreeStandardDefaultsOnce()
+                customBackgroundManager.revertPaidVisualsOnTrialExpiryPreservingGalleryPhoto()
+                val curSettings = repository.getCachedSettingsSnapshot()
+                if (curSettings.effect != RgbEffect.NORMAL_DEFAULT &&
+                    !state.isThemeItemUnlocked(curSettings.effect.id, isPermanentlyFree = !curSettings.effect.isVipEffect)
+                ) {
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                }
+                if (curSettings.touchEffect != TouchTypingEffect.NONE &&
+                    !state.isThemeItemUnlocked(curSettings.touchEffect.id, isPermanentlyFree = !curSettings.touchEffect.isVipEffect)
+                ) {
+                    repository.updateTouchEffect(TouchTypingEffect.NONE)
+                }
+                val photo = customBackgroundManager.getCurrentTheme()
+                if (!photo.hasCustomGalleryPhoto && photo.hasPhoto) {
+                    val itemId = photo.downloadedThemeId ?: photo.presetId.orEmpty()
+                    if (itemId.isBlank() || !state.isThemeItemUnlocked(itemId, isPermanentlyFree = false)) {
+                        customBackgroundManager.clearBuiltInPresetOrComboPreservingGalleryPhoto()
+                    }
+                }
+            }
+        }
+        com.example.notifications.VipNotificationHelper.evaluateAndNotify(getApplication(), state)
     }
 
     private fun enforceBanglishVipLockIfExpired(state: LicenseUiState) {
@@ -683,11 +741,37 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setEffect(effect: RgbEffect) {
-        viewModelScope.launch { repository.updateEffect(effect) }
+        if (effect != RgbEffect.NORMAL_DEFAULT) {
+            val unlocked = trialLicenseManager.refreshState()
+                .isThemeItemUnlocked(effect.id, isPermanentlyFree = !effect.isVipEffect)
+            if (!unlocked) return
+        }
+        viewModelScope.launch {
+            repository.updateEffect(effect)
+            if (effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateTouchEffect(TouchTypingEffect.NONE)
+                customBackgroundManager.clearCustomPhoto()
+            }
+        }
     }
 
     fun setTouchEffect(touchEffect: TouchTypingEffect) {
-        viewModelScope.launch { repository.updateTouchEffect(touchEffect) }
+        if (touchEffect != TouchTypingEffect.NONE) {
+            val unlocked = trialLicenseManager.refreshState()
+                .isThemeItemUnlocked(touchEffect.id, isPermanentlyFree = !touchEffect.isVipEffect)
+            if (!unlocked) return
+        }
+        viewModelScope.launch {
+            repository.updateTouchEffect(touchEffect)
+            if (touchEffect != TouchTypingEffect.NONE) {
+                if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                }
+                customBackgroundManager.selectPreset(
+                    BannerPresetCatalog.defaultBannerForTouchEffect(touchEffect)
+                )
+            }
+        }
     }
 
     fun setPalette(palette: RgbPalette) {
@@ -768,17 +852,30 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectBannerPreset(presetId: String) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(presetId, isPermanentlyFree = false)
+        if (!unlocked) return
         customBackgroundManager.selectPreset(presetId)
+        viewModelScope.launch {
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
+        }
     }
 
     /**
-     * On-demand download & apply for any of the 52 Combos or remote Cloud Themes (`filesDir/themes/`).
-     * Clean Isolation Rule: keeps Package Themes crisp without turning on Touch Effects unless the user enables one!
+     * On-demand download & apply for any of the Combos or remote Cloud Themes (`filesDir/themes/`).
+     * Mutual Exclusion Rule: Themes turn OFF active Touch Response and clear prior standalone photos.
      */
     fun downloadComboTheme(combo: ComboThemePreset, applyAfterDownload: Boolean = true) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+        if (!unlocked) return
         if (applyAfterDownload) {
             if (!combo.bannerPresetId.isNullOrBlank() && combo.remoteImageUrl.isNullOrBlank()) {
                 customBackgroundManager.selectPreset(combo.bannerPresetId)
+            } else if (!customBackgroundManager.isComboDownloaded(combo.id)) {
+                customBackgroundManager.clearCustomPhoto()
             }
             viewModelScope.launch {
                 repository.updateEffect(combo.effect)
@@ -802,6 +899,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     /** 1-Tap Combo apply: activates live immediately and caches `filesDir/themes/` artwork cleanly. */
     fun applyComboTheme(combo: ComboThemePreset) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+        if (!unlocked) return
         if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
             viewModelScope.launch {
                 repository.updateEffect(combo.effect)
@@ -814,32 +914,49 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Dual-layer Ambient Physics Animation selector:
-     * - Selecting Classic Black (`NORMAL_DEFAULT`) clears any background photo for clean Classic Black.
-     * - Selecting any of the 20 Ambient Physics Animations layers it cleanly while preserving the active Touch Effect!
+     * RGB Animation selector:
+     * - Classic Black (`NORMAL_DEFAULT`) clears any background photo for clean Classic Black.
+     * - Selecting any active RGB Design resets Touch Response and clears any active Banner/Photo.
      */
     fun applyAnimationOnly(effect: RgbEffect) {
-        if (effect == RgbEffect.NORMAL_DEFAULT) {
-            customBackgroundManager.clearCustomPhoto()
+        if (effect != RgbEffect.NORMAL_DEFAULT) {
+            val unlocked = trialLicenseManager.refreshState()
+                .isThemeItemUnlocked(effect.id, isPermanentlyFree = !effect.isVipEffect)
+            if (!unlocked) return
         }
+        customBackgroundManager.clearCustomPhoto()
         viewModelScope.launch {
             repository.updateEffect(effect)
+            if (effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateTouchEffect(TouchTypingEffect.NONE)
+            }
         }
     }
 
-    /** Applies a remote Cloud Animation synced from Firebase `/admin_config/cloudAnimations`. */
+    /** Applies a remote Cloud Animation synced from admin config and resets conflicting Touch/Banner layers. */
     fun applyCloudAnimation(anim: CloudAnimationConfig) {
+        val state = trialLicenseManager.refreshState()
         val mappedEffect = RgbEffect.fromSavedName(anim.baseEffectId)
+        val unlocked = state.isThemeItemUnlocked(anim.id, isPermanentlyFree = anim.isFree) ||
+            (mappedEffect != RgbEffect.NORMAL_DEFAULT && state.isThemeItemUnlocked(mappedEffect.id, isPermanentlyFree = !mappedEffect.isVipEffect))
+        if (!unlocked) return
         val mappedPalette = RgbPalette.entries.find { it.name.equals(anim.paletteName, ignoreCase = true) }
             ?: settings.value.palette
         viewModelScope.launch {
             repository.updateEffect(mappedEffect)
             repository.updatePalette(mappedPalette)
+            if (mappedEffect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateTouchEffect(TouchTypingEffect.NONE)
+                customBackgroundManager.clearCustomPhoto()
+            }
         }
     }
 
     /** Static HD Photo Banner — applies static banner cleanly without unwanted overlapping touch effects. */
     fun applyStaticBannerOnly(presetId: String) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(presetId, isPermanentlyFree = false)
+        if (!unlocked) return
         customBackgroundManager.selectPreset(presetId)
         viewModelScope.launch {
             repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
@@ -849,11 +966,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Switches Typing Effect backdrop to pure Default Black cleanly while ensuring an active Touch Response is ready. */
     fun applyTypingEffectDefaultBlack() {
+        val state = trialLicenseManager.refreshState()
         customBackgroundManager.clearCustomPhoto()
         viewModelScope.launch {
             repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
-            if (settings.value.touchEffect == TouchTypingEffect.NONE) {
-                repository.updateTouchEffect(TouchTypingEffect.AI_NEURAL_PULSE)
+            if (settings.value.touchEffect == TouchTypingEffect.NONE &&
+                state.isThemeItemUnlocked(
+                    TouchTypingEffect.TOUCH_SHOCKWAVE_RING.id,
+                    isPermanentlyFree = !TouchTypingEffect.TOUCH_SHOCKWAVE_RING.isVipEffect
+                )
+            ) {
+                repository.updateTouchEffect(TouchTypingEffect.TOUCH_SHOCKWAVE_RING)
             }
         }
     }
@@ -872,6 +995,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Sets HD Banner Photo backdrop ONLY, preserving the user's active Touch Response. */
     fun applyBannerPhotoPreservingTouch(presetId: String) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(presetId, isPermanentlyFree = false)
+        if (!unlocked) return
         customBackgroundManager.selectPreset(presetId)
         viewModelScope.launch {
             if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
@@ -882,6 +1008,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Downloads & applies a Theme Pack artwork as background photo ONLY, preserving active Touch Response. */
     fun applyComboPhotoPreservingTouch(combo: ComboThemePreset) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+        if (!unlocked) return
         if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
             viewModelScope.launch {
                 repository.updatePalette(combo.palette)
@@ -924,12 +1053,21 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         showKeyBorders: Boolean,
         clearPhotoToBlack: Boolean
     ) {
+        val state = trialLicenseManager.refreshState()
+        val comboUnlocked = combo == null || state.isThemeItemUnlocked(combo.id, isPermanentlyFree = combo.isCloudFree)
+        val bannerUnlocked = bannerPresetId.isNullOrBlank() || state.isThemeItemUnlocked(bannerPresetId, isPermanentlyFree = false)
+        val effectUnlocked = effect == RgbEffect.NORMAL_DEFAULT ||
+            state.isThemeItemUnlocked(effect.id, isPermanentlyFree = !effect.isVipEffect)
+        val touchUnlocked = touchEffect == TouchTypingEffect.NONE ||
+            state.isThemeItemUnlocked(touchEffect.id, isPermanentlyFree = !touchEffect.isVipEffect)
+        if (!comboUnlocked || !bannerUnlocked || !effectUnlocked || !touchUnlocked) return
+
         viewModelScope.launch {
             repository.updateShowKeyBorders(showKeyBorders)
-            repository.updateTouchEffect(touchEffect)
             repository.updatePalette(palette)
             when {
                 combo != null -> {
+                    repository.updateTouchEffect(TouchTypingEffect.NONE)
                     if (customBackgroundManager.selectDownloadedCombo(combo.id)) {
                         repository.updateEffect(combo.effect)
                     } else {
@@ -939,13 +1077,21 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 !bannerPresetId.isNullOrBlank() -> {
                     customBackgroundManager.selectPreset(bannerPresetId)
                     repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                    repository.updateTouchEffect(touchEffect)
+                }
+                effect != RgbEffect.NORMAL_DEFAULT -> {
+                    customBackgroundManager.clearCustomPhoto()
+                    repository.updateTouchEffect(TouchTypingEffect.NONE)
+                    repository.updateEffect(effect)
                 }
                 clearPhotoToBlack -> {
                     customBackgroundManager.clearCustomPhoto()
-                    repository.updateEffect(effect)
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                    repository.updateTouchEffect(touchEffect)
                 }
                 else -> {
-                    repository.updateEffect(effect)
+                    repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+                    repository.updateTouchEffect(touchEffect)
                 }
             }
         }
@@ -954,6 +1100,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun saveCustomPhoto(uri: Uri) {
         viewModelScope.launch {
             customBackgroundManager.savePhotoFromUri(uri)
+            if (settings.value.effect != RgbEffect.NORMAL_DEFAULT) {
+                repository.updateEffect(RgbEffect.NORMAL_DEFAULT)
+            }
         }
     }
 
@@ -968,6 +1117,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun applyBannerWithDim(presetId: String, dimAlpha: Float, showKeyBorders: Boolean) {
+        val unlocked = trialLicenseManager.refreshState()
+            .isThemeItemUnlocked(presetId, isPermanentlyFree = false)
+        if (!unlocked) return
         customBackgroundManager.selectPresetWithDim(presetId, dimAlpha)
         viewModelScope.launch {
             repository.updateShowKeyBorders(showKeyBorders)
@@ -978,6 +1130,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun applyRemoteBannerWithDim(imageSource: String, dimAlpha: Float, showKeyBorders: Boolean) {
+        if (!trialLicenseManager.refreshState().isRgbThemesUnlocked) return
         viewModelScope.launch {
             customBackgroundManager.saveRemoteBannerImage(imageSource, dimAlpha)
             repository.updateShowKeyBorders(showKeyBorders)

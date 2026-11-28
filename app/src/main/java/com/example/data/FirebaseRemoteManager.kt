@@ -19,6 +19,9 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 @Immutable
 data class PromoBannerConfig(
@@ -43,7 +46,7 @@ data class PromoBannerConfig(
         const val DEFAULT_BANNER1_TITLE = "AI Keyboard — Rakib official"
         const val DEFAULT_BANNER1_SUBTITLE = "Touch Spark RGB • 170+ AI Shayari • Voice Lock"
         const val DEFAULT_BANNER2_TITLE = "✨ Special Features"
-        const val DEFAULT_BANNER2_SUBTITLE = "Custom Photo Themes, 56 Touch FX, Stylish Fonts & AI Hub"
+        const val DEFAULT_BANNER2_SUBTITLE = "Custom Photo Themes, 106 Touch FX, Stylish Fonts & AI Hub"
     }
 }
 
@@ -126,10 +129,15 @@ data class RemoteAdminConfig(
     val banners: PromoBannerConfig = PromoBannerConfig(),
     val freeThemeIds: Set<String> = emptySet(),
     val cloudThemes: List<CloudThemeConfig> = emptyList(),
-    val cloudAnimations: List<CloudAnimationConfig> = emptyList()
+    val cloudAnimations: List<CloudAnimationConfig> = emptyList(),
+    val offerTitle: String = "",
+    val offerMessageBn: String = "",
+    val offerMessageEn: String = "",
+    val offerIntervalDays: Int = DEFAULT_OFFER_INTERVAL_DAYS
 ) {
     val trialDurationMs: Long
-        get() = freeTrialDays.coerceIn(0, 365).toLong() * 86_400_000L
+        get() = (if (freeTrialDays > 0) freeTrialDays else DEFAULT_FREE_TRIAL_DAYS)
+            .coerceIn(1, 365).toLong() * 86_400_000L
 
     val isWeeklyPlan: Boolean
         get() = vipDurationDays == 7 || (vipDurationDays < 0 && vipPlanType.equals(PLAN_WEEKLY, ignoreCase = true))
@@ -201,6 +209,7 @@ data class RemoteAdminConfig(
 
     companion object {
         const val DEFAULT_FREE_TRIAL_DAYS = 7
+        const val DEFAULT_OFFER_INTERVAL_DAYS = 5
         const val DEFAULT_VIP_PRICE = 20
         const val DEFAULT_VIP_DURATION_DAYS = 0 // 0 = Lifetime
         const val DEFAULT_BANGLISH_PRICE = 20
@@ -273,20 +282,40 @@ data class DeviceRemoteOverrides(
     val adminFreeVip: Boolean = false,
     val adminAllFree: Boolean = false,
     val customExpiryTimestampMs: Long = 0L,
+    val isBlocked: Boolean = false,
     val allowedFeatures: DeviceFeatureAllowMap = DeviceFeatureAllowMap()
 ) {
-    /** True when admin granted full free VIP access via either `adminAllFree` or `adminFreeVip`. */
+    /** True when admin granted full free VIP access via either `adminAllFree` or `adminFreeVip` (unless device is blocked). */
     val hasFullAdminFreeAccess: Boolean
-        get() = adminAllFree || adminFreeVip
+        get() = !isBlocked && (adminAllFree || adminFreeVip)
 }
 
 @Immutable
+data class RemoteSecurityFlags(
+    val reinstallDetected: Boolean = false,
+    val reinstallCount: Int = 0,
+    val clockRollbackDetected: Boolean = false,
+    val clockRollbackCount: Int = 0,
+    val localTamperDetected: Boolean = false,
+    val tamperBlocked: Boolean = false
+)
+
+@Immutable
 data class RemoteDeviceSnapshot(
+    val exists: Boolean = false,
     val firstInstallTimestampMs: Long? = null,
+    val firstInstallAtMs: Long? = null,
+    val trialStartedAtMs: Long? = null,
+    val trialExpiresAtMs: Long? = null,
+    val trialUsed: Boolean? = null,
+    val trialPolicyVersion: Int = 0,
     val vipStatus: String? = null,
+    val explicitLifetime: Boolean? = null,
     val vipExpiryTimestampMs: Long = 0L,
     val banglishExpiryTimestampMs: Long = 0L,
-    val overrides: DeviceRemoteOverrides = DeviceRemoteOverrides()
+    val isBlocked: Boolean = false,
+    val overrides: DeviceRemoteOverrides = DeviceRemoteOverrides(),
+    val securityFlags: RemoteSecurityFlags = RemoteSecurityFlags()
 )
 
 /**
@@ -309,7 +338,12 @@ class FirebaseRemoteManager private constructor(context: Context) {
     private val appContext: Context = context.applicationContext
     private val started = AtomicBoolean(false)
     private val firstInstallTransactionAttempted = AtomicBoolean(false)
+    private val hasSyncedServerOffset = AtomicBoolean(false)
     private val serverTimeOffsetMs = AtomicLong(0L)
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+    private val _lastSyncTimestampMs = MutableStateFlow(0L)
+    val lastSyncTimestampMs: StateFlow<Long> = _lastSyncTimestampMs.asStateFlow()
 
     @Volatile
     private var database: FirebaseDatabase? = null
@@ -344,8 +378,21 @@ class FirebaseRemoteManager private constructor(context: Context) {
     @Volatile
     private var connectedListener: ValueEventListener? = null
 
+    fun hasServerTimeOffset(): Boolean = hasSyncedServerOffset.get()
+
+    fun getServerTimeOffsetMs(): Long = serverTimeOffsetMs.get()
+
     /** Current server/UTC timestamp in milliseconds (local wall clock corrected by Firebase serverTimeOffset). */
-    fun serverNowMs(): Long = System.currentTimeMillis() + serverTimeOffsetMs.get()
+    fun serverNowMs(): Long {
+        val localNow = System.currentTimeMillis()
+        val offset = serverTimeOffsetMs.get()
+        val safeOffset = if (localNow >= MIN_VALID_EPOCH_MS && kotlin.math.abs(offset) > 3650L * 86_400_000L) {
+            0L
+        } else {
+            offset
+        }
+        return localNow + safeOffset
+    }
 
     private fun getDatabaseOrNull(): FirebaseDatabase? {
         database?.let { return it }
@@ -388,6 +435,7 @@ class FirebaseRemoteManager private constructor(context: Context) {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val offset = snapshot.readLongOrNull() ?: 0L
                     serverTimeOffsetMs.set(offset)
+                    hasSyncedServerOffset.set(true)
                 }
 
                 override fun onCancelled(error: DatabaseError) {
@@ -404,20 +452,25 @@ class FirebaseRemoteManager private constructor(context: Context) {
             val cListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val connected = snapshot.readBooleanOrNull() ?: false
+                    _isConnected.value = connected
                     if (connected) {
                         runCatching {
                             devRef.onDisconnect().updateChildren(
                                 mapOf(
                                     FIELD_IS_ONLINE to false,
-                                    FIELD_LAST_ACTIVE to ServerValue.TIMESTAMP
+                                    FIELD_LAST_ACTIVE to ServerValue.TIMESTAMP,
+                                    FIELD_LAST_ACTIVE_AT to ServerValue.TIMESTAMP
                                 )
                             )
                             devRef.updateChildren(
                                 mapOf(
                                     FIELD_IS_ONLINE to true,
-                                    FIELD_LAST_ACTIVE to ServerValue.TIMESTAMP
+                                    FIELD_LAST_ACTIVE to ServerValue.TIMESTAMP,
+                                    FIELD_LAST_ACTIVE_AT to ServerValue.TIMESTAMP
                                 )
-                            )
+                            ).addOnSuccessListener {
+                                _lastSyncTimestampMs.value = System.currentTimeMillis()
+                            }
                         }
                     }
                 }
@@ -446,20 +499,33 @@ class FirebaseRemoteManager private constructor(context: Context) {
             adminConfigListener = cfgListener
             cfgRef.addValueEventListener(cfgListener)
 
-            // 4. Real-time /devices/{deviceId} listener + strict one-time atomic firstInstallTimestamp transaction
+            // 4. Real-time /devices/{deviceId} listener + strict one-time atomic firstInstallTimestamp / firstInstallAt transaction
             val devListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
-                    val existingFirstInstall = snapshot.child(FIELD_FIRST_INSTALL_TS).readLongOrNull()
-                    if (existingFirstInstall == null || existingFirstInstall <= 0L) {
+                    val existingFirstInstall = normalizeEpochMs(
+                        snapshot.child(FIELD_FIRST_INSTALL_TS).readLongOrNull()
+                            ?: snapshot.child(FIELD_FIRST_INSTALL_AT).readLongOrNull()
+                            ?: snapshot.child(FIELD_INSTALLED_AT).readLongOrNull()
+                    )
+                    if (existingFirstInstall <= 0L) {
                         ensureFirstInstallTimestampOnce(devRef)
                     } else {
                         firstInstallTransactionAttempted.set(true)
-                        val existingDateText = snapshot.child(FIELD_INSTALL_DATE_TEXT).readStringOrNull()
-                        if (existingDateText.isNullOrBlank()) {
-                            runCatching {
-                                devRef.child(FIELD_INSTALL_DATE_TEXT)
-                                    .setValue(formatInstallDateText(existingFirstInstall))
-                            }
+                        val updates = hashMapOf<String, Any>()
+                        if (snapshot.child(FIELD_FIRST_INSTALL_TS).readLongOrNull()?.let { normalizeEpochMs(it) } != existingFirstInstall) {
+                            updates[FIELD_FIRST_INSTALL_TS] = existingFirstInstall
+                        }
+                        if (snapshot.child(FIELD_FIRST_INSTALL_AT).readLongOrNull()?.let { normalizeEpochMs(it) } != existingFirstInstall) {
+                            updates[FIELD_FIRST_INSTALL_AT] = existingFirstInstall
+                        }
+                        if (snapshot.child(FIELD_INSTALLED_AT).readLongOrNull()?.let { normalizeEpochMs(it) } != existingFirstInstall) {
+                            updates[FIELD_INSTALLED_AT] = existingFirstInstall
+                        }
+                        if (snapshot.child(FIELD_INSTALL_DATE_TEXT).readStringOrNull().isNullOrBlank()) {
+                            updates[FIELD_INSTALL_DATE_TEXT] = formatInstallDateText(existingFirstInstall)
+                        }
+                        if (updates.isNotEmpty()) {
+                            runCatching { devRef.updateChildren(updates) }
                         }
                     }
 
@@ -541,13 +607,15 @@ class FirebaseRemoteManager private constructor(context: Context) {
         runCatching {
             devRef.child(FIELD_FIRST_INSTALL_TS).runTransaction(object : Transaction.Handler {
                 override fun doTransaction(currentData: MutableData): Transaction.Result {
-                    val existing = when (val v = currentData.value) {
-                        is Number -> v.toLong()
-                        is String -> v.trim().toLongOrNull() ?: 0L
-                        else -> 0L
-                    }
+                    val existing = normalizeEpochMs(
+                        when (val v = currentData.value) {
+                            is Number -> v.toLong()
+                            is String -> v.trim().toLongOrNull() ?: 0L
+                            else -> 0L
+                        }
+                    )
                     if (existing > 0L) {
-                        // Already recorded on server: preserve strictly!
+                        // Already recorded validly on server: preserve strictly!
                         return Transaction.abort()
                     }
                     currentData.value = ServerValue.TIMESTAMP
@@ -563,11 +631,16 @@ class FirebaseRemoteManager private constructor(context: Context) {
                         firstInstallTransactionAttempted.set(false)
                         return
                     }
-                    val ts = currentData?.readLongOrNull()
-                    if (ts != null && ts > 0L) {
+                    val ts = normalizeEpochMs(currentData?.readLongOrNull())
+                    if (ts > 0L) {
                         runCatching {
-                            devRef.child(FIELD_INSTALL_DATE_TEXT)
-                                .setValue(formatInstallDateText(ts))
+                            devRef.updateChildren(
+                                mapOf(
+                                    FIELD_FIRST_INSTALL_AT to ts,
+                                    FIELD_INSTALLED_AT to ts,
+                                    FIELD_INSTALL_DATE_TEXT to formatInstallDateText(ts)
+                                )
+                            )
                         }
                     }
                 }
@@ -582,36 +655,115 @@ class FirebaseRemoteManager private constructor(context: Context) {
         vipStatus: String,
         vipExpiryTimestampMs: Long,
         firstInstallTimestampMs: Long = 0L,
-        banglishExpiryTimestampMs: Long = 0L
+        banglishExpiryTimestampMs: Long = 0L,
+        trialStartedAtMs: Long = 0L,
+        trialExpiresAtMs: Long = 0L,
+        trialPolicyVersion: Int = 5,
+        overrideLegacyTrialTimestamps: Boolean = false,
+        writeFirstInstallFields: Boolean = false,
+        allowTrialAndVipStatusWrite: Boolean = true,
+        trialUsed: Boolean = true,
+        isLifetime: Boolean = false,
+        isBlocked: Boolean = false,
+        reinstallDetected: Boolean = false,
+        reinstallCount: Int = 0,
+        clockRollbackDetected: Boolean = false,
+        clockRollbackCount: Int = 0,
+        localTamperDetected: Boolean = false,
+        integrityStatus: String = "verified"
     ) {
         if (deviceId.isBlank()) return
         val db = getDatabaseOrNull() ?: return
         runCatching {
             val devRef = db.getReference(NODE_DEVICES).child(deviceId)
             val model = Build.MODEL.orEmpty().trim().ifBlank { "UNKNOWN_MODEL" }
+            val manufacturer = normalizeManufacturerName(Build.MANUFACTURER)
+            val cleanDeviceName = buildCleanDeviceName(Build.MANUFACTURER, model)
+            val safeFirstInstall = normalizeEpochMs(firstInstallTimestampMs)
+            val safeTrialStart = normalizeEpochMs(trialStartedAtMs).takeIf { it > 0L } ?: safeFirstInstall
+            val safeTrialExpiry = normalizeEpochMs(trialExpiresAtMs)
+            val safeVipExpiry = normalizeEpochMs(vipExpiryTimestampMs)
+            val safeBanglishExpiry = normalizeEpochMs(banglishExpiryTimestampMs)
+            val certDigest = com.example.security.AntiTamperGuard.getSigningCertSha256Prefix(appContext)
+
             val payload = hashMapOf<String, Any>(
+                FIELD_RK_ID to deviceId,
                 FIELD_DEVICE_ID to deviceId,
+                FIELD_DEVICE_NAME to cleanDeviceName,
                 FIELD_DEVICE_MODEL to model,
+                FIELD_MANUFACTURER to manufacturer,
                 FIELD_LAST_ACTIVE to ServerValue.TIMESTAMP,
+                FIELD_LAST_ACTIVE_AT to ServerValue.TIMESTAMP,
                 FIELD_IS_ONLINE to true,
-                FIELD_VIP_STATUS to vipStatus,
-                FIELD_VIP_EXPIRY_TS to vipExpiryTimestampMs,
-                FIELD_BANGLISH_EXPIRY_TS to banglishExpiryTimestampMs
+                FIELD_APP_VERSION to getAppVersionName(),
+                "$FIELD_SECURITY_FLAGS/hardwareBoundId" to deviceId,
+                "$FIELD_SECURITY_FLAGS/appPackage" to appContext.packageName.orEmpty(),
+                "$FIELD_SECURITY_FLAGS/signingCertHash" to certDigest,
+                "$FIELD_SECURITY_FLAGS/lastVerifiedAt" to ServerValue.TIMESTAMP
             )
-            if (firstInstallTimestampMs > 0L) {
-                payload[FIELD_INSTALL_DATE_TEXT] = formatInstallDateText(firstInstallTimestampMs)
+
+            // Only update trial/VIP status & timestamps once server state has been reconciled (or on verified purchase),
+            // preventing a reinstall launch from overwriting earlier server trial/expiry records before the listener fires.
+            if (allowTrialAndVipStatusWrite) {
+                payload[FIELD_VIP_STATUS] = vipStatus
+                payload[FIELD_VIP_EXPIRY_TS] = safeVipExpiry
+                payload[FIELD_BANGLISH_EXPIRY_TS] = safeBanglishExpiry
+                payload[FIELD_TRIAL_POLICY_VERSION] = trialPolicyVersion
+                payload[FIELD_TRIAL_USED] = trialUsed
+                payload[FIELD_LIFETIME] = isLifetime
+                payload[FIELD_BLOCKED] = isBlocked
+                payload["$FIELD_SECURITY_FLAGS/reinstallDetected"] = reinstallDetected
+                payload["$FIELD_SECURITY_FLAGS/reinstallCount"] = reinstallCount.coerceAtLeast(0)
+                payload["$FIELD_SECURITY_FLAGS/clockRollbackDetected"] = clockRollbackDetected
+                payload["$FIELD_SECURITY_FLAGS/clockRollbackCount"] = clockRollbackCount.coerceAtLeast(0)
+                payload["$FIELD_SECURITY_FLAGS/localTamperDetected"] = localTamperDetected
+                payload["$FIELD_SECURITY_FLAGS/integrityStatus"] = integrityStatus
+
+                if (safeFirstInstall > 0L && (writeFirstInstallFields || overrideLegacyTrialTimestamps)) {
+                    payload[FIELD_FIRST_INSTALL_TS] = safeFirstInstall
+                    payload[FIELD_FIRST_INSTALL_AT] = safeFirstInstall
+                    payload[FIELD_INSTALLED_AT] = safeFirstInstall
+                    payload[FIELD_INSTALL_DATE_TEXT] = formatInstallDateText(safeFirstInstall)
+                }
+                if (safeTrialStart > 0L) {
+                    payload[FIELD_TRIAL_STARTED_AT] = safeTrialStart
+                }
+                if (safeTrialExpiry > 0L) {
+                    payload[FIELD_TRIAL_EXPIRES_AT] = safeTrialExpiry
+                }
             }
+
             devRef.updateChildren(payload)
+                .addOnSuccessListener {
+                    _lastSyncTimestampMs.value = System.currentTimeMillis()
+                }
+            if (_isConnected.value) {
+                _lastSyncTimestampMs.value = System.currentTimeMillis()
+            }
+            ensureFirstInstallTimestampOnce(devRef)
         }.onFailure { err ->
             Log.w(TAG, "Failed to sync device status: ${err.message}")
         }
     }
 
+    fun getAppVersionLabel(): String = getAppVersionName()
+
+    private fun getAppVersionName(): String {
+        return runCatching {
+            val pm = appContext.packageManager
+            @Suppress("DEPRECATION")
+            val info = pm.getPackageInfo(appContext.packageName, 0)
+            info.versionName?.trim()?.takeIf { it.isNotEmpty() } ?: "1.0"
+        }.getOrDefault("1.0")
+    }
+
     private fun parseAdminConfig(snapshot: DataSnapshot): RemoteAdminConfig {
         if (!snapshot.exists()) return RemoteAdminConfig()
-        val freeTrialDays = snapshot.child(FIELD_FREE_TRIAL_DAYS)
-            .readIntOrNull()
-            ?.coerceIn(0, 365)
+        val rawTrialDays = snapshot.child(FIELD_FREE_TRIAL_DAYS).readIntOrNull()
+            ?: snapshot.child(FIELD_DEFAULT_TRIAL_DAYS).readIntOrNull()
+        val freeTrialDays = rawTrialDays
+            ?.takeIf { it > 0 }
+            ?.coerceIn(1, 365)
             ?: RemoteAdminConfig.DEFAULT_FREE_TRIAL_DAYS
         val globalAllFree = snapshot.child(FIELD_GLOBAL_ALL_FREE).readBooleanOrNull() ?: false
         val vipPrice = snapshot.child(FIELD_VIP_PRICE)
@@ -689,6 +841,16 @@ class FirebaseRemoteManager private constructor(context: Context) {
         val freeThemeIds = parseFreeThemeIds(snapshot.child(FIELD_FREE_THEME_IDS))
         val cloudThemes = parseCloudThemes(snapshot.child(FIELD_CLOUD_THEMES))
         val cloudAnimations = parseCloudAnimations(snapshot.child(FIELD_CLOUD_ANIMATIONS))
+        val offerNode = snapshot.child(FIELD_OFFER)
+        val offerTitle = offerNode.child("title").readStringOrNull()
+            ?: snapshot.child(FIELD_OFFER_TITLE).readStringOrNull().orEmpty()
+        val offerMessageBn = offerNode.child("messageBn").readStringOrNull()
+            ?: snapshot.child(FIELD_OFFER_MESSAGE_BN).readStringOrNull().orEmpty()
+        val offerMessageEn = offerNode.child("messageEn").readStringOrNull()
+            ?: snapshot.child(FIELD_OFFER_MESSAGE_EN).readStringOrNull().orEmpty()
+        val offerIntervalDays = (offerNode.child("intervalDays").readIntOrNull()
+            ?: snapshot.child(FIELD_OFFER_INTERVAL_DAYS).readIntOrNull()
+            ?: RemoteAdminConfig.DEFAULT_OFFER_INTERVAL_DAYS).coerceIn(4, 7)
 
         return RemoteAdminConfig(
             freeTrialDays = freeTrialDays,
@@ -707,7 +869,11 @@ class FirebaseRemoteManager private constructor(context: Context) {
             banners = banners,
             freeThemeIds = freeThemeIds,
             cloudThemes = cloudThemes,
-            cloudAnimations = cloudAnimations
+            cloudAnimations = cloudAnimations,
+            offerTitle = offerTitle,
+            offerMessageBn = offerMessageBn,
+            offerMessageEn = offerMessageEn,
+            offerIntervalDays = offerIntervalDays
         )
     }
 
@@ -836,16 +1002,48 @@ class FirebaseRemoteManager private constructor(context: Context) {
     }
 
     private fun parseDeviceSnapshot(snapshot: DataSnapshot): RemoteDeviceSnapshot {
-        if (!snapshot.exists()) return RemoteDeviceSnapshot()
-        val firstInstallTs = snapshot.child(FIELD_FIRST_INSTALL_TS).readLongOrNull()
+        if (!snapshot.exists()) return RemoteDeviceSnapshot(exists = false)
+        val firstInstallAtTs = normalizeEpochMs(
+            snapshot.child(FIELD_FIRST_INSTALL_AT).readLongOrNull()
+        ).takeIf { it > 0L }
+        val firstInstallTs = normalizeEpochMs(
+            snapshot.child(FIELD_FIRST_INSTALL_TS).readLongOrNull()
+                ?: snapshot.child(FIELD_FIRST_INSTALL_AT).readLongOrNull()
+                ?: snapshot.child(FIELD_INSTALLED_AT).readLongOrNull()
+        ).takeIf { it > 0L }
+        val trialStartedAtTs = normalizeEpochMs(
+            snapshot.child(FIELD_TRIAL_STARTED_AT).readLongOrNull()
+        ).takeIf { it > 0L }
+        val trialExpiresAtTs = normalizeEpochMs(
+            snapshot.child(FIELD_TRIAL_EXPIRES_AT).readLongOrNull()
+        ).takeIf { it > 0L }
+        val trialUsed = snapshot.child(FIELD_TRIAL_USED).readBooleanOrNull()
+        val trialPolicyVersion = snapshot.child(FIELD_TRIAL_POLICY_VERSION).readIntOrNull() ?: 0
         val vipStatus = snapshot.child(FIELD_VIP_STATUS).readStringOrNull()
-        val vipExpiryTs = snapshot.child(FIELD_VIP_EXPIRY_TS).readLongOrNull() ?: 0L
-        val banglishExpiryTs = snapshot.child(FIELD_BANGLISH_EXPIRY_TS).readLongOrNull() ?: 0L
+        val explicitLifetime = snapshot.child(FIELD_LIFETIME).readBooleanOrNull()
+        val vipExpiryTs = normalizeEpochMs(snapshot.child(FIELD_VIP_EXPIRY_TS).readLongOrNull())
+        val banglishExpiryTs = normalizeEpochMs(snapshot.child(FIELD_BANGLISH_EXPIRY_TS).readLongOrNull())
+
+        val securityNode = snapshot.child(FIELD_SECURITY_FLAGS)
+        val securityFlags = RemoteSecurityFlags(
+            reinstallDetected = securityNode.child("reinstallDetected").readBooleanOrNull() ?: false,
+            reinstallCount = (securityNode.child("reinstallCount").readIntOrNull() ?: 0).coerceAtLeast(0),
+            clockRollbackDetected = securityNode.child("clockRollbackDetected").readBooleanOrNull() ?: false,
+            clockRollbackCount = (securityNode.child("clockRollbackCount").readIntOrNull() ?: 0).coerceAtLeast(0),
+            localTamperDetected = securityNode.child("localTamperDetected").readBooleanOrNull() ?: false,
+            tamperBlocked = securityNode.child("tamperBlocked").readBooleanOrNull() ?: false
+        )
 
         val overridesNode = snapshot.child(FIELD_OVERRIDES)
+        val isBlocked = overridesNode.child(FIELD_IS_BLOCKED).readBooleanOrNull()
+            ?: overridesNode.child(FIELD_BLOCKED).readBooleanOrNull()
+            ?: overridesNode.child(FIELD_DEVICE_LOCKED).readBooleanOrNull()
+            ?: snapshot.child(FIELD_IS_BLOCKED).readBooleanOrNull()
+            ?: snapshot.child(FIELD_BLOCKED).readBooleanOrNull()
+            ?: securityFlags.tamperBlocked
         val adminFreeVip = overridesNode.child(FIELD_ADMIN_FREE_VIP).readBooleanOrNull() ?: false
         val adminAllFree = overridesNode.child(FIELD_ADMIN_ALL_FREE).readBooleanOrNull() ?: false
-        val customExpiryTs = overridesNode.child(FIELD_CUSTOM_EXPIRY_TS).readLongOrNull() ?: 0L
+        val customExpiryTs = normalizeEpochMs(overridesNode.child(FIELD_CUSTOM_EXPIRY_TS).readLongOrNull())
         val allowedNode = overridesNode.child(FIELD_ALLOWED_FEATURES)
         val allowed = DeviceFeatureAllowMap(
             rgbThemes = allowedNode.child(FEAT_RGB_THEMES).readBooleanOrNull(),
@@ -857,16 +1055,26 @@ class FirebaseRemoteManager private constructor(context: Context) {
         )
 
         return RemoteDeviceSnapshot(
+            exists = true,
             firstInstallTimestampMs = firstInstallTs,
+            firstInstallAtMs = firstInstallAtTs,
+            trialStartedAtMs = trialStartedAtTs,
+            trialExpiresAtMs = trialExpiresAtTs,
+            trialUsed = trialUsed,
+            trialPolicyVersion = trialPolicyVersion,
             vipStatus = vipStatus,
+            explicitLifetime = explicitLifetime,
             vipExpiryTimestampMs = vipExpiryTs,
             banglishExpiryTimestampMs = banglishExpiryTs,
+            isBlocked = isBlocked,
             overrides = DeviceRemoteOverrides(
                 adminFreeVip = adminFreeVip,
                 adminAllFree = adminAllFree,
                 customExpiryTimestampMs = customExpiryTs,
+                isBlocked = isBlocked,
                 allowedFeatures = allowed
-            )
+            ),
+            securityFlags = securityFlags
         )
     }
 
@@ -931,7 +1139,13 @@ class FirebaseRemoteManager private constructor(context: Context) {
         private const val NODE_PENDING_PAYMENTS = "pending_payments"
 
         private const val FIELD_FREE_TRIAL_DAYS = "freeTrialDays"
+        private const val FIELD_DEFAULT_TRIAL_DAYS = "defaultTrialDays"
         private const val FIELD_GLOBAL_ALL_FREE = "globalAllFree"
+        private const val FIELD_OFFER = "offer"
+        private const val FIELD_OFFER_TITLE = "offerTitle"
+        private const val FIELD_OFFER_MESSAGE_BN = "offerMessageBn"
+        private const val FIELD_OFFER_MESSAGE_EN = "offerMessageEn"
+        private const val FIELD_OFFER_INTERVAL_DAYS = "offerIntervalDays"
         private const val FIELD_VIP_PRICE = "vipPrice"
         private const val FIELD_VIP_DURATION_DAYS = "vipDurationDays"
         private const val FIELD_VIP_PLAN_TYPE = "vipPlanType"
@@ -956,16 +1170,32 @@ class FirebaseRemoteManager private constructor(context: Context) {
         private const val FIELD_CLOUD_THEMES = "cloudThemes"
         private const val FIELD_CLOUD_ANIMATIONS = "cloudAnimations"
 
+        private const val FIELD_RK_ID = "rkId"
         private const val FIELD_DEVICE_ID = "deviceId"
+        private const val FIELD_DEVICE_NAME = "deviceName"
         private const val FIELD_DEVICE_MODEL = "deviceModel"
+        private const val FIELD_MANUFACTURER = "manufacturer"
         private const val FIELD_FIRST_INSTALL_TS = "firstInstallTimestamp"
+        private const val FIELD_FIRST_INSTALL_AT = "firstInstallAt"
+        private const val FIELD_INSTALLED_AT = "installedAt"
         private const val FIELD_INSTALL_DATE_TEXT = "installDateText"
         private const val FIELD_LAST_ACTIVE = "lastActive"
+        private const val FIELD_LAST_ACTIVE_AT = "lastActiveAt"
         private const val FIELD_IS_ONLINE = "isOnline"
+        private const val FIELD_TRIAL_STARTED_AT = "trialStartedAt"
+        private const val FIELD_TRIAL_EXPIRES_AT = "trialExpiresAt"
+        private const val FIELD_TRIAL_USED = "trialUsed"
+        private const val FIELD_TRIAL_POLICY_VERSION = "trialPolicyVersion"
+        private const val FIELD_SECURITY_FLAGS = "securityFlags"
         private const val FIELD_VIP_STATUS = "vipStatus"
+        private const val FIELD_LIFETIME = "lifetime"
         private const val FIELD_VIP_EXPIRY_TS = "vipExpiryTimestamp"
         private const val FIELD_BANGLISH_EXPIRY_TS = "banglishExpiryTimestamp"
+        private const val FIELD_APP_VERSION = "appVersion"
         private const val FIELD_OVERRIDES = "overrides"
+        private const val FIELD_IS_BLOCKED = "isBlocked"
+        private const val FIELD_BLOCKED = "blocked"
+        private const val FIELD_DEVICE_LOCKED = "deviceLocked"
         private const val FIELD_ADMIN_FREE_VIP = "adminFreeVip"
         private const val FIELD_ADMIN_ALL_FREE = "adminAllFree"
         private const val FIELD_CUSTOM_EXPIRY_TS = "customExpiryTimestamp"
@@ -988,12 +1218,56 @@ class FirebaseRemoteManager private constructor(context: Context) {
         private const val FEAT_STYLISH_FONTS = "stylishFonts"
         private const val FEAT_AI_HUB = "aiHub"
 
+        const val MIN_VALID_EPOCH_MS = 1_577_836_800_000L // 2020-01-01T00:00:00Z
+        const val MAX_VALID_EPOCH_MS = 4_102_444_800_000L // 2100-01-01T00:00:00Z
+        private const val MIN_VALID_EPOCH_SEC = 1_577_836_800L
+        private const val MAX_VALID_EPOCH_SEC = 4_102_444_800L
+
+        /**
+         * Normalizes an epoch timestamp so `0`, `null`, negative, or corrupted values return `0L`
+         * (never epoch `0` -> `20697d`), and 10-digit seconds timestamps scale cleanly to millis.
+         */
+        fun normalizeEpochMs(raw: Long?): Long {
+            if (raw == null || raw <= 0L) return 0L
+            val scaled = if (raw in MIN_VALID_EPOCH_SEC..MAX_VALID_EPOCH_SEC) {
+                raw * 1000L
+            } else {
+                raw
+            }
+            return if (scaled in MIN_VALID_EPOCH_MS..MAX_VALID_EPOCH_MS) scaled else 0L
+        }
+
+        fun normalizeManufacturerName(manufacturer: String?): String {
+            val clean = manufacturer.orEmpty().trim()
+            if (clean.isEmpty()) return "Android"
+            return clean.split(Regex("\\s+")).joinToString(" ") { part ->
+                part.replaceFirstChar { ch ->
+                    if (ch.isLowerCase()) ch.titlecase(Locale.US) else ch.toString()
+                }
+            }
+        }
+
+        fun buildCleanDeviceName(
+            manufacturer: String? = Build.MANUFACTURER,
+            model: String? = Build.MODEL
+        ): String {
+            val cleanModel = model.orEmpty().trim()
+            val cleanMfr = normalizeManufacturerName(manufacturer)
+            if (cleanModel.isEmpty()) return "$cleanMfr Device"
+            return if (cleanModel.startsWith(cleanMfr, ignoreCase = true)) {
+                cleanModel
+            } else {
+                "$cleanMfr $cleanModel"
+            }
+        }
+
         fun formatInstallDateText(timestampMs: Long): String {
+            val safeTs = normalizeEpochMs(timestampMs).takeIf { it > 0L } ?: return "Unknown"
             return runCatching {
                 val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm 'IST'", Locale.US)
                 fmt.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-                fmt.format(Date(timestampMs))
-            }.getOrDefault(timestampMs.toString())
+                fmt.format(Date(safeTs))
+            }.getOrDefault(safeTs.toString())
         }
 
         @Volatile

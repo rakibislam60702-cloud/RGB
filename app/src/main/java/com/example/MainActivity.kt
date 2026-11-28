@@ -17,35 +17,48 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.PermDeviceInformation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.PermDeviceInformation
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -83,14 +96,19 @@ import com.example.ui.components.SilentFeatureTourOverlay
 import com.example.ui.components.StartupSetupStepper
 import com.example.ui.components.StudioEffectsCategory
 import com.example.ui.components.UnlockPaywallFocus
+import com.example.ui.screens.DeviceInfoScreen
 import com.example.ui.screens.EffectsScreen
 import com.example.ui.screens.HardwareScreen
 import com.example.ui.screens.LanguagesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StudioScreen
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import com.example.ui.theme.FlagshipCyanMagentaBrush
 import com.example.ui.theme.GlassCardSelected
 import com.example.ui.theme.GlassNavSurface
@@ -131,6 +149,11 @@ private enum class StudioTab(
         selectedIcon = Icons.Filled.Settings,
         unselectedIcon = Icons.Outlined.Settings,
         testTag = "nav_tab_settings"
+    ),
+    DEVICE_INFO(
+        selectedIcon = Icons.Filled.PermDeviceInformation,
+        unselectedIcon = Icons.Outlined.PermDeviceInformation,
+        testTag = "nav_tab_device_info"
     );
 
     fun label(strings: AppUiStrings): String = when (this) {
@@ -139,6 +162,7 @@ private enum class StudioTab(
         EFFECTS -> strings.navEffects
         HARDWARE -> strings.navFeel
         SETTINGS -> strings.navSettings
+        DEVICE_INFO -> strings.navDeviceInfo
     }
 }
 
@@ -196,6 +220,10 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
+                getSharedPreferences(PREFS_PERMISSIONS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_MIC_PROMPTED_ONCE, true)
+                    .apply()
                 audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
@@ -236,11 +264,13 @@ fun ProRgbKeyboardApp(
 
     val appUiLanguage by viewModel.appUiLanguage.collectAsStateWithLifecycle()
     val appStrings = remember(appUiLanguage) { appStringsFor(appUiLanguage) }
-    val navLabelFont = if (appUiLanguage == AppUiLanguage.BENGALI) NotoSansBengaliFamily else FontFamily.Default
+    val navLabelFont = FontFamily.Default
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val customPhotoTheme by viewModel.customPhotoTheme.collectAsStateWithLifecycle()
     val imeStatus by viewModel.imeStatus.collectAsStateWithLifecycle()
     val licenseState by viewModel.licenseState.collectAsStateWithLifecycle()
+    val isFirebaseConnected by viewModel.isFirebaseConnected.collectAsStateWithLifecycle()
+    val lastFirebaseSyncMs by viewModel.lastFirebaseSyncMs.collectAsStateWithLifecycle()
     val languagePacks by viewModel.languagePacks.collectAsStateWithLifecycle()
     val playgroundText by viewModel.playgroundText.collectAsStateWithLifecycle()
     val clipboardClips by viewModel.clipboardClips.collectAsStateWithLifecycle()
@@ -272,9 +302,14 @@ fun ProRgbKeyboardApp(
 
     LaunchedEffect(openUnlockTrigger) {
         if (openUnlockTrigger > 0) {
-            viewModel.refreshLicenseState()
-            if (!licenseState.isAllUnlocked) {
-                openVipModal(UnlockPaywallFocus.VIP_FEATURES)
+            val freshState = viewModel.refreshAndGetLicenseState()
+            if (!freshState.isAllUnlocked) {
+                val targetFocus = if (freshState.isPaidOrAdminVip && !freshState.isBanglishUnlocked) {
+                    UnlockPaywallFocus.BANGLISH
+                } else {
+                    UnlockPaywallFocus.VIP_FEATURES
+                }
+                openVipModal(targetFocus)
             }
         }
     }
@@ -322,7 +357,7 @@ fun ProRgbKeyboardApp(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshImeStatus()
-                viewModel.refreshLicenseState()
+                viewModel.syncDeviceInfoOnResume()
                 viewModel.refreshClipboard()
                 viewModel.refreshDownloadedLanguages()
             }
@@ -407,6 +442,8 @@ fun ProRgbKeyboardApp(
                             customPhotoTheme = customPhotoTheme,
                             imeStatus = imeStatus,
                             licenseState = licenseState,
+                            isFirebaseConnected = isFirebaseConnected,
+                            lastFirebaseSyncMs = lastFirebaseSyncMs,
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
@@ -444,47 +481,74 @@ fun ProRgbKeyboardApp(
                     containerColor = ComposeColor.Transparent,
                     contentWindowInsets = WindowInsets.safeDrawing,
                     bottomBar = {
-                        NavigationBar(
-                            containerColor = GlassNavSurface,
+                        Surface(
+                            color = GlassNavSurface,
                             tonalElevation = 0.dp,
-                            modifier = Modifier.drawBehind {
-                                drawLine(
-                                    brush = FlagshipCyanMagentaBrush,
-                                    start = Offset(0f, 0f),
-                                    end = Offset(size.width, 0f),
-                                    strokeWidth = 1.2.dp.toPx()
-                                )
-                            }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .drawBehind {
+                                    drawLine(
+                                        brush = FlagshipCyanMagentaBrush,
+                                        start = Offset(0f, 0f),
+                                        end = Offset(size.width, 0f),
+                                        strokeWidth = 1.2.dp.toPx()
+                                    )
+                                }
+                                .navigationBarsPadding()
                         ) {
-                            StudioTab.entries.forEach { tab ->
-                                val selected = currentTab == tab
-                                val tabLabel = tab.label(appStrings)
-                                NavigationBarItem(
-                                    selected = selected,
-                                    onClick = { currentTab = tab },
-                                    icon = {
-                                        Icon(
-                                            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                            contentDescription = tabLabel
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            text = tabLabel,
-                                            fontFamily = navLabelFont,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1
-                                        )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = ComposeColor.White,
-                                        selectedTextColor = ComposeColor.White,
-                                        indicatorColor = GlassCardSelected,
-                                        unselectedIconColor = ComposeColor.White.copy(alpha = 0.72f),
-                                        unselectedTextColor = ComposeColor.White.copy(alpha = 0.72f)
-                                    ),
-                                    modifier = Modifier.testTag(tab.testTag)
-                                )
+                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                val itemWidth = (maxWidth / StudioTab.entries.size.toFloat()).coerceAtLeast(66.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    StudioTab.entries.forEach { tab ->
+                                        val selected = currentTab == tab
+                                        val tabLabel = tab.label(appStrings)
+                                        Column(
+                                            modifier = Modifier
+                                                .width(itemWidth)
+                                                .heightIn(min = 56.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable { currentTab = tab }
+                                                .padding(vertical = 4.dp, horizontal = 2.dp)
+                                                .testTag(tab.testTag),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(999.dp))
+                                                    .background(
+                                                        if (selected) GlassCardSelected
+                                                        else ComposeColor.Transparent
+                                                    )
+                                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                                    contentDescription = tabLabel,
+                                                    tint = if (selected) ComposeColor.White else ComposeColor.White.copy(alpha = 0.72f),
+                                                    modifier = Modifier.size(21.dp)
+                                                )
+                                            }
+                                            Text(
+                                                text = tabLabel,
+                                                fontFamily = navLabelFont,
+                                                fontSize = 10.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (selected) ComposeColor.White else ComposeColor.White.copy(alpha = 0.72f),
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -501,6 +565,8 @@ fun ProRgbKeyboardApp(
                             customPhotoTheme = customPhotoTheme,
                             imeStatus = imeStatus,
                             licenseState = licenseState,
+                            isFirebaseConnected = isFirebaseConnected,
+                            lastFirebaseSyncMs = lastFirebaseSyncMs,
                             languagePacks = languagePacks,
                             playgroundText = playgroundText,
                             clipboardClips = clipboardClips,
@@ -585,6 +651,8 @@ private fun TabContent(
     customPhotoTheme: CustomPhotoTheme,
     imeStatus: com.example.model.ImeStatus,
     licenseState: LicenseUiState,
+    isFirebaseConnected: Boolean,
+    lastFirebaseSyncMs: Long,
     languagePacks: List<LanguagePackUiState>,
     playgroundText: String,
     clipboardClips: List<String>,
@@ -621,6 +689,7 @@ private fun TabContent(
                 onOpenImeSettings = onOpenImeSettings,
                 onShowImePicker = onShowImePicker,
                 onOpenUnlockScreen = onOpenUnlockScreen,
+                onOpenBanglishVip = onOpenBanglishVip,
                 onSelectLanguageById = { langId ->
                     if (!viewModel.selectLanguageById(langId)) {
                         if (langId == com.example.model.LanguageCatalog.BANGLISH_ID) {
@@ -658,6 +727,8 @@ private fun TabContent(
                 onApplyDefaultBlack = viewModel::applyDefaultBlackBackdropPreservingTouch,
                 onApplyComboTheme = viewModel::applyComboTheme,
                 onDownloadComboTheme = { combo -> viewModel.downloadComboTheme(combo, applyAfterDownload = true) },
+                onApplyBannerPhotoPreservingTouch = viewModel::applyBannerPhotoPreservingTouch,
+                onSaveCroppedPhotoBitmap = viewModel::saveCroppedPhotoBitmap,
                 isFeatureTourActive = isFeatureTourActive,
                 activeTourTarget = activeTourTarget,
                 featureTourCoordinates = featureTourCoordinates
@@ -749,6 +820,14 @@ private fun TabContent(
                 onShowKeyBordersChange = viewModel::setShowKeyBorders,
                 onOpenThemeCustomizer = onOpenThemeCustomizer,
                 onReplayFeatureGuide = viewModel::replayFeatureTour,
+                onOpenUnlockScreen = onOpenUnlockScreen
+            )
+
+            StudioTab.DEVICE_INFO -> DeviceInfoScreen(
+                licenseState = licenseState,
+                isFirebaseConnected = isFirebaseConnected,
+                lastFirebaseSyncMs = lastFirebaseSyncMs,
+                appVersionLabel = viewModel.appVersionLabel,
                 onOpenUnlockScreen = onOpenUnlockScreen
             )
         }

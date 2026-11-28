@@ -104,13 +104,22 @@ fun StartupSetupStepper(
         }
     }
 
+    val permPrefs = remember(context) {
+        context.getSharedPreferences("rakib_permissions_prefs", android.content.Context.MODE_PRIVATE)
+    }
     var permissionsGranted by remember { mutableStateOf(checkPermissionsGranted()) }
-    var permissionsRequestedOnce by remember { mutableStateOf(false) }
+    var permissionsRequestedOnce by remember {
+        mutableStateOf(permPrefs.getBoolean("mic_permission_prompted_once", false))
+    }
 
     val multiPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         permissionsRequestedOnce = true
+        permPrefs.edit()
+            .putBoolean("mic_permission_prompted_once", true)
+            .putBoolean("mic_activity_prompted_once", true)
+            .apply()
         permissionsGranted = results.values.all { it } || checkPermissionsGranted()
     }
 
@@ -187,7 +196,24 @@ fun StartupSetupStepper(
                 buttonLabel = if (step1Done) "পারমিশন চালু আছে ✓" else "সব পারমিশন Allow করুন",
                 accentColor = NeonCyan,
                 testTag = "stepper_btn_permissions",
-                onAction = { multiPermissionLauncher.launch(requiredPermissions) }
+                onAction = {
+                    val alreadyPromptedMic = permPrefs.getBoolean("mic_permission_prompted_once", false)
+                    val permissionsToRequest = if (alreadyPromptedMic) {
+                        requiredPermissions.filterNot { it == Manifest.permission.RECORD_AUDIO }.toTypedArray()
+                    } else {
+                        requiredPermissions
+                    }
+                    if (!alreadyPromptedMic) {
+                        permissionsRequestedOnce = true
+                        permPrefs.edit()
+                            .putBoolean("mic_permission_prompted_once", true)
+                            .putBoolean("mic_activity_prompted_once", true)
+                            .apply()
+                    }
+                    if (permissionsToRequest.isNotEmpty()) {
+                        multiPermissionLauncher.launch(permissionsToRequest)
+                    }
+                }
             )
 
             // STEP 2: Enable AI Keyboard in Android Settings

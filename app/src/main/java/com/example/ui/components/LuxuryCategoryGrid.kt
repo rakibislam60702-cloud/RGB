@@ -78,7 +78,7 @@ enum class StudioEffectsCategory(
     ),
     TOUCH_RESPONSES(
         title = "Touch Responses",
-        subtitle = "50+ AI & Physics Key-Tap Effects",
+        subtitle = "100+ AI & Physics Key-Tap Effects",
         testTag = "category_card_touch_responses"
     ),
     THEMES(

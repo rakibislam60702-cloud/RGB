@@ -1,9 +1,11 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.net.Uri
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -50,6 +52,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -58,13 +61,13 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Verified
+import com.example.ui.components.BlueVerifiedBadge
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -121,9 +124,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.R
+import com.example.data.BannerPresetCatalog
+import com.example.data.BannerThemePreset
 import com.example.data.ComboCategory
 import com.example.data.ComboThemeCatalog
 import com.example.data.ComboThemePreset
+import com.example.data.CustomBackgroundManager
 import com.example.data.CustomPhotoTheme
 import com.example.data.LicenseUiState
 import com.example.engine.BengaliTransliterator
@@ -146,6 +152,8 @@ import com.example.model.RgbPalette
 import com.example.model.TouchEffectCategory
 import com.example.model.TouchTypingEffect
 import com.example.rgbkeyboard.RgbKeyboardView as NativeRgbKeyboardView
+import com.example.ui.components.BackdropBrightnessEditorDialog
+import com.example.ui.components.BackdropEditTarget
 import com.example.ui.components.FeatureTourCoordinates
 import com.example.ui.components.FeatureTourTarget
 import com.example.ui.components.LuxuryStudioCategoryGrid
@@ -202,7 +210,7 @@ private enum class HomeTopSection(
     val testTag: String
 ) {
     KEYBOARD("Keyboard", "Live Deck & Languages", "home_top_tab_keyboard"),
-    THEMES_RGB("Themes & RGB", "Touch • Themes • RGB", "home_top_tab_themes_rgb"),
+    THEMES_RGB("Themes & RGB", "Touch • Themes • RGB • Photos", "home_top_tab_themes_rgb"),
     STYLES("Photos & Art", "Photos • Banners • Packs", "home_top_tab_styles"),
     SETUP("Setup & Guide", "2-Step Setup & Tips", "home_top_tab_setup")
 }
@@ -220,6 +228,7 @@ fun StudioScreen(
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
     onOpenUnlockScreen: () -> Unit,
+    onOpenBanglishVip: () -> Unit = onOpenUnlockScreen,
     onSelectLanguageById: (String) -> Unit,
     onToggleLanguage: () -> Unit,
     onSelectEffect: (RgbEffect) -> Unit,
@@ -250,6 +259,8 @@ fun StudioScreen(
     onApplyDefaultBlack: () -> Unit = {},
     onApplyComboTheme: (ComboThemePreset) -> Unit = {},
     onDownloadComboTheme: (ComboThemePreset) -> Unit = {},
+    onApplyBannerPhotoPreservingTouch: (String) -> Unit = {},
+    onSaveCroppedPhotoBitmap: (android.graphics.Bitmap, Float, Boolean) -> Unit = { _, _, _ -> },
     isFeatureTourActive: Boolean = false,
     activeTourTarget: FeatureTourTarget? = null,
     featureTourCoordinates: FeatureTourCoordinates? = null,
@@ -262,7 +273,15 @@ fun StudioScreen(
     val selectedHomeSection = remember(selectedHomeSectionName) {
         HomeTopSection.entries.firstOrNull { it.name == selectedHomeSectionName } ?: HomeTopSection.KEYBOARD
     }
-    val homeRgbPagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
+    val homeRgbPagerState = rememberPagerState(initialPage = 0, pageCount = { 4 })
+    var homeBackdropEditTarget by remember { mutableStateOf<BackdropEditTarget?>(null) }
+    val homePhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { selectedUri: Uri? ->
+        if (selectedUri != null) {
+            homeBackdropEditTarget = BackdropEditTarget.PhotoUri(selectedUri)
+        }
+    }
     var homeTimeSec by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(selectedHomeSection) {
         if (selectedHomeSection == HomeTopSection.THEMES_RGB) {
@@ -499,6 +518,7 @@ fun StudioScreen(
                 imeStatus = imeStatus,
                 licenseState = licenseState,
                 onOpenUnlockScreen = onOpenUnlockScreen,
+                onOpenBanglishVip = onOpenBanglishVip,
                 onOpenSetupSection = { selectedHomeSectionName = HomeTopSection.SETUP.name }
             )
 
@@ -590,7 +610,11 @@ fun StudioScreen(
                                                 )
                                                 .clickable {
                                                     if (isVipLocked) {
-                                                        onOpenUnlockScreen()
+                                                        if (pack.catalog.id == LanguageCatalog.BANGLISH_ID) {
+                                                            onOpenBanglishVip()
+                                                        } else {
+                                                            onOpenUnlockScreen()
+                                                        }
                                                     } else {
                                                         onSelectLanguageById(pack.catalog.id)
                                                     }
@@ -1109,7 +1133,8 @@ fun StudioScreen(
                     val prediction = remember(playgroundText, settings.activeLanguageId) {
                         SmartWordPredictor.predict(playgroundText, settings.activeLanguageId, context)
                     }
-                    val isBanglishMode = settings.activeLanguageId == LanguageCatalog.BANGLISH_ID
+                    val isBanglishMode = settings.activeLanguageId == LanguageCatalog.BANGLISH_ID &&
+                        licenseState.isBanglishUnlocked
                     val topBanglaClip = remember(clipboardClips, isBanglishMode) {
                         if (isBanglishMode) {
                             clipboardClips.firstOrNull { BengaliTransliterator.containsBengaliScript(it) }.orEmpty()
@@ -1168,6 +1193,10 @@ fun StudioScreen(
                                         )
                                         .clickable {
                                             onKeyFeedback(true)
+                                            if (!licenseState.isBanglishUnlocked) {
+                                                onOpenBanglishVip()
+                                                return@clickable
+                                            }
                                             when {
                                                 hasLiveConvert -> {
                                                     repeat(prediction.banglaConvertSource.length) {
@@ -1547,6 +1576,19 @@ fun StudioScreen(
                                     onApplyComboTheme(combo)
                                 }
                             },
+                            onPickGalleryPhoto = {
+                                homePhotoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            onSelectHdPhoto = { preset ->
+                                val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+                                if (isLocked) {
+                                    onOpenUnlockScreen()
+                                } else {
+                                    onApplyBannerPhotoPreservingTouch(preset.id)
+                                }
+                            },
                             onOpenFullStudio = { cat -> onOpenEffectsCategory(cat) }
                         )
                     }
@@ -1601,6 +1643,27 @@ fun StudioScreen(
         }
 
         Spacer(modifier = Modifier.height(22.dp))
+    }
+
+    homeBackdropEditTarget?.let { editTarget ->
+        BackdropBrightnessEditorDialog(
+            target = editTarget,
+            settings = settings,
+            customPhotoTheme = customPhotoTheme,
+            timeSec = homeTimeSec,
+            onDismiss = { homeBackdropEditTarget = null },
+            onApplyCroppedPhoto = { bmp, dimAlpha, showBorders ->
+                onSaveCroppedPhotoBitmap(bmp, dimAlpha, showBorders)
+                homeBackdropEditTarget = null
+            },
+            onApplyBannerPreset = { presetId, _, _ ->
+                onApplyBannerPhotoPreservingTouch(presetId)
+                homeBackdropEditTarget = null
+            },
+            onApplyRemoteBanner = { _, _, _ ->
+                homeBackdropEditTarget = null
+            }
+        )
     }
 }
 
@@ -2093,24 +2156,36 @@ private fun HeroStatusCard(
     imeStatus: ImeStatus,
     licenseState: LicenseUiState,
     onOpenUnlockScreen: () -> Unit,
+    onOpenBanglishVip: () -> Unit,
     onOpenSetupSection: () -> Unit
 ) {
     val glassShape = RoundedCornerShape(24.dp)
 
+    val isDeviceBlocked = licenseState.isDeviceBlocked
+    val isTrueLifetimeDisplay = licenseState.isTrueLifetimeDisplay
+    val isAdminGrantedVip = !isDeviceBlocked && !isTrueLifetimeDisplay &&
+        (licenseState.isAdminGrantedVip || licenseState.deviceOverrides.hasFullAdminFreeAccess)
+    val isTimedVip = !isDeviceBlocked && !isTrueLifetimeDisplay && !isAdminGrantedVip &&
+        (licenseState.isMonthlyActive || licenseState.isWeeklyActive)
+    val isPaidOrAdminOrGlobalVip = isTrueLifetimeDisplay || isAdminGrantedVip || isTimedVip
+    val isActiveFreeTrial = !isDeviceBlocked && !isPaidOrAdminOrGlobalVip && !licenseState.isTrialExpired
+    val isExpiredFreeMode = isDeviceBlocked || (!isPaidOrAdminOrGlobalVip && licenseState.isTrialExpired)
+
     val pillBorderBrush = when {
-        licenseState.isAllUnlocked || licenseState.isPaidOrAdminVip -> FlagshipEmeraldCyanBrush
-        licenseState.isFreeStandardMode -> FlagshipCyanMagentaBrush
+        isDeviceBlocked -> FlagshipCyanMagentaBrush
+        isPaidOrAdminOrGlobalVip -> FlagshipEmeraldCyanBrush
+        isExpiredFreeMode -> FlagshipCyanMagentaBrush
         else -> FlagshipGoldAmberBrush
     }
     val pillBg = when {
-        licenseState.isAllUnlocked || licenseState.isPaidOrAdminVip -> Color(0xCC0A2E22)
-        licenseState.isFreeStandardMode -> Color(0xCC2A1026)
+        isDeviceBlocked -> Color(0xCC2A1026)
+        isPaidOrAdminOrGlobalVip -> Color(0xCC0A2E22)
+        isExpiredFreeMode -> Color(0xCC2A1026)
         else -> Color(0xCC221909)
     }
     val strings = LocalAppStrings.current
     val heroBodyFont = if (strings.language == AppUiLanguage.BENGALI) NotoSansBengaliFamily else FontFamily.Default
     val pillText = licenseState.formattedVipPillText
-    val isVipActive = licenseState.isAllUnlocked || licenseState.isPaidOrAdminVip
 
     Box(
         modifier = Modifier
@@ -2201,24 +2276,30 @@ private fun HeroStatusCard(
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Icon(
-                                imageVector = Icons.Filled.Verified,
-                                contentDescription = null,
-                                tint = RoyalGold,
-                                modifier = Modifier.size(15.dp)
+                            BlueVerifiedBadge(
+                                size = 17.dp,
+                                contentDescription = "Verified Official Badge"
                             )
                         }
                         Text(
-                            text = if (isVipActive) {
-                                strings.vipBannerUnlocked
-                            } else {
-                                "AI RGB KEYBOARD • VIP PASS"
+                            text = when {
+                                isDeviceBlocked -> "🔒 ACCESS RESTRICTED BY ADMIN"
+                                isTrueLifetimeDisplay -> strings.vipBannerUnlocked
+                                isAdminGrantedVip -> "✓ ADMIN VIP UNLOCKED · ALL EFFECTS ACTIVE"
+                                isTimedVip -> "✓ ${licenseState.formattedCompactEnglish} VIP ACTIVE"
+                                isActiveFreeTrial -> "👑 VIP TRIAL • ${licenseState.formattedCompactEnglish}"
+                                else -> "NORMAL BLACK • FREE STANDARD MODE"
                             },
                             fontFamily = JetBrainsMonoFamily,
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 0.6.sp,
-                            color = if (isVipActive) NeonEmerald else NeonCyan.copy(alpha = 0.88f),
+                            color = when {
+                                isDeviceBlocked -> NeonMagenta
+                                isPaidOrAdminOrGlobalVip -> NeonEmerald
+                                isActiveFreeTrial -> RoyalGold
+                                else -> NeonCyan.copy(alpha = 0.88f)
+                            },
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Ellipsis
@@ -2240,24 +2321,40 @@ private fun HeroStatusCard(
                         .clip(RoundedCornerShape(999.dp))
                         .background(pillBg)
                         .border(1.3.dp, pillBorderBrush, RoundedCornerShape(999.dp))
-                        .clickable(enabled = !licenseState.isAllUnlocked, onClick = onOpenUnlockScreen)
+                        .clickable(
+                            enabled = !licenseState.isAllUnlocked && !isDeviceBlocked,
+                            onClick = {
+                                if (isPaidOrAdminOrGlobalVip && !licenseState.isBanglishUnlocked) {
+                                    onOpenBanglishVip()
+                                } else {
+                                    onOpenUnlockScreen()
+                                }
+                            }
+                        )
                         .padding(horizontal = 11.dp, vertical = 7.dp)
                         .testTag(
                             when {
-                                licenseState.isAllUnlocked || licenseState.isLifetimeUnlocked || licenseState.isAdminGrantedVip -> "badge_lifetime_unlocked"
-                                licenseState.isFreeStandardMode -> "badge_free_standard_mode"
+                                isTrueLifetimeDisplay || isAdminGrantedVip -> "badge_lifetime_unlocked"
+                                isExpiredFreeMode -> "badge_free_standard_mode"
                                 else -> "badge_free_trial_timer"
                             }
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isVipActive) Icons.Filled.CheckCircle else Icons.Filled.Timer,
-                        contentDescription = null,
-                        tint = if (isVipActive) NeonEmerald else RoyalGold,
-                        modifier = Modifier.size(13.dp)
-                    )
+                    if (licenseState.isVipActive) {
+                        BlueVerifiedBadge(
+                            size = 15.dp,
+                            contentDescription = "VIP Verified"
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                     Text(
                         text = pillText,
                         fontFamily = FontFamily.Default,
@@ -2313,12 +2410,12 @@ private fun HeroStatusCard(
                     .shadow(
                         elevation = 12.dp,
                         shape = RoundedCornerShape(14.dp),
-                        ambientColor = if (isVipActive) NeonEmerald.copy(alpha = 0.42f) else RoyalGold.copy(alpha = 0.55f),
-                        spotColor = if (isVipActive) NeonCyan.copy(alpha = 0.48f) else NeonCyan.copy(alpha = 0.42f)
+                        ambientColor = if (isPaidOrAdminOrGlobalVip) NeonEmerald.copy(alpha = 0.42f) else RoyalGold.copy(alpha = 0.55f),
+                        spotColor = if (isPaidOrAdminOrGlobalVip) NeonCyan.copy(alpha = 0.48f) else NeonCyan.copy(alpha = 0.42f)
                     )
                     .clip(RoundedCornerShape(14.dp))
                     .background(
-                        if (isVipActive) {
+                        if (isPaidOrAdminOrGlobalVip) {
                             Brush.horizontalGradient(
                                 listOf(
                                     Color(0xFF0A3327),
@@ -2338,25 +2435,37 @@ private fun HeroStatusCard(
                     )
                     .border(
                         width = 1.2.dp,
-                        brush = if (isVipActive) FlagshipEmeraldCyanBrush else FlagshipGoldCyanBrush,
+                        brush = if (isPaidOrAdminOrGlobalVip) FlagshipEmeraldCyanBrush else FlagshipGoldCyanBrush,
                         shape = RoundedCornerShape(14.dp)
                     )
-                    .clickable(enabled = !licenseState.isAllUnlocked, onClick = onOpenUnlockScreen)
+                    .clickable(
+                        enabled = !licenseState.isAllUnlocked && !isDeviceBlocked,
+                        onClick = {
+                            if (isPaidOrAdminOrGlobalVip && !licenseState.isBanglishUnlocked) {
+                                onOpenBanglishVip()
+                            } else {
+                                onOpenUnlockScreen()
+                            }
+                        }
+                    )
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .testTag("hero_lifetime_vip_banner"),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isVipActive) {
-                        "👑 ${strings.vipBannerUnlocked}"
-                    } else {
-                        "👑 VIP আনলক / প্ল্যান দেখুন"
+                    text = when {
+                        isDeviceBlocked -> "🔒 অ্যাক্সেস সীমিত (Admin Blocked)"
+                        isTrueLifetimeDisplay -> "👑 ${strings.vipBannerUnlocked}"
+                        isAdminGrantedVip -> "👑 ADMIN VIP UNLOCKED · ALL EFFECTS"
+                        isTimedVip -> "👑 VIP ACTIVE • ${licenseState.formattedCompactEnglish}"
+                        isActiveFreeTrial -> "👑 VIP ট্রায়াল (${licenseState.formattedCompactEnglish}) • প্ল্যান দেখুন"
+                        else -> "👑 VIP আনলক / প্ল্যান দেখুন"
                     },
-                    fontFamily = if (isVipActive) heroBodyFont else NotoSansBengaliFamily,
+                    fontFamily = if (isPaidOrAdminOrGlobalVip) heroBodyFont else NotoSansBengaliFamily,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.35.sp,
-                    color = if (isVipActive) Color.White else Color(0xFF060A18),
+                    color = if (isPaidOrAdminOrGlobalVip) Color.White else Color(0xFF060A18),
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis
@@ -2499,12 +2608,15 @@ private fun HomeUnifiedRgbThemesTouchSection(
     onSelectEffect: (RgbEffect) -> Unit,
     onSelectPalette: (RgbPalette) -> Unit,
     onQuickApplyCombo: (ComboThemePreset) -> Unit,
+    onPickGalleryPhoto: () -> Unit,
+    onSelectHdPhoto: (BannerThemePreset) -> Unit,
     onOpenFullStudio: (StudioEffectsCategory) -> Unit
 ) {
     val touchEffects = remember { TouchTypingEffect.byCategory(TouchEffectCategory.ALL).take(16) }
     val featuredCombos = remember(licenseState.adminConfig.cloudThemes) {
         ComboThemeCatalog.byCategory(ComboCategory.ALL, licenseState.adminConfig.cloudThemes).take(12)
     }
+    val featuredPhotos = remember { BannerPresetCatalog.staticBannerPresets.take(12) }
     val isClassicBlack = !customPhotoTheme.hasPhoto && settings.effect == RgbEffect.NORMAL_DEFAULT
 
     Column(
@@ -2575,6 +2687,7 @@ private fun HomeUnifiedRgbThemesTouchSection(
                             val targetCat = when (pagerState.currentPage) {
                                 1 -> StudioEffectsCategory.THEMES
                                 2 -> StudioEffectsCategory.ANIMATIONS
+                                3 -> StudioEffectsCategory.PHOTOS
                                 else -> StudioEffectsCategory.TOUCH_RESPONSES
                             }
                             onOpenFullStudio(targetCat)
@@ -2594,8 +2707,8 @@ private fun HomeUnifiedRgbThemesTouchSection(
             }
         }
 
-        // Unified 3-Way Bar: Touch FX | Themes | RGB Design
-        val tabTitles = listOf("Touch FX", "Themes", "RGB Design")
+        // Unified 4-Way Bar: Touch FX | Themes | RGB Design | Photos
+        val tabTitles = listOf("Touch FX", "Themes", "RGB Design", "Photos")
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2619,17 +2732,19 @@ private fun HomeUnifiedRgbThemesTouchSection(
                             shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { onSelectPage(idx) }
-                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .padding(horizontal = 4.dp, vertical = 8.dp)
                         .testTag("home_unified_tab_$idx"),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = label,
                         fontFamily = SpaceGroteskFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (selected) NeonCyan else Color.White.copy(alpha = 0.80f),
-                        maxLines = 1
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -2678,6 +2793,8 @@ private fun HomeUnifiedRgbThemesTouchSection(
                                                 glowIntensity = settings.glowIntensity,
                                                 timeProvider = timeProvider,
                                                 showKeyBorders = settings.showKeyBorders,
+                                                bannerPresetId = BannerPresetCatalog.defaultBannerForTouchEffect(fx),
+                                                dimAlpha = 0.44f,
                                                 showTopStrip = false,
                                                 modifier = Modifier
                                                     .fillMaxWidth()
@@ -2784,7 +2901,7 @@ private fun HomeUnifiedRgbThemesTouchSection(
                         }
                     }
 
-                    else -> {
+                    2 -> {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(RgbPalette.entries) { palette ->
@@ -2871,6 +2988,115 @@ private fun HomeUnifiedRgbThemesTouchSection(
                                                 )
                                                 Text(
                                                     text = if (selected) "Active ✓" else "Ambient RGB",
+                                                    fontFamily = JetBrainsMonoFamily,
+                                                    fontSize = 9.5.sp,
+                                                    color = if (selected) NeonEmerald else NeonCyan,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
+                                    }
+                                    if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                        .luminousGlassCard(
+                                            shape = RoundedCornerShape(14.dp),
+                                            borderBrush = if (customPhotoTheme.hasCustomGalleryPhoto) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                                            borderWidth = if (customPhotoTheme.hasCustomGalleryPhoto) 1.5.dp else 1.dp,
+                                            glowColor = NeonCyan,
+                                            glowElevation = 8.dp,
+                                            surfaceColor = if (customPhotoTheme.hasCustomGalleryPhoto) GlassCardSelected else GlassCardSurface
+                                        )
+                                        .clickable(onClick = onPickGalleryPhoto)
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        .testTag("home_btn_pick_gallery_photo"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.AddPhotoAlternate,
+                                        contentDescription = "Pick Gallery Photo",
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = if (customPhotoTheme.hasCustomGalleryPhoto) "Change Photo" else "Pick Gallery Photo",
+                                            fontFamily = SpaceGroteskFamily,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "FREE • Works with Touch FX",
+                                            fontFamily = JetBrainsMonoFamily,
+                                            fontSize = 9.5.sp,
+                                            color = NeonEmerald,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+
+                            featuredPhotos.chunked(2).forEach { pair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    pair.forEach { preset ->
+                                        val selected = customPhotoTheme.presetId == preset.id
+                                        val isLocked = !licenseState.isThemeItemUnlocked(preset.id, isPermanentlyFree = false)
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .luminousGlassCard(
+                                                    shape = RoundedCornerShape(16.dp),
+                                                    borderBrush = if (selected) FlagshipCyanMagentaBrush else FlagshipGlassRimSubtle,
+                                                    borderWidth = if (selected) 1.6.dp else 1.dp,
+                                                    glowColor = NeonCyan,
+                                                    glowElevation = if (selected) 12.dp else 6.dp,
+                                                    surfaceColor = if (selected) GlassCardSelected else GlassCardSurface
+                                                )
+                                                .clickable { onSelectHdPhoto(preset) }
+                                                .padding(10.dp)
+                                                .testTag("home_photo_${preset.id}"),
+                                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                                        ) {
+                                            MiniKeyboardEffectPreview(
+                                                bannerPresetId = preset.id,
+                                                gradientColors = preset.previewColors,
+                                                showKeyBorders = settings.showKeyBorders,
+                                                showTopStrip = false,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(54.dp)
+                                            )
+                                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Text(
+                                                    text = if (isLocked) "🔒 ${preset.title}" else preset.title,
+                                                    fontFamily = SpaceGroteskFamily,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = if (selected) "Active ✓" else "HD Photo • Touch Ready",
                                                     fontFamily = JetBrainsMonoFamily,
                                                     fontSize = 9.5.sp,
                                                     color = if (selected) NeonEmerald else NeonCyan,

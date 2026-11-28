@@ -265,11 +265,22 @@ fun BackdropBrightnessEditorDialog(
                         .background(Color(0xFF0A0D16))
                         .border(1.4.dp, NeonCyan.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
                         .onSizeChanged { cropViewportSize = it }
-                        .pointerInput(sourceBitmap) {
+                        .pointerInput(sourceBitmap, cropViewportSize) {
                             detectTransformGestures { _, pan, zoom, _ ->
-                                val nextScale = (scale * zoom).coerceIn(1f, 4.5f)
-                                val maxOffsetX = (cropViewportSize.width * (nextScale - 1f) / 2f).coerceAtLeast(80f)
-                                val maxOffsetY = (cropViewportSize.height * (nextScale - 1f) / 2f).coerceAtLeast(80f)
+                                val nextScale = (scale * zoom).coerceIn(1f, 5f)
+                                val bmp = sourceBitmap
+                                val vw = cropViewportSize.width.toFloat().coerceAtLeast(1f)
+                                val vh = cropViewportSize.height.toFloat().coerceAtLeast(1f)
+                                val (maxOffsetX, maxOffsetY) = if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+                                    val bw = bmp.width.toFloat()
+                                    val bh = bmp.height.toFloat()
+                                    val baseScale = maxOf(vw / bw, vh / bh)
+                                    val maxX = maxOf(0f, (bw * baseScale * nextScale - vw) / 2f)
+                                    val maxY = maxOf(0f, (bh * baseScale * nextScale - vh) / 2f)
+                                    maxX to maxY
+                                } else {
+                                    ((vw * (nextScale - 1f)) / 2f) to ((vh * (nextScale - 1f)) / 2f)
+                                }
                                 scale = nextScale
                                 offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
                                 offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)

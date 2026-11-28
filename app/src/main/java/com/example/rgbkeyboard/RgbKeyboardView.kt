@@ -794,9 +794,9 @@ class RgbKeyboardView @JvmOverloads constructor(
         val cornerRadius = (settings.keyCornerRadiusDp * density).coerceIn(3.5f * density, 14f * density)
 
         // =========================================================================
-        // LAYER 1A: Persistent Custom / Downloaded Theme Photo Background (VIP only)
+        // LAYER 1A: Background Photo (Built-in Presets/Combos require VIP; User's Custom Gallery Photo stays FREE forever)
         // =========================================================================
-        val hasCustomPhoto = if (vipVisualsEnabled) {
+        val hasCustomPhoto = if (vipVisualsEnabled || photoTheme.hasCustomGalleryPhoto) {
             reloadPhotoBitmapIfNeeded()
             drawCustomPhotoBackground(canvas)
         } else {
@@ -1013,9 +1013,9 @@ class RgbKeyboardView @JvmOverloads constructor(
                             val neon = when {
                                 isCapsLocked -> Color.parseColor("#38BDF8")
                                 settings.touchEffect == TouchTypingEffect.TOUCH_SPARK -> box.neonColor
-                                else -> blendColor(fxPrimary, fxSecondary, ((sin(timeSec * 20f) + 1f) * 0.5f))
+                                else -> blendColor(fxPrimary, fxSecondary, ((sin(timeSec * 2.4f) + 1f) * 0.5f))
                             }
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, neon, effGlow, fillMaxAlpha = 152)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, neon, effGlow, fillMaxAlpha = 115)
                         }
                     }
 
@@ -1030,8 +1030,8 @@ class RgbKeyboardView @JvmOverloads constructor(
                             if (d <= 2) {
                                 val weight = when (d) {
                                     0 -> 1.0f
-                                    1 -> 0.75f
-                                    else -> 0.45f
+                                    1 -> 0.72f
+                                    else -> 0.42f
                                 }
                                 val energy = gFade * weight
                                 if (energy > synStrength) {
@@ -1042,7 +1042,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                         }
                         effectiveTouchGlow = maxOf(effectiveTouchGlow, synStrength)
                         if (synStrength > 0.02f) {
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, synColor, synStrength, fillMaxAlpha = 156)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, synColor, synStrength, fillMaxAlpha = 128)
                         }
                     }
 
@@ -1055,7 +1055,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                             if (gFade <= 0.02f) continue
                             if (box.rowIndex == gItem.rowIndex || box.colIndex == gItem.colIndex) {
                                 val dist = abs(box.rowIndex - gItem.rowIndex) + abs(box.colIndex - gItem.colIndex)
-                                val falloff = if (dist == 0) 1f else (0.78f - dist * 0.09f).coerceAtLeast(0.22f)
+                                val falloff = if (dist == 0) 1f else (0.72f - dist * 0.09f).coerceAtLeast(0.20f)
                                 val energy = gFade * falloff
                                 if (energy > crossStrength) {
                                     crossStrength = energy
@@ -1065,7 +1065,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                         }
                         effectiveTouchGlow = maxOf(effectiveTouchGlow, crossStrength)
                         if (crossStrength > 0.02f) {
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, crossColor, crossStrength, fillMaxAlpha = 155)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, crossColor, crossStrength, fillMaxAlpha = 126)
                         }
                     }
 
@@ -1073,14 +1073,14 @@ class RgbKeyboardView @JvmOverloads constructor(
                     TouchEffectVisualStyle.GRAVITY_IMPLOSION -> {
                         if (effGlow > 0.01f) {
                             val col = blendColor(fxPrimary, fxSecondary, effGlow * 0.5f)
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, col, effGlow, fillMaxAlpha = 152)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, col, effGlow, fillMaxAlpha = 124)
                         }
                     }
 
                     TouchEffectVisualStyle.RISING_EMBER -> {
                         if (effGlow > 0.01f) {
-                            val magmaCol = blendColor(fxPrimary, fxSecondary, effGlow)
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, magmaCol, effGlow, fillMaxAlpha = 175)
+                            val magmaCol = blendColor(fxPrimary, fxSecondary, (0.35f + 0.65f * effGlow).coerceIn(0f, 1f))
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, magmaCol, effGlow, fillMaxAlpha = 136)
                         }
                     }
 
@@ -1094,7 +1094,7 @@ class RgbKeyboardView @JvmOverloads constructor(
                             val dr = abs(box.rowIndex - gItem.rowIndex)
                             val dc = abs(box.colIndex - gItem.colIndex)
                             if (dr <= 1 && dc <= 1) {
-                                val energy = if (dr == 0 && dc == 0) gFade else gFade * 0.72f
+                                val energy = if (dr == 0 && dc == 0) gFade else gFade * 0.68f
                                 if (energy > frostStrength) {
                                     frostStrength = energy
                                     isFrostCenter = dr == 0 && dc == 0
@@ -1104,11 +1104,11 @@ class RgbKeyboardView @JvmOverloads constructor(
                         effectiveTouchGlow = maxOf(effectiveTouchGlow, frostStrength)
                         if (frostStrength > 0.02f) {
                             val frostCol = if (isFrostCenter) fxPrimary else fxSecondary
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, frostCol, frostStrength, fillMaxAlpha = 165)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, frostCol, frostStrength, fillMaxAlpha = 130)
                             effectOverlayPaint.style = Paint.Style.STROKE
-                            effectOverlayPaint.strokeWidth = 1.4f * density
-                            effectOverlayPaint.color = Color.argb((frostStrength * 220).toInt().coerceIn(0, 220), 224, 251, 252)
-                            val tick = 5.5f * density
+                            effectOverlayPaint.strokeWidth = 1.3f * density
+                            effectOverlayPaint.color = Color.argb((frostStrength * 185).toInt().coerceIn(0, 185), 224, 251, 252)
+                            val tick = 5.2f * density
                             canvas.drawLine(rect.left + 3f * density, rect.top + tick, rect.left + tick, rect.top + 3f * density, effectOverlayPaint)
                             canvas.drawLine(rect.right - tick, rect.bottom - 3f * density, rect.right - 3f * density, rect.bottom - tick, effectOverlayPaint)
                         }
@@ -1117,29 +1117,29 @@ class RgbKeyboardView @JvmOverloads constructor(
                     TouchEffectVisualStyle.COMET_STREAK -> {
                         if (effGlow > 0.01f) {
                             val streakCol = blendColor(fxPrimary, fxSecondary, effGlow)
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, streakCol, effGlow, fillMaxAlpha = 148)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, streakCol, effGlow, fillMaxAlpha = 122)
                         }
                     }
 
                     TouchEffectVisualStyle.PRISM_SHATTER -> {
                         if (effGlow > 0.01f) {
                             val prismCol = blendColor(fxPrimary, fxSecondary, 0.45f)
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, prismCol, effGlow, fillMaxAlpha = 152)
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, prismCol, effGlow, fillMaxAlpha = 124)
                             drawDiamondStarGlint(canvas, rect, effGlow)
                         }
                     }
 
                     TouchEffectVisualStyle.CHRONO_ORBIT -> {
                         if (effGlow > 0.01f) {
-                            val orbitCol = blendColor(fxPrimary, fxSecondary, ((sin(timeSec * 7f) + 1f) * 0.5f))
-                            drawTouchKeyHighlight(canvas, rect, cornerRadius, orbitCol, effGlow, fillMaxAlpha = 155)
+                            val orbitCol = blendColor(fxPrimary, fxSecondary, ((sin(timeSec * 3.0f) + 1f) * 0.5f))
+                            drawTouchKeyHighlight(canvas, rect, cornerRadius, orbitCol, effGlow, fillMaxAlpha = 126)
                             effectOverlayPaint.style = Paint.Style.FILL
-                            val angle = timeSec * 7.5f + box.colIndex
+                            val angle = timeSec * 4.5f + box.colIndex
                             val rOrbit = min(rect.width(), rect.height()) * 0.42f
                             val ox = rect.centerX() + cos(angle) * rOrbit
                             val oy = rect.centerY() + sin(angle) * rOrbit
-                            effectOverlayPaint.color = Color.argb((effGlow * 245).toInt().coerceIn(0, 255), Color.red(fxSecondary), Color.green(fxSecondary), Color.blue(fxSecondary))
-                            canvas.drawCircle(ox, oy, 2.8f * density, effectOverlayPaint)
+                            effectOverlayPaint.color = Color.argb((effGlow * 210).toInt().coerceIn(0, 215), Color.red(fxSecondary), Color.green(fxSecondary), Color.blue(fxSecondary))
+                            canvas.drawCircle(ox, oy, 2.6f * density, effectOverlayPaint)
                         }
                     }
                 }
@@ -1259,16 +1259,16 @@ class RgbKeyboardView @JvmOverloads constructor(
         val g = Color.green(colorInt)
         val b = Color.blue(colorInt)
         sparkFillPaint.color = Color.argb(
-            (strength * fillMaxAlpha * settings.glowIntensity).toInt().coerceIn(0, 210),
+            (strength * fillMaxAlpha * settings.glowIntensity).toInt().coerceIn(0, 165),
             r, g, b
         )
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkFillPaint)
 
         sparkBorderPaint.color = Color.argb(
-            (strength * 230 * settings.glowIntensity).toInt().coerceIn(0, 235),
+            (strength * 185 * settings.glowIntensity).toInt().coerceIn(0, 195),
             r, g, b
         )
-        sparkBorderPaint.strokeWidth = (1.1f + strength * 0.9f) * density
+        sparkBorderPaint.strokeWidth = (1.0f + strength * 0.8f) * density
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, sparkBorderPaint)
     }
 
@@ -1343,15 +1343,21 @@ class RgbKeyboardView @JvmOverloads constructor(
             val ageSec = (nowMs - s.createdAtMs).toFloat() / 1000f
             val life = (1f - (nowMs - s.createdAtMs).toFloat() / EMBER_LIFETIME_MS).coerceIn(0f, 1f)
             if (life <= 0.02f) continue
-            val px = s.x + s.vx * ageSec * density
+            val smoothLife = life * life * (2.2f - 1.2f * life)
+            val swayX = sin(ageSec * 6.5f + i * 1.1f) * 3.5f * density * (1f - life)
+            val px = s.x + s.vx * ageSec * density + swayX
             val py = s.y + s.vy * ageSec * density
             val r = Color.red(s.color)
             val g = Color.green(s.color)
             val b = Color.blue(s.color)
-            effectOverlayPaint.color = Color.argb((life * 120 * settings.glowIntensity).toInt().coerceIn(0, 165), r, g, b)
-            canvas.drawCircle(px, py, s.sizePx * 1.9f * life, effectOverlayPaint)
-            effectOverlayPaint.color = Color.argb((life * 255).toInt().coerceIn(0, 255), 255, 245, 200)
-            canvas.drawCircle(px, py, s.sizePx * 0.85f * life, effectOverlayPaint)
+            val flameW = s.sizePx * (0.95f + 0.7f * smoothLife)
+            val flameH = flameW * 1.55f
+            tempRect.set(px - flameW, py - flameH, px + flameW, py + flameW * 0.85f)
+            effectOverlayPaint.color = Color.argb((smoothLife * 125 * settings.glowIntensity).toInt().coerceIn(0, 145), r, g, b)
+            canvas.drawOval(tempRect, effectOverlayPaint)
+            tempRect.set(px - flameW * 0.5f, py - flameH * 0.65f, px + flameW * 0.5f, py + flameW * 0.45f)
+            effectOverlayPaint.color = Color.argb((smoothLife * 210 * settings.glowIntensity).toInt().coerceIn(0, 220), 255, 220, 145)
+            canvas.drawOval(tempRect, effectOverlayPaint)
         }
     }
 
@@ -1390,7 +1396,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         diamondPath.close()
 
         effectOverlayPaint.style = Paint.Style.FILL
-        effectOverlayPaint.color = Color.argb((strength * 245).toInt().coerceIn(0, 255), 255, 255, 255)
+        effectOverlayPaint.color = Color.argb((strength * 210).toInt().coerceIn(0, 215), 255, 255, 255)
         canvas.drawPath(diamondPath, effectOverlayPaint)
     }
 
@@ -1554,7 +1560,7 @@ class RgbKeyboardView @JvmOverloads constructor(
         val releasedAt = entry.releasedAtMs ?: return 1f
         val elapsed = (nowMs - releasedAt).toFloat()
         val linear = (1f - elapsed / SPARK_FADE_MS).coerceIn(0f, 1f)
-        return linear * linear
+        return (linear * linear * (2.2f - 1.2f * linear)).coerceIn(0f, 1f)
     }
 
     private fun drawRisingSparkBubbles(
@@ -2381,11 +2387,11 @@ class RgbKeyboardView @JvmOverloads constructor(
     }
 
     companion object {
-        private const val SPARK_FADE_MS = 460L
-        private const val TRAIL_LIFETIME_MS = 380L
-        private const val SHOCKWAVE_LIFETIME_MS = 520L
-        private const val EMBER_LIFETIME_MS = 620L
-        private const val COMET_LIFETIME_MS = 780L
+        private const val SPARK_FADE_MS = 520L
+        private const val TRAIL_LIFETIME_MS = 420L
+        private const val SHOCKWAVE_LIFETIME_MS = 560L
+        private const val EMBER_LIFETIME_MS = 760L
+        private const val COMET_LIFETIME_MS = 820L
         private const val LONG_PRESS_DELAY_MS = 350L
         private const val DOUBLE_TAP_SHIFT_MS = 380L
         private const val IDLE_PAUSE_MS = 1500L
