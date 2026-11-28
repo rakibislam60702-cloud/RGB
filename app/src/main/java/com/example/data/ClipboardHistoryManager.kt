@@ -352,7 +352,10 @@ class ClipboardHistoryManager private constructor(context: Context) {
         fun isBlockedInternalClip(text: String): Boolean {
             val lower = text.lowercase()
             return lower.contains("firebaseio.com") ||
+                lower.contains("firebaseapp.com") ||
                 lower.contains("rakib-ai-keyboard") ||
+                lower.contains("/admin_config") ||
+                lower.contains("/pending_payments") ||
                 lower.contains("upi://pay") ||
                 lower.contains("6296603748") ||
                 lower.contains("aikb_enc_v2") ||

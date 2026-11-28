@@ -78,7 +78,7 @@ object AntiTamperGuard {
         val normalizedExpectedUrl = normalizeUrl(EXPECTED_FIREBASE_DATABASE_URL)
         val normalizedActualUrl = normalizeUrl(firebaseDatabaseUrl)
         if (normalizedActualUrl != normalizedExpectedUrl) {
-            return TamperCheckResult.Tampered("Unauthorized Firebase database endpoint")
+            return TamperCheckResult.Tampered("Unauthorized server endpoint")
         }
 
         val firebaseApps = runCatching { FirebaseApp.getApps(context) }.getOrNull().orEmpty()
@@ -86,11 +86,11 @@ object AntiTamperGuard {
             val options = runCatching { app.options }.getOrNull() ?: continue
             val projectId = options.projectId.orEmpty().trim()
             if (projectId.isNotEmpty() && projectId != EXPECTED_FIREBASE_PROJECT_ID) {
-                return TamperCheckResult.Tampered("Unauthorized Firebase project configuration")
+                return TamperCheckResult.Tampered("Unauthorized server configuration")
             }
             val dbUrl = options.databaseUrl.orEmpty().trim()
             if (dbUrl.isNotEmpty() && normalizeUrl(dbUrl) != normalizedExpectedUrl) {
-                return TamperCheckResult.Tampered("Modified Firebase Realtime Database URL")
+                return TamperCheckResult.Tampered("Modified server endpoint URL")
             }
         }
 
@@ -215,7 +215,8 @@ object AntiTamperGuard {
         maxSeenElapsedMs: Long,
         trialExpiredSticky: Boolean,
         reinstallDetected: Boolean,
-        clockRollbackDetected: Boolean
+        clockRollbackDetected: Boolean,
+        isServerVerified: Boolean = false
     ): String {
         val secretKeyMaterial = "$deviceId|$rawAndroidId|$packageName|$HMAC_DOMAIN_SALT"
         val keyHash = MessageDigest.getInstance("SHA-256")
@@ -240,7 +241,8 @@ object AntiTamperGuard {
             append(maxSeenElapsedMs).append('|')
             append(trialExpiredSticky).append('|')
             append(reinstallDetected).append('|')
-            append(clockRollbackDetected)
+            append(clockRollbackDetected).append('|')
+            append(isServerVerified)
         }
 
         val mac = Mac.getInstance("HmacSHA256")
@@ -310,7 +312,8 @@ object AntiTamperGuard {
         maxSeenElapsedMs: Long,
         trialExpiredSticky: Boolean,
         reinstallDetected: Boolean,
-        clockRollbackDetected: Boolean
+        clockRollbackDetected: Boolean,
+        isServerVerified: Boolean = false
     ): Boolean {
         val actual = providedHmac?.trim().orEmpty()
         if (actual.isEmpty()) return false
@@ -333,7 +336,8 @@ object AntiTamperGuard {
             maxSeenElapsedMs = maxSeenElapsedMs,
             trialExpiredSticky = trialExpiredSticky,
             reinstallDetected = reinstallDetected,
-            clockRollbackDetected = clockRollbackDetected
+            clockRollbackDetected = clockRollbackDetected,
+            isServerVerified = isServerVerified
         )
         return MessageDigest.isEqual(
             actual.toByteArray(Charsets.UTF_8),

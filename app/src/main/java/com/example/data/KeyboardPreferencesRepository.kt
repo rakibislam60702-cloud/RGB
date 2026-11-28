@@ -374,7 +374,8 @@ class KeyboardPreferencesRepository private constructor(
     suspend fun seedInitialTrialTouchDefaultsIfNeeded() {
         context.rgbKeyboardDataStore.edit { prefs ->
             if (prefs[Keys.TRIAL_DEFAULTS_SEEDED_V1] != true) {
-                if (!prefs.contains(Keys.TOUCH_EFFECT)) {
+                val existingTouch = prefs[Keys.TOUCH_EFFECT]
+                if (existingTouch == null || existingTouch == TouchTypingEffect.NONE.name) {
                     prefs[Keys.TOUCH_EFFECT] = TouchTypingEffect.TOUCH_SHOCKWAVE_RING.name
                 }
                 if (!prefs.contains(Keys.SHOW_KEY_BORDERS)) {

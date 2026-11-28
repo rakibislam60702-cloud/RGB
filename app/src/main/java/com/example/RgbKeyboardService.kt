@@ -343,6 +343,7 @@ class RgbKeyboardService : InputMethodService() {
         serviceScope.launch {
             trialLicenseManager.licenseState.collect { state ->
                 currentLicenseState = state
+                syncTrialVisualStateFromService(state)
                 applyTrialLockState()
             }
         }
@@ -678,7 +679,11 @@ class RgbKeyboardService : InputMethodService() {
         clipboardManager.pruneExpiredClips()
         clipboardManager.captureCurrentPrimaryClip()
         // Synchronously load saved settings, language, and photo wallpaper before drawing so IME switches never flash defaults
-        currentLicenseState = trialLicenseManager.refreshState()
+        currentLicenseState = if (!currentLicenseState.isServerVerified || !trialLicenseManager.isFirebaseConnected.value) {
+            trialLicenseManager.syncNowOnLaunchOrServiceStart()
+        } else {
+            trialLicenseManager.refreshState()
+        }
         currentSettings = preferencesRepository.getCachedSettingsSnapshot()
         currentPhotoTheme = customBackgroundManager.reloadFromPrefs()
         applySettingsToViews(currentSettings)
@@ -707,6 +712,21 @@ class RgbKeyboardService : InputMethodService() {
     }
 
     private fun syncTrialVisualStateFromService(state: LicenseUiState) {
+        if (!state.isServerVerified) {
+            // Keep Normal Black / No Animation in memory while initial server verification is pending
+            val lockedSettings = currentSettings.copy(
+                effect = RgbEffect.NORMAL_DEFAULT,
+                touchEffect = TouchTypingEffect.NONE
+            )
+            if (lockedSettings != currentSettings) {
+                currentSettings = lockedSettings
+                keyboardView?.updateSettings(lockedSettings)
+            }
+            if (!currentPhotoTheme.hasCustomGalleryPhoto && currentPhotoTheme.hasPhoto) {
+                keyboardView?.updatePhotoTheme(CustomPhotoTheme())
+            }
+            return
+        }
         if (!state.isDeviceBlocked && state.isVipActive) {
             serviceScope.launch(Dispatchers.IO) {
                 preferencesRepository.resetPostTrialRevertFlag()

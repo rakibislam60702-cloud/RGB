@@ -204,7 +204,7 @@ fun DeviceInfoScreen(
                                 .background(if (isFirebaseConnected) NeonEmerald else NeonAmber)
                         )
                         Text(
-                            text = if (isFirebaseConnected) "Connected & Auto-Syncing" else "Offline",
+                            text = if (isFirebaseConnected) "Online • Connected" else "Offline",
                             fontFamily = PlusJakartaSansFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -399,7 +399,7 @@ fun DeviceInfoScreen(
             ) {
                 DeviceInfoKeyValueRow(
                     label = "Connection Status",
-                    value = if (isFirebaseConnected) "Connected & Auto-Syncing" else "Offline",
+                    value = if (isFirebaseConnected) "Online • Connected & Auto-Syncing" else "Offline",
                     valueColor = if (isFirebaseConnected) NeonEmerald else NeonAmber
                 )
                 DeviceInfoKeyValueRow(

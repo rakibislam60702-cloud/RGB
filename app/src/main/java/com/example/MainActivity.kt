@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -37,21 +38,29 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PermDeviceInformation
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.PermDeviceInformation
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
@@ -108,12 +117,24 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.FlagshipCyanMagentaBrush
+import com.example.ui.theme.FlagshipEmeraldCyanBrush
+import com.example.ui.theme.FlagshipGoldAmberBrush
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassCardInner
 import com.example.ui.theme.GlassCardSelected
+import com.example.ui.theme.GlassCardSurface
 import com.example.ui.theme.GlassNavSurface
+import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.NotoSansBengaliFamily
+import com.example.ui.theme.PlusJakartaSansFamily
+import com.example.ui.theme.SpaceGroteskFamily
+import com.example.ui.theme.luminousGlassCard
 import androidx.compose.ui.graphics.Color as ComposeColor
 import com.example.security.AntiTamperGuard
 import com.example.ui.theme.ProRgbKeyboardTheme
@@ -329,6 +350,12 @@ fun ProRgbKeyboardApp(
     LaunchedEffect(licenseState.isAllUnlocked) {
         if (licenseState.isAllUnlocked) {
             showVipUnlockModal = false
+        }
+    }
+
+    LaunchedEffect(currentTab) {
+        if (currentTab == StudioTab.DEVICE_INFO) {
+            viewModel.syncDeviceInfoOnResume()
         }
     }
 
@@ -600,45 +627,207 @@ fun ProRgbKeyboardApp(
                 }
             }
 
-            // Stage 1: Clean One-Time Startup Setup Stepper (requests Mic + Phone + Notifications once together & hides forever)
-            if (showStartupStepper) {
-                StartupSetupStepper(
-                    imeStatus = imeStatus,
-                    onOpenImeSettings = openImeSettings,
-                    onShowImePicker = showImePicker,
-                    onCompleteSetup = viewModel::completeStartupStepper
+            // Stage 0: Mandatory Internet & Server Verification Gate on First Launch / Clear Data
+            if (!licenseState.isServerVerified) {
+                ServerVerificationGateOverlay(
+                    licenseState = licenseState,
+                    onRetry = viewModel::retryServerVerification
                 )
+            } else {
+                // Stage 1: Clean One-Time Startup Setup Stepper (requests Mic + Phone + Notifications once together & hides forever)
+                if (showStartupStepper) {
+                    StartupSetupStepper(
+                        imeStatus = imeStatus,
+                        onOpenImeSettings = openImeSettings,
+                        onShowImePicker = showImePicker,
+                        onCompleteSetup = viewModel::completeStartupStepper
+                    )
+                }
+
+                // Stage 2: 100% Silent Bouncing Green/Red Arrow Feature Tour with fixed top-right "Skip ✕"
+                if (!showStartupStepper && showFeatureTour && !showVipUnlockModal) {
+                    SilentFeatureTourOverlay(
+                        coordinates = featureTourCoordinates,
+                        imeStatus = imeStatus,
+                        onActiveTargetChanged = { activeTourTarget = it },
+                        onFinishOrSkip = viewModel::finishOrSkipFeatureTour
+                    )
+                }
+
+                // Stage 3: Auto-Disappearing Final Lifetime VIP Banner (fades out completely after 3 seconds, non-blocking)
+                FinalLifetimeVipAutoBanner(
+                    visible = showFinalVipBanner,
+                    freeTrialDays = licenseState.adminConfig.freeTrialDays
+                )
+
+                // Dismissible 2-Card Dynamic Remote Pricing VIP Unlock Modal (Card 1 RGB/VIP + Card 2 Indian Romanized Bengali)
+                if (showVipUnlockModal && !licenseState.isAllUnlocked) {
+                    LifetimeUnlockScreen(
+                        licenseState = licenseState,
+                        initialFocus = unlockModalFocus,
+                        generateDiscountedAmount = viewModel::generateDiscountedUniqueAmount,
+                        registerPendingPayment = viewModel::registerPendingPayment,
+                        buildUpiQrPayload = viewModel::buildUpiQrPayload,
+                        createUpiPaymentIntent = viewModel::createOfficialUpiIntent,
+                        onVerifyUpiResult = viewModel::verifyUpiPaymentResult,
+                        onDismiss = { showVipUnlockModal = false }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServerVerificationGateOverlay(
+    licenseState: LicenseUiState,
+    onRetry: () -> Unit
+) {
+    val isConnecting = licenseState.isVerifyingServer
+    val titleText = if (isConnecting) {
+        "Connecting to Cloud Server..."
+    } else {
+        "Internet Connection Required"
+    }
+    val messageText = if (isConnecting) {
+        "Verifying your device license and syncing trial status with cloud auto-sync."
+    } else {
+        licenseState.verificationErrorMessage ?: "Internet connection required to connect and start trial"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ComposeColor(0xE8060914))
+            .clickable(enabled = true, onClick = {})
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 460.dp)
+                .luminousGlassCard(
+                    shape = RoundedCornerShape(26.dp),
+                    borderBrush = if (isConnecting) FlagshipEmeraldCyanBrush else FlagshipGoldAmberBrush,
+                    borderWidth = 1.5.dp,
+                    glowColor = if (isConnecting) NeonCyan else NeonAmber,
+                    glowElevation = 18.dp,
+                    surfaceColor = GlassCardSurface
+                )
+                .padding(24.dp)
+                .testTag("server_verification_gate_overlay"),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isConnecting) NeonCyan.copy(alpha = 0.16f) else NeonAmber.copy(alpha = 0.16f)
+                    )
+                    .border(
+                        1.5.dp,
+                        if (isConnecting) NeonCyan else NeonAmber,
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isConnecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(30.dp),
+                        color = NeonCyan,
+                        strokeWidth = 3.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.WifiOff,
+                        contentDescription = "Internet connection required",
+                        tint = NeonAmber,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
             }
 
-            // Stage 2: 100% Silent Bouncing Green/Red Arrow Feature Tour with fixed top-right "Skip ✕"
-            if (!showStartupStepper && showFeatureTour && !showVipUnlockModal) {
-                SilentFeatureTourOverlay(
-                    coordinates = featureTourCoordinates,
-                    imeStatus = imeStatus,
-                    onActiveTargetChanged = { activeTourTarget = it },
-                    onFinishOrSkip = viewModel::finishOrSkipFeatureTour
-                )
-            }
-
-            // Stage 3: Auto-Disappearing Final Lifetime VIP Banner (fades out completely after 3 seconds, non-blocking)
-            FinalLifetimeVipAutoBanner(
-                visible = showFinalVipBanner,
-                freeTrialDays = licenseState.adminConfig.freeTrialDays
+            Text(
+                text = titleText,
+                fontFamily = SpaceGroteskFamily,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = ComposeColor.White,
+                textAlign = TextAlign.Center
             )
 
-            // Dismissible 2-Card Dynamic Remote Pricing VIP Unlock Modal (Card 1 RGB/VIP + Card 2 Indian Romanized Bengali)
-            if (showVipUnlockModal && !licenseState.isAllUnlocked) {
-                LifetimeUnlockScreen(
-                    licenseState = licenseState,
-                    initialFocus = unlockModalFocus,
-                    generateDiscountedAmount = viewModel::generateDiscountedUniqueAmount,
-                    registerPendingPayment = viewModel::registerPendingPayment,
-                    buildUpiQrPayload = viewModel::buildUpiQrPayload,
-                    createUpiPaymentIntent = viewModel::createOfficialUpiIntent,
-                    onVerifyUpiResult = viewModel::verifyUpiPaymentResult,
-                    onDismiss = { showVipUnlockModal = false }
+            Text(
+                text = messageText,
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 20.sp,
+                color = if (isConnecting) ComposeColor.White.copy(alpha = 0.85f) else NeonAmber,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("server_verification_gate_message")
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(GlassCardInner)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Device RK-ID",
+                    fontFamily = PlusJakartaSansFamily,
+                    fontSize = 12.sp,
+                    color = ComposeColor.White.copy(alpha = 0.75f)
+                )
+                Text(
+                    text = licenseState.deviceId,
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonCyan
                 )
             }
+
+            Button(
+                onClick = onRetry,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isConnecting) NeonEmerald else NeonCyan,
+                    contentColor = ComposeColor(0xFF040914)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("btn_retry_server_verification")
+            ) {
+                Icon(
+                    imageVector = if (isConnecting) Icons.Filled.CloudSync else Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (isConnecting) "Re-check Connection" else "Retry Connection",
+                    fontFamily = PlusJakartaSansFamily,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            Text(
+                text = "Cloud Auto-Sync connects automatically once active internet is detected.",
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 11.5.sp,
+                color = ComposeColor.White.copy(alpha = 0.68f),
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

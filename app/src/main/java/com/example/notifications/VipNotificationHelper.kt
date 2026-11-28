@@ -46,7 +46,7 @@ object VipNotificationHelper {
         nowMs: Long = System.currentTimeMillis()
     ) {
         if (!hasNotificationPermission(context)) return
-        if (state.isDeviceBlocked) return
+        if (!state.isServerVerified || state.isDeviceBlocked) return
 
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val firstObserved = prefs.getLong(KEY_FIRST_OBSERVED_MS, 0L).let { existing ->

@@ -157,6 +157,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         trialLicenseManager.syncStorageInBackground(forcePersistToDocuments = false)
         refreshImeStatus()
         refreshLicenseState()
+        viewModelScope.launch {
+            trialLicenseManager.licenseState.collect { state ->
+                syncLicenseVisualLifecycle(state)
+            }
+        }
         startTrialCountdownTicker()
     }
 
@@ -186,8 +191,16 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         syncLicenseVisualLifecycle(state)
     }
 
+    fun retryServerVerification() {
+        val state = trialLicenseManager.retryServerVerification()
+        syncLicenseVisualLifecycle(state)
+    }
+
     private fun syncLicenseVisualLifecycle(state: LicenseUiState) {
         enforceBanglishVipLockIfExpired(state)
+        if (!state.isServerVerified) {
+            return
+        }
         if (!state.isDeviceBlocked && state.isVipActive) {
             viewModelScope.launch(Dispatchers.IO) {
                 repository.resetPostTrialRevertFlag()

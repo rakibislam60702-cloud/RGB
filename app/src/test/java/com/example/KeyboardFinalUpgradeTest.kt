@@ -882,6 +882,132 @@ class KeyboardFinalUpgradeTest {
             resetSingleton()
         }
     }
+
+    @Test
+    fun `unverified offline first launch blocks trial and server snapshot enforces prior expiry after clear data`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val resetSingleton = {
+            TrialLicenseManager::class.java.getDeclaredField("instance").apply {
+                isAccessible = true
+                set(null, null)
+            }
+        }
+        resetSingleton()
+        TrialLicenseManager.forceRequireServerVerificationInTest = true
+        try {
+            val prefs = context.getSharedPreferences("rakib_trial_license_prefs", Context.MODE_PRIVATE)
+            prefs.edit().clear().commit()
+
+            val manager = TrialLicenseManager.getInstance(context)
+            val initialState = manager.refreshState()
+
+            assertFalse("Unverified fresh/clear-data launch must NOT start offline trial", initialState.isServerVerified)
+            assertFalse("Unverified launch must NOT grant VIP", initialState.isVipActive)
+            assertTrue("Unverified launch must stay in free standard mode", initialState.isFreeStandardMode)
+            assertEquals(
+                "Internet connection required to connect and start trial",
+                initialState.verificationErrorMessage
+            )
+
+            // Simulate server returning an existing expired record after Clear Data / Reinstall
+            val applyMethod = TrialLicenseManager::class.java.getDeclaredMethod(
+                "applyRemoteDeviceSnapshot",
+                com.example.data.RemoteDeviceSnapshot::class.java
+            ).apply { isAccessible = true }
+
+            val tenDaysAgo = System.currentTimeMillis() - (10L * 86_400_000L)
+            applyMethod.invoke(
+                manager,
+                com.example.data.RemoteDeviceSnapshot(
+                    exists = true,
+                    firstInstallTimestampMs = tenDaysAgo,
+                    firstInstallAtMs = tenDaysAgo,
+                    trialStartedAtMs = tenDaysAgo,
+                    trialExpiresAtMs = tenDaysAgo + (7L * 86_400_000L),
+                    trialUsed = true,
+                    trialPolicyVersion = 5,
+                    vipStatus = "expired",
+                    explicitLifetime = false
+                )
+            )
+            val afterExpiredSync = manager.refreshState()
+            assertTrue(afterExpiredSync.isServerVerified)
+            assertTrue("Server-expired device must stay expired after Clear Data", afterExpiredSync.isTrialExpired)
+            assertFalse(afterExpiredSync.isVipActive)
+            assertEquals(0L, afterExpiredSync.remainingMillis)
+
+            // Now simulate a genuinely new device (exists = false) on a fresh cleared prefs state
+            resetSingleton()
+            prefs.edit().clear().commit()
+            val freshManager = TrialLicenseManager.getInstance(context)
+            assertFalse(freshManager.refreshState().isServerVerified)
+            applyMethod.invoke(
+                freshManager,
+                com.example.data.RemoteDeviceSnapshot(exists = false)
+            )
+            val newDeviceState = freshManager.refreshState()
+            assertTrue(newDeviceState.isServerVerified)
+            assertFalse("Genuinely new verified device receives full 7-day trial", newDeviceState.isTrialExpired)
+            assertTrue(newDeviceState.isVipActive)
+            assertTrue(newDeviceState.remainingSeconds >= 6L * 86_400L + 86_300L)
+        } finally {
+            TrialLicenseManager.forceRequireServerVerificationInTest = false
+            resetSingleton()
+        }
+    }
+
+    @Test
+    fun `anti tamper guard v2 HMAC detects forging server_verified_once`() {
+        val now = 1_770_000_000_000L
+        val hmac = AntiTamperGuard.computePrefsIntegrityHmacV2(
+            deviceId = "RK-1234ABCD",
+            rawAndroidId = "android-id",
+            packageName = AntiTamperGuard.EXPECTED_PACKAGE_NAME,
+            isLifetimeUnlocked = false,
+            isBanglishLifetimeUnlocked = false,
+            banglishExpiryMs = 0L,
+            vipExpiryMs = 0L,
+            adminGrantedVip = false,
+            adminAllFreeDevice = false,
+            adminGlobalAllFree = false,
+            deviceCustomExpiryMs = 0L,
+            unlockMethod = null,
+            unlockTxnId = null,
+            isDeviceBlocked = false,
+            firstInstallTimestampMs = now,
+            maxSeenElapsedMs = 0L,
+            trialExpiredSticky = false,
+            reinstallDetected = false,
+            clockRollbackDetected = false,
+            isServerVerified = false
+        )
+
+        assertFalse(
+            AntiTamperGuard.verifyPrefsIntegrityHmacV2(
+                providedHmac = hmac,
+                deviceId = "RK-1234ABCD",
+                rawAndroidId = "android-id",
+                packageName = AntiTamperGuard.EXPECTED_PACKAGE_NAME,
+                isLifetimeUnlocked = false,
+                isBanglishLifetimeUnlocked = false,
+                banglishExpiryMs = 0L,
+                vipExpiryMs = 0L,
+                adminGrantedVip = false,
+                adminAllFreeDevice = false,
+                adminGlobalAllFree = false,
+                deviceCustomExpiryMs = 0L,
+                unlockMethod = null,
+                unlockTxnId = null,
+                isDeviceBlocked = false,
+                firstInstallTimestampMs = now,
+                maxSeenElapsedMs = 0L,
+                trialExpiredSticky = false,
+                reinstallDetected = false,
+                clockRollbackDetected = false,
+                isServerVerified = true
+            )
+        )
+    }
 }
 
 

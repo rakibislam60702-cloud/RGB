@@ -1,6 +1,9 @@
 package com.example.data
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import androidx.compose.runtime.Immutable
@@ -13,15 +16,22 @@ import com.google.firebase.database.MutableData
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.Transaction
 import com.google.firebase.database.ValueEventListener
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
 
 @Immutable
 data class PromoBannerConfig(
@@ -340,10 +350,33 @@ class FirebaseRemoteManager private constructor(context: Context) {
     private val firstInstallTransactionAttempted = AtomicBoolean(false)
     private val hasSyncedServerOffset = AtomicBoolean(false)
     private val serverTimeOffsetMs = AtomicLong(0L)
+    private val sdkConnected = AtomicBoolean(false)
+    private val restReachable = AtomicBoolean(false)
+    private val restSyncInFlight = AtomicBoolean(false)
+    private val networkCallbackRegistered = AtomicBoolean(false)
+    private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    private val _hasNetwork = MutableStateFlow(checkActiveNetwork())
+    val hasNetwork: StateFlow<Boolean> = _hasNetwork.asStateFlow()
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
     private val _lastSyncTimestampMs = MutableStateFlow(0L)
     val lastSyncTimestampMs: StateFlow<Long> = _lastSyncTimestampMs.asStateFlow()
+
+    @Volatile
+    private var activeDeviceId: String = ""
+
+    @Volatile
+    private var activeAdminConfigCallback: ((RemoteAdminConfig) -> Unit)? = null
+
+    @Volatile
+    private var activeDeviceSnapshotCallback: ((RemoteDeviceSnapshot) -> Unit)? = null
+
+    @Volatile
+    private var activePendingPaymentCallback: ((PendingPaymentSnapshot?) -> Unit)? = null
+
+    @Volatile
+    private var activeHandshakeCallback: ((Boolean, Boolean) -> Unit)? = null
 
     @Volatile
     private var database: FirebaseDatabase? = null
@@ -382,7 +415,79 @@ class FirebaseRemoteManager private constructor(context: Context) {
 
     fun getServerTimeOffsetMs(): Long = serverTimeOffsetMs.get()
 
-    /** Current server/UTC timestamp in milliseconds (local wall clock corrected by Firebase serverTimeOffset). */
+    fun checkActiveNetwork(): Boolean {
+        return runCatching {
+            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val active = cm.activeNetwork ?: return false
+                val caps = cm.getNetworkCapabilities(active) ?: return false
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+            } else {
+                @Suppress("DEPRECATION")
+                cm.activeNetworkInfo?.isConnected == true
+            }
+        }.getOrDefault(false).also { online ->
+            _hasNetwork.value = online
+            if (!online) {
+                restReachable.set(false)
+                _isConnected.value = false
+            }
+        }
+    }
+
+    private fun updateConnectedState() {
+        val onlineNet = checkActiveNetwork()
+        _isConnected.value = onlineNet && (sdkConnected.get() || restReachable.get())
+    }
+
+    private fun registerNetworkMonitorOnce() {
+        if (!networkCallbackRegistered.compareAndSet(false, true)) return
+        runCatching {
+            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        _hasNetwork.value = true
+                        runCatching { database?.goOnline() }
+                        triggerImmediateSync()
+                    }
+
+                    override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                        val hasNet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        _hasNetwork.value = hasNet
+                        if (hasNet) {
+                            runCatching { database?.goOnline() }
+                            if (!_isConnected.value) {
+                                triggerImmediateSync()
+                            }
+                        } else {
+                            restReachable.set(false)
+                            _isConnected.value = false
+                        }
+                    }
+
+                    override fun onLost(network: Network) {
+                        val stillOnline = checkActiveNetwork()
+                        if (!stillOnline) {
+                            sdkConnected.set(false)
+                            restReachable.set(false)
+                            _isConnected.value = false
+                        }
+                    }
+                })
+            }
+        }.onFailure {
+            networkCallbackRegistered.set(false)
+        }
+    }
+
+    /** Current server/UTC timestamp in milliseconds (local wall clock corrected by verified server offset). */
     fun serverNowMs(): Long {
         val localNow = System.currentTimeMillis()
         val offset = serverTimeOffsetMs.get()
@@ -408,7 +513,7 @@ class FirebaseRemoteManager private constructor(context: Context) {
                     database = db
                 }
             }.onFailure { err ->
-                Log.w(TAG, "Firebase Realtime Database init skipped/offline: ${err.message}")
+                Log.w(TAG, "Cloud sync init deferred: ${err.message}")
             }.getOrNull()
         }
     }
@@ -417,10 +522,26 @@ class FirebaseRemoteManager private constructor(context: Context) {
         deviceId: String,
         onAdminConfigChanged: (RemoteAdminConfig) -> Unit,
         onDeviceSnapshotChanged: (RemoteDeviceSnapshot) -> Unit,
-        onPendingPaymentChanged: (PendingPaymentSnapshot?) -> Unit = {}
+        onPendingPaymentChanged: (PendingPaymentSnapshot?) -> Unit = {},
+        onHandshakeResult: (Boolean, Boolean) -> Unit = { _, _ -> }
     ) {
         if (deviceId.isBlank()) return
-        if (!started.compareAndSet(false, true)) return
+        activeDeviceId = deviceId
+        activeAdminConfigCallback = onAdminConfigChanged
+        activeDeviceSnapshotCallback = onDeviceSnapshotChanged
+        activePendingPaymentCallback = onPendingPaymentChanged
+        activeHandshakeCallback = onHandshakeResult
+
+        registerNetworkMonitorOnce()
+        checkActiveNetwork()
+
+        if (!started.compareAndSet(false, true)) {
+            runCatching { database?.goOnline() }
+            triggerImmediateSync()
+            return
+        }
+
+        triggerImmediateSync()
 
         val db = getDatabaseOrNull()
         if (db == null) {
@@ -429,6 +550,8 @@ class FirebaseRemoteManager private constructor(context: Context) {
         }
 
         try {
+            db.goOnline()
+
             // 1. Live server clock offset (.info/serverTimeOffset) to defeat phone date tampering
             val oRef = db.getReference(".info/serverTimeOffset")
             val oListener = object : ValueEventListener {
@@ -439,7 +562,7 @@ class FirebaseRemoteManager private constructor(context: Context) {
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w(TAG, "serverTimeOffset listener cancelled: ${error.message}")
+                    Log.w(TAG, "Clock offset listener cancelled")
                 }
             }
             offsetRef = oRef
@@ -452,8 +575,10 @@ class FirebaseRemoteManager private constructor(context: Context) {
             val cListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val connected = snapshot.readBooleanOrNull() ?: false
-                    _isConnected.value = connected
+                    sdkConnected.set(connected)
                     if (connected) {
+                        _hasNetwork.value = true
+                        _isConnected.value = true
                         runCatching {
                             devRef.onDisconnect().updateChildren(
                                 mapOf(
@@ -472,11 +597,14 @@ class FirebaseRemoteManager private constructor(context: Context) {
                                 _lastSyncTimestampMs.value = System.currentTimeMillis()
                             }
                         }
+                    } else {
+                        updateConnectedState()
                     }
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w(TAG, "connected listener cancelled: ${error.message}")
+                    sdkConnected.set(false)
+                    updateConnectedState()
                 }
             }
             connectedRef = cRef
@@ -487,12 +615,15 @@ class FirebaseRemoteManager private constructor(context: Context) {
             val cfgRef = db.getReference(NODE_ADMIN_CONFIG)
             val cfgListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
+                    if (checkActiveNetwork() && (sdkConnected.get() || restReachable.get())) {
+                        _lastSyncTimestampMs.value = System.currentTimeMillis()
+                    }
                     val parsed = parseAdminConfig(snapshot)
                     onAdminConfigChanged(parsed)
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w(TAG, "admin_config listener cancelled: ${error.message}")
+                    Log.w(TAG, "Remote config listener cancelled")
                 }
             }
             adminConfigRef = cfgRef
@@ -529,12 +660,15 @@ class FirebaseRemoteManager private constructor(context: Context) {
                         }
                     }
 
+                    if (checkActiveNetwork() && (sdkConnected.get() || restReachable.get())) {
+                        _lastSyncTimestampMs.value = System.currentTimeMillis()
+                    }
                     val parsed = parseDeviceSnapshot(snapshot)
                     onDeviceSnapshotChanged(parsed)
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w(TAG, "device listener cancelled for $deviceId: ${error.message}")
+                    Log.w(TAG, "Device state listener cancelled")
                 }
             }
             deviceRef = devRef
@@ -550,16 +684,168 @@ class FirebaseRemoteManager private constructor(context: Context) {
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w(TAG, "pending_payments listener cancelled for $deviceId: ${error.message}")
+                    Log.w(TAG, "Payment status listener cancelled")
                 }
             }
             pendingPaymentRef = payRef
             pendingPaymentListener = payListener
             payRef.addValueEventListener(payListener)
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to attach Firebase listeners: ${t.message}")
+            Log.w(TAG, "Cloud listener setup deferred")
             started.set(false)
         }
+    }
+
+    /**
+     * Performs a direct HTTPS handshake against the backend database so connectivity,
+     * server UTC clock, admin config, and device trial/VIP status sync immediately on launch,
+     * resume, network reconnect, and retry even when persistent WebSockets lag.
+     */
+    fun triggerImmediateSync() {
+        val deviceId = activeDeviceId
+        if (deviceId.isBlank()) return
+        if (!checkActiveNetwork()) {
+            restReachable.set(false)
+            _isConnected.value = false
+            activeHandshakeCallback?.invoke(false, false)
+            return
+        }
+        if (!restSyncInFlight.compareAndSet(false, true)) return
+        ioExecutor.execute {
+            try {
+                com.example.security.AntiTamperGuard.verifyOrTerminate(appContext)
+                if (!checkActiveNetwork()) {
+                    restReachable.set(false)
+                    _isConnected.value = false
+                    activeHandshakeCallback?.invoke(false, false)
+                    return@execute
+                }
+                val adminRes = httpGetJson("${DATABASE_URL}${NODE_ADMIN_CONFIG}.json")
+                val devRes = httpGetJson("${DATABASE_URL}${NODE_DEVICES}/$deviceId.json")
+                val payRes = httpGetJson("${DATABASE_URL}${NODE_PENDING_PAYMENTS}/$deviceId.json")
+
+                val serverHeaderMs = maxOf(adminRes.serverDateMs, devRes.serverDateMs)
+                if (serverHeaderMs >= MIN_VALID_EPOCH_MS) {
+                    serverTimeOffsetMs.set(serverHeaderMs - System.currentTimeMillis())
+                    hasSyncedServerOffset.set(true)
+                }
+
+                if (adminRes.success && devRes.success) {
+                    restReachable.set(true)
+                    _hasNetwork.value = true
+                    _isConnected.value = true
+                    _lastSyncTimestampMs.value = System.currentTimeMillis()
+
+                    val parsedConfig = parseAdminConfigJson(adminRes.json)
+                    val parsedDevice = parseDeviceSnapshotJson(devRes.json)
+                    val parsedPayment = if (payRes.success) parsePendingPaymentJson(payRes.json) else null
+
+                    activeAdminConfigCallback?.invoke(parsedConfig)
+                    activeDeviceSnapshotCallback?.invoke(parsedDevice)
+                    if (payRes.success) {
+                        activePendingPaymentCallback?.invoke(parsedPayment)
+                    }
+                    activeHandshakeCallback?.invoke(true, true)
+                } else {
+                    restReachable.set(false)
+                    updateConnectedState()
+                    activeHandshakeCallback?.invoke(false, checkActiveNetwork())
+                }
+            } catch (_: Throwable) {
+                restReachable.set(false)
+                updateConnectedState()
+                activeHandshakeCallback?.invoke(false, checkActiveNetwork())
+            } finally {
+                restSyncInFlight.set(false)
+            }
+        }
+    }
+
+    private data class RestGetResult(
+        val success: Boolean,
+        val json: JSONObject?,
+        val serverDateMs: Long
+    )
+
+    private fun httpGetJson(urlStr: String): RestGetResult {
+        var conn: HttpsURLConnection? = null
+        return try {
+            val url = URL(urlStr)
+            conn = (url.openConnection() as HttpsURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 7_000
+                readTimeout = 7_000
+                useCaches = false
+                setRequestProperty("Accept", "application/json")
+            }
+            val code = conn.responseCode
+            val serverDate = conn.date.takeIf { it >= MIN_VALID_EPOCH_MS } ?: 0L
+            if (code in 200..299) {
+                val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }.trim()
+                val obj = if (body.isEmpty() || body == "null") null else runCatching { JSONObject(body) }.getOrNull()
+                RestGetResult(success = true, json = obj, serverDateMs = serverDate)
+            } else {
+                RestGetResult(success = false, json = null, serverDateMs = serverDate)
+            }
+        } catch (_: Throwable) {
+            RestGetResult(success = false, json = null, serverDateMs = 0L)
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    private fun httpPatchJsonAsync(path: String, payload: Map<String, Any>) {
+        if (!checkActiveNetwork()) return
+        ioExecutor.execute {
+            var conn: HttpsURLConnection? = null
+            try {
+                val url = URL("${DATABASE_URL}$path.json")
+                conn = (url.openConnection() as HttpsURLConnection).apply {
+                    requestMethod = "PATCH"
+                    connectTimeout = 7_000
+                    readTimeout = 7_000
+                    doOutput = true
+                    useCaches = false
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                val jsonBody = mapToJsonObject(payload, serverNowMs()).toString()
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(jsonBody)
+                    writer.flush()
+                }
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    restReachable.set(true)
+                    _hasNetwork.value = true
+                    _isConnected.value = true
+                    _lastSyncTimestampMs.value = System.currentTimeMillis()
+                }
+            } catch (_: Throwable) {
+                // SDK offline persistence / next retry handles transient transport failures
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    private fun mapToJsonObject(map: Map<String, Any>, resolvedServerNowMs: Long): JSONObject {
+        val root = JSONObject()
+        map.forEach { (rawKey, rawVal) ->
+            val value = if (rawVal == ServerValue.TIMESTAMP) resolvedServerNowMs else rawVal
+            if (rawKey.contains('/')) {
+                val parts = rawKey.split('/').filter { it.isNotEmpty() }
+                var cursor = root
+                for (i in 0 until parts.lastIndex) {
+                    val segment = parts[i]
+                    val next = cursor.optJSONObject(segment) ?: JSONObject().also { cursor.put(segment, it) }
+                    cursor = next
+                }
+                cursor.put(parts.last(), value)
+            } else {
+                root.put(rawKey, value)
+            }
+        }
+        return root
     }
 
     /**
@@ -576,24 +862,29 @@ class FirebaseRemoteManager private constructor(context: Context) {
         txnRef: String
     ) {
         if (deviceId.isBlank()) return
-        val db = getDatabaseOrNull() ?: return
-        runCatching {
-            val payRef = db.getReference(NODE_PENDING_PAYMENTS).child(deviceId)
-            val payload = hashMapOf<String, Any>(
-                FIELD_DEVICE_ID to deviceId,
-                FIELD_DEVICE_MODEL to Build.MODEL.orEmpty().trim().ifBlank { "UNKNOWN_MODEL" },
-                FIELD_PLAN_TYPE to planType,
-                FIELD_BASE_AMOUNT to baseAmount,
-                FIELD_UNIQUE_AMOUNT to uniqueAmountFormatted,
-                FIELD_UNIQUE_AMOUNT_NUM to (uniqueAmountFormatted.toDoubleOrNull() ?: baseAmount.toDouble()),
-                FIELD_DURATION_DAYS to durationDays,
-                FIELD_TXN_REF to txnRef,
-                FIELD_STATUS to STATUS_PAYMENT_PENDING,
-                FIELD_CREATED_AT to ServerValue.TIMESTAMP
-            )
-            payRef.setValue(payload)
-        }.onFailure { err ->
-            Log.w(TAG, "Failed to submit pending payment: ${err.message}")
+        val payload = hashMapOf<String, Any>(
+            FIELD_DEVICE_ID to deviceId,
+            FIELD_DEVICE_MODEL to Build.MODEL.orEmpty().trim().ifBlank { "UNKNOWN_MODEL" },
+            FIELD_PLAN_TYPE to planType,
+            FIELD_BASE_AMOUNT to baseAmount,
+            FIELD_UNIQUE_AMOUNT to uniqueAmountFormatted,
+            FIELD_UNIQUE_AMOUNT_NUM to (uniqueAmountFormatted.toDoubleOrNull() ?: baseAmount.toDouble()),
+            FIELD_DURATION_DAYS to durationDays,
+            FIELD_TXN_REF to txnRef,
+            FIELD_STATUS to STATUS_PAYMENT_PENDING,
+            FIELD_CREATED_AT to ServerValue.TIMESTAMP
+        )
+        val db = getDatabaseOrNull()
+        if (db != null) {
+            runCatching {
+                val payRef = db.getReference(NODE_PENDING_PAYMENTS).child(deviceId)
+                payRef.setValue(payload)
+            }.onFailure {
+                Log.w(TAG, "Failed to submit pending payment via SDK")
+            }
+        }
+        if (checkActiveNetwork() && (!sdkConnected.get() || db == null)) {
+            httpPatchJsonAsync("$NODE_PENDING_PAYMENTS/$deviceId", payload)
         }
     }
 
@@ -673,9 +964,8 @@ class FirebaseRemoteManager private constructor(context: Context) {
         integrityStatus: String = "verified"
     ) {
         if (deviceId.isBlank()) return
-        val db = getDatabaseOrNull() ?: return
+        val db = getDatabaseOrNull()
         runCatching {
-            val devRef = db.getReference(NODE_DEVICES).child(deviceId)
             val model = Build.MODEL.orEmpty().trim().ifBlank { "UNKNOWN_MODEL" }
             val manufacturer = normalizeManufacturerName(Build.MANUFACTURER)
             val cleanDeviceName = buildCleanDeviceName(Build.MANUFACTURER, model)
@@ -733,16 +1023,41 @@ class FirebaseRemoteManager private constructor(context: Context) {
                 }
             }
 
-            devRef.updateChildren(payload)
-                .addOnSuccessListener {
-                    _lastSyncTimestampMs.value = System.currentTimeMillis()
-                }
-            if (_isConnected.value) {
+            if (db != null) {
+                val devRef = db.getReference(NODE_DEVICES).child(deviceId)
+                devRef.updateChildren(payload)
+                    .addOnSuccessListener {
+                        sdkConnected.set(true)
+                        _hasNetwork.value = true
+                        _isConnected.value = true
+                        _lastSyncTimestampMs.value = System.currentTimeMillis()
+                    }
+                ensureFirstInstallTimestampOnce(devRef)
+            }
+            if (checkActiveNetwork() && (!sdkConnected.get() || writeFirstInstallFields || db == null)) {
+                httpPatchJsonAsync("$NODE_DEVICES/$deviceId", payload)
+            } else if (_isConnected.value) {
                 _lastSyncTimestampMs.value = System.currentTimeMillis()
             }
-            ensureFirstInstallTimestampOnce(devRef)
-        }.onFailure { err ->
-            Log.w(TAG, "Failed to sync device status: ${err.message}")
+        }.onFailure {
+            if (checkActiveNetwork() && allowTrialAndVipStatusWrite) {
+                runCatching {
+                    val model = Build.MODEL.orEmpty().trim().ifBlank { "UNKNOWN_MODEL" }
+                    val fallback = hashMapOf<String, Any>(
+                        FIELD_RK_ID to deviceId,
+                        FIELD_DEVICE_ID to deviceId,
+                        FIELD_DEVICE_NAME to buildCleanDeviceName(Build.MANUFACTURER, model),
+                        FIELD_DEVICE_MODEL to model,
+                        FIELD_IS_ONLINE to true,
+                        FIELD_VIP_STATUS to vipStatus,
+                        FIELD_VIP_EXPIRY_TS to normalizeEpochMs(vipExpiryTimestampMs),
+                        FIELD_BANGLISH_EXPIRY_TS to normalizeEpochMs(banglishExpiryTimestampMs),
+                        FIELD_LIFETIME to isLifetime,
+                        FIELD_BLOCKED to isBlocked
+                    )
+                    httpPatchJsonAsync("$NODE_DEVICES/$deviceId", fallback)
+                }
+            }
         }
     }
 
@@ -1096,6 +1411,370 @@ class FirebaseRemoteManager private constructor(context: Context) {
         )
     }
 
+    private fun parseAdminConfigJson(root: JSONObject?): RemoteAdminConfig {
+        if (root == null) return RemoteAdminConfig()
+        val rawTrialDays = root.optIntOrNull(FIELD_FREE_TRIAL_DAYS)
+            ?: root.optIntOrNull(FIELD_DEFAULT_TRIAL_DAYS)
+        val freeTrialDays = rawTrialDays?.takeIf { it > 0 }?.coerceIn(1, 365)
+            ?: RemoteAdminConfig.DEFAULT_FREE_TRIAL_DAYS
+        val globalAllFree = root.optBooleanOrNull(FIELD_GLOBAL_ALL_FREE) ?: false
+        val vipPrice = root.optIntOrNull(FIELD_VIP_PRICE)?.coerceAtLeast(1)
+            ?: RemoteAdminConfig.DEFAULT_VIP_PRICE
+        val rawVipPlanType = root.optStringOrNull(FIELD_VIP_PLAN_TYPE)?.lowercase()
+        val rawVipDays = root.optIntOrNull(FIELD_VIP_DURATION_DAYS)
+        val vipDurationDays = when {
+            rawVipDays != null -> rawVipDays.coerceIn(0, 3650)
+            rawVipPlanType != null -> RemoteAdminConfig.planTypeToDefaultDays(rawVipPlanType)
+            else -> RemoteAdminConfig.DEFAULT_VIP_DURATION_DAYS
+        }
+        val vipPlanType = RemoteAdminConfig.durationDaysToPlanType(vipDurationDays)
+
+        val banglishPrice = root.optIntOrNull(FIELD_BANGLISH_PRICE)?.coerceAtLeast(1)
+            ?: RemoteAdminConfig.DEFAULT_BANGLISH_PRICE
+        val rawBanglishPlanType = root.optStringOrNull(FIELD_BANGLISH_PLAN_TYPE)?.lowercase()
+        val rawBanglishDays = root.optIntOrNull(FIELD_BANGLISH_DURATION_DAYS)
+        val banglishDurationDays = when {
+            rawBanglishDays != null -> rawBanglishDays.coerceIn(0, 3650)
+            rawBanglishPlanType != null -> RemoteAdminConfig.planTypeToDefaultDays(rawBanglishPlanType)
+            else -> RemoteAdminConfig.DEFAULT_BANGLISH_DURATION_DAYS
+        }
+        val banglishPlanType = RemoteAdminConfig.durationDaysToPlanType(banglishDurationDays)
+        val banglishDailyPrice = root.optIntOrNull(FIELD_BANGLISH_DAILY_PRICE)?.coerceAtLeast(1)
+            ?: RemoteAdminConfig.DEFAULT_BANGLISH_DAILY_PRICE
+        val banglishWeeklyPrice = root.optIntOrNull(FIELD_BANGLISH_WEEKLY_PRICE)?.coerceAtLeast(1)
+            ?: RemoteAdminConfig.DEFAULT_BANGLISH_WEEKLY_PRICE
+        val banglishMonthlyPrice = root.optIntOrNull(FIELD_BANGLISH_MONTHLY_PRICE)?.coerceAtLeast(1)
+            ?: banglishPrice
+
+        val customBanglishPlans = parseCustomBanglishPlansJson(root.opt(FIELD_BANGLISH_PLANS))
+        val freeNode = root.optJSONObject(FIELD_GLOBAL_FREE_FEATURES)
+        val globalFree = FreeFeatureOverrides(
+            rgbThemes = freeNode?.optBooleanOrNull(FEAT_RGB_THEMES) ?: false,
+            banglish = freeNode?.optBooleanOrNull(FEAT_BANGLISH) ?: false,
+            callBar = freeNode?.optBooleanOrNull(FEAT_CALL_BAR) ?: false,
+            rgbSticker = freeNode?.optBooleanOrNull(FEAT_RGB_STICKER) ?: false,
+            stylishFonts = freeNode?.optBooleanOrNull(FEAT_STYLISH_FONTS) ?: false,
+            aiHub = freeNode?.optBooleanOrNull(FEAT_AI_HUB) ?: false
+        )
+        val bannersNode = root.optJSONObject(FIELD_BANNERS)
+        val banners = PromoBannerConfig(
+            banner1Url = bannersNode?.optStringOrNull(FIELD_BANNER1_URL).orEmpty(),
+            banner1Image = bannersNode?.optStringOrNull(FIELD_BANNER1_IMAGE).orEmpty(),
+            banner1Title = bannersNode?.optStringOrNull(FIELD_BANNER1_TITLE)
+                ?: PromoBannerConfig.DEFAULT_BANNER1_TITLE,
+            banner1Subtitle = bannersNode?.optStringOrNull(FIELD_BANNER1_SUBTITLE)
+                ?: PromoBannerConfig.DEFAULT_BANNER1_SUBTITLE,
+            banner2Url = bannersNode?.optStringOrNull(FIELD_BANNER2_URL).orEmpty(),
+            banner2Image = bannersNode?.optStringOrNull(FIELD_BANNER2_IMAGE).orEmpty(),
+            banner2Title = bannersNode?.optStringOrNull(FIELD_BANNER2_TITLE)
+                ?: PromoBannerConfig.DEFAULT_BANNER2_TITLE,
+            banner2Subtitle = bannersNode?.optStringOrNull(FIELD_BANNER2_SUBTITLE)
+                ?: PromoBannerConfig.DEFAULT_BANNER2_SUBTITLE
+        )
+        val freeThemeIds = parseFreeThemeIdsJson(root.opt(FIELD_FREE_THEME_IDS))
+        val cloudThemes = parseCloudThemesJson(root.opt(FIELD_CLOUD_THEMES))
+        val cloudAnimations = parseCloudAnimationsJson(root.opt(FIELD_CLOUD_ANIMATIONS))
+        val offerNode = root.optJSONObject(FIELD_OFFER)
+        val offerTitle = offerNode?.optStringOrNull("title")
+            ?: root.optStringOrNull(FIELD_OFFER_TITLE).orEmpty()
+        val offerMessageBn = offerNode?.optStringOrNull("messageBn")
+            ?: root.optStringOrNull(FIELD_OFFER_MESSAGE_BN).orEmpty()
+        val offerMessageEn = offerNode?.optStringOrNull("messageEn")
+            ?: root.optStringOrNull(FIELD_OFFER_MESSAGE_EN).orEmpty()
+        val offerIntervalDays = (offerNode?.optIntOrNull("intervalDays")
+            ?: root.optIntOrNull(FIELD_OFFER_INTERVAL_DAYS)
+            ?: RemoteAdminConfig.DEFAULT_OFFER_INTERVAL_DAYS).coerceIn(4, 7)
+
+        return RemoteAdminConfig(
+            freeTrialDays = freeTrialDays,
+            globalAllFree = globalAllFree,
+            vipPrice = vipPrice,
+            vipDurationDays = vipDurationDays,
+            vipPlanType = vipPlanType,
+            banglishPrice = banglishPrice,
+            banglishDurationDays = banglishDurationDays,
+            banglishPlanType = banglishPlanType,
+            banglishDailyPrice = banglishDailyPrice,
+            banglishWeeklyPrice = banglishWeeklyPrice,
+            banglishMonthlyPrice = banglishMonthlyPrice,
+            banglishCustomPlans = customBanglishPlans,
+            globalFreeFeatures = globalFree,
+            banners = banners,
+            freeThemeIds = freeThemeIds,
+            cloudThemes = cloudThemes,
+            cloudAnimations = cloudAnimations,
+            offerTitle = offerTitle,
+            offerMessageBn = offerMessageBn,
+            offerMessageEn = offerMessageEn,
+            offerIntervalDays = offerIntervalDays
+        )
+    }
+
+    private fun parseFreeThemeIdsJson(raw: Any?): Set<String> {
+        if (raw == null || raw == JSONObject.NULL) return emptySet()
+        val result = linkedSetOf<String>()
+        when (raw) {
+            is JSONObject -> {
+                raw.keys().forEach { key ->
+                    val v = raw.opt(key)
+                    when (v) {
+                        is Boolean -> if (v && key.isNotBlank()) result.add(key.trim())
+                        is Number -> if (v.toInt() != 0 && key.isNotBlank()) result.add(key.trim())
+                        is String -> {
+                            val trimmed = v.trim()
+                            if (trimmed.equals("true", true) || trimmed == "1") {
+                                if (key.isNotBlank()) result.add(key.trim())
+                            } else if (trimmed.isNotEmpty() && !trimmed.equals("false", true)) {
+                                result.add(trimmed)
+                            }
+                        }
+                    }
+                }
+            }
+            is JSONArray -> {
+                for (i in 0 until raw.length()) {
+                    val s = raw.optString(i)?.trim().orEmpty()
+                    if (s.isNotEmpty() && s != "null") result.add(s)
+                }
+            }
+            is String -> raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { result.add(it) }
+        }
+        return result
+    }
+
+    private fun parseCloudThemesJson(raw: Any?): List<CloudThemeConfig> {
+        val list = mutableListOf<CloudThemeConfig>()
+        val entries: List<Pair<String, JSONObject>> = when (raw) {
+            is JSONObject -> raw.keys().asSequence().mapNotNull { k ->
+                raw.optJSONObject(k)?.let { k to it }
+            }.toList()
+            is JSONArray -> (0 until raw.length()).mapNotNull { idx ->
+                raw.optJSONObject(idx)?.let { idx.toString() to it }
+            }
+            else -> emptyList()
+        }
+        entries.forEach { (key, obj) ->
+            if (obj.optBooleanOrNull("enabled") == false) return@forEach
+            val id = obj.optStringOrNull("id") ?: key.trim()
+            val title = obj.optStringOrNull("title") ?: return@forEach
+            if (id.isBlank()) return@forEach
+            val colors = mutableListOf<Long>()
+            val cArr = obj.optJSONArray("colors")
+            if (cArr != null) {
+                for (i in 0 until cArr.length()) {
+                    val hex = cArr.optString(i)?.trim()?.removePrefix("#")
+                    val parsed = hex?.toLongOrNull(16)
+                    if (parsed != null) {
+                        colors.add(if (hex.length <= 6) (0xFF000000L or parsed) else parsed)
+                    }
+                }
+            }
+            list += CloudThemeConfig(
+                id = id,
+                title = title,
+                subtitle = obj.optStringOrNull("subtitle").orEmpty(),
+                category = obj.optStringOrNull("category") ?: "cyber",
+                imageUrl = obj.optStringOrNull("imageUrl") ?: obj.optStringOrNull("image").orEmpty(),
+                effectId = obj.optStringOrNull("effectId") ?: obj.optStringOrNull("effect") ?: "quantum_vortex",
+                touchEffectId = obj.optStringOrNull("touchEffectId") ?: obj.optStringOrNull("touchEffect") ?: "touch_spark",
+                paletteName = obj.optStringOrNull("palette") ?: "VICE_CITY_NEON",
+                previewColors = colors.ifEmpty { listOf(0xFF00E5FF, 0xFFFF2A85, 0xFF0C1022) },
+                isFree = obj.optBooleanOrNull("isFree") ?: false
+            )
+        }
+        return list
+    }
+
+    private fun parseCloudAnimationsJson(raw: Any?): List<CloudAnimationConfig> {
+        val list = mutableListOf<CloudAnimationConfig>()
+        val entries: List<Pair<String, JSONObject>> = when (raw) {
+            is JSONObject -> raw.keys().asSequence().mapNotNull { k ->
+                raw.optJSONObject(k)?.let { k to it }
+            }.toList()
+            is JSONArray -> (0 until raw.length()).mapNotNull { idx ->
+                raw.optJSONObject(idx)?.let { idx.toString() to it }
+            }
+            else -> emptyList()
+        }
+        entries.forEach { (key, obj) ->
+            if (obj.optBooleanOrNull("enabled") == false) return@forEach
+            val id = obj.optStringOrNull("id") ?: key.trim()
+            val title = obj.optStringOrNull("title") ?: return@forEach
+            if (id.isBlank()) return@forEach
+            list += CloudAnimationConfig(
+                id = id,
+                title = title,
+                subtitle = obj.optStringOrNull("subtitle").orEmpty(),
+                baseEffectId = obj.optStringOrNull("baseEffectId") ?: obj.optStringOrNull("effect") ?: "quantum_vortex",
+                paletteName = obj.optStringOrNull("palette") ?: "SPECTRUM_PRISM",
+                isFree = obj.optBooleanOrNull("isFree") ?: false
+            )
+        }
+        return list
+    }
+
+    private fun parseCustomBanglishPlansJson(raw: Any?): List<BanglishPlanOption> {
+        val result = mutableListOf<BanglishPlanOption>()
+        val entries: List<Pair<String, JSONObject>> = when (raw) {
+            is JSONObject -> raw.keys().asSequence().mapNotNull { k ->
+                raw.optJSONObject(k)?.let { k to it }
+            }.toList()
+            is JSONArray -> (0 until raw.length()).mapNotNull { idx ->
+                raw.optJSONObject(idx)?.let { idx.toString() to it }
+            }
+            else -> emptyList()
+        }
+        entries.forEach { (key, obj) ->
+            if (obj.optBooleanOrNull("enabled") == false) return@forEach
+            val price = obj.optIntOrNull("price")?.coerceAtLeast(1) ?: return@forEach
+            val days = obj.optIntOrNull("days")?.coerceIn(0, 3650)
+                ?: obj.optIntOrNull("durationDays")?.coerceIn(0, 3650)
+                ?: return@forEach
+            val id = key.ifBlank { "plan_${days}d" }
+            val labelBn = obj.optStringOrNull("labelBn") ?: obj.optStringOrNull("label") ?: when {
+                days <= 0 -> "লাইফটাইম"
+                days == 1 -> "১ দিন"
+                days == 7 -> "৭ দিন"
+                days == 30 -> "৩০ দিন"
+                else -> "${RemoteAdminConfig.toBengaliDigits(days)} দিন"
+            }
+            val labelEn = obj.optStringOrNull("labelEn") ?: when {
+                days <= 0 -> "Lifetime"
+                days == 1 -> "1 Day"
+                else -> "$days Days"
+            }
+            result += BanglishPlanOption(id = id, labelBn = labelBn, labelEn = labelEn, priceInr = price, durationDays = days)
+        }
+        return result.sortedBy { if (it.durationDays <= 0) Int.MAX_VALUE else it.durationDays }
+    }
+
+    private fun parseDeviceSnapshotJson(root: JSONObject?): RemoteDeviceSnapshot {
+        if (root == null) return RemoteDeviceSnapshot(exists = false)
+        val firstInstallAtTs = normalizeEpochMs(root.optLongOrNull(FIELD_FIRST_INSTALL_AT)).takeIf { it > 0L }
+        val firstInstallTs = normalizeEpochMs(
+            root.optLongOrNull(FIELD_FIRST_INSTALL_TS)
+                ?: root.optLongOrNull(FIELD_FIRST_INSTALL_AT)
+                ?: root.optLongOrNull(FIELD_INSTALLED_AT)
+        ).takeIf { it > 0L }
+        val trialStartedAtTs = normalizeEpochMs(root.optLongOrNull(FIELD_TRIAL_STARTED_AT)).takeIf { it > 0L }
+        val trialExpiresAtTs = normalizeEpochMs(root.optLongOrNull(FIELD_TRIAL_EXPIRES_AT)).takeIf { it > 0L }
+        val trialUsed = root.optBooleanOrNull(FIELD_TRIAL_USED)
+        val trialPolicyVersion = root.optIntOrNull(FIELD_TRIAL_POLICY_VERSION) ?: 0
+        val vipStatus = root.optStringOrNull(FIELD_VIP_STATUS)
+        val explicitLifetime = root.optBooleanOrNull(FIELD_LIFETIME)
+        val vipExpiryTs = normalizeEpochMs(root.optLongOrNull(FIELD_VIP_EXPIRY_TS))
+        val banglishExpiryTs = normalizeEpochMs(root.optLongOrNull(FIELD_BANGLISH_EXPIRY_TS))
+
+        val securityNode = root.optJSONObject(FIELD_SECURITY_FLAGS)
+        val securityFlags = RemoteSecurityFlags(
+            reinstallDetected = securityNode?.optBooleanOrNull("reinstallDetected") ?: false,
+            reinstallCount = (securityNode?.optIntOrNull("reinstallCount") ?: 0).coerceAtLeast(0),
+            clockRollbackDetected = securityNode?.optBooleanOrNull("clockRollbackDetected") ?: false,
+            clockRollbackCount = (securityNode?.optIntOrNull("clockRollbackCount") ?: 0).coerceAtLeast(0),
+            localTamperDetected = securityNode?.optBooleanOrNull("localTamperDetected") ?: false,
+            tamperBlocked = securityNode?.optBooleanOrNull("tamperBlocked") ?: false
+        )
+
+        val overridesNode = root.optJSONObject(FIELD_OVERRIDES)
+        val isBlocked = overridesNode?.optBooleanOrNull(FIELD_IS_BLOCKED)
+            ?: overridesNode?.optBooleanOrNull(FIELD_BLOCKED)
+            ?: overridesNode?.optBooleanOrNull(FIELD_DEVICE_LOCKED)
+            ?: root.optBooleanOrNull(FIELD_IS_BLOCKED)
+            ?: root.optBooleanOrNull(FIELD_BLOCKED)
+            ?: securityFlags.tamperBlocked
+        val adminFreeVip = overridesNode?.optBooleanOrNull(FIELD_ADMIN_FREE_VIP) ?: false
+        val adminAllFree = overridesNode?.optBooleanOrNull(FIELD_ADMIN_ALL_FREE) ?: false
+        val customExpiryTs = normalizeEpochMs(overridesNode?.optLongOrNull(FIELD_CUSTOM_EXPIRY_TS))
+        val allowedNode = overridesNode?.optJSONObject(FIELD_ALLOWED_FEATURES)
+        val allowed = DeviceFeatureAllowMap(
+            rgbThemes = allowedNode?.optBooleanOrNull(FEAT_RGB_THEMES),
+            banglish = allowedNode?.optBooleanOrNull(FEAT_BANGLISH),
+            callBar = allowedNode?.optBooleanOrNull(FEAT_CALL_BAR),
+            rgbSticker = allowedNode?.optBooleanOrNull(FEAT_RGB_STICKER),
+            stylishFonts = allowedNode?.optBooleanOrNull(FEAT_STYLISH_FONTS),
+            aiHub = allowedNode?.optBooleanOrNull(FEAT_AI_HUB)
+        )
+
+        return RemoteDeviceSnapshot(
+            exists = true,
+            firstInstallTimestampMs = firstInstallTs,
+            firstInstallAtMs = firstInstallAtTs,
+            trialStartedAtMs = trialStartedAtTs,
+            trialExpiresAtMs = trialExpiresAtTs,
+            trialUsed = trialUsed,
+            trialPolicyVersion = trialPolicyVersion,
+            vipStatus = vipStatus,
+            explicitLifetime = explicitLifetime,
+            vipExpiryTimestampMs = vipExpiryTs,
+            banglishExpiryTimestampMs = banglishExpiryTs,
+            isBlocked = isBlocked,
+            overrides = DeviceRemoteOverrides(
+                adminFreeVip = adminFreeVip,
+                adminAllFree = adminAllFree,
+                customExpiryTimestampMs = customExpiryTs,
+                isBlocked = isBlocked,
+                allowedFeatures = allowed
+            ),
+            securityFlags = securityFlags
+        )
+    }
+
+    private fun parsePendingPaymentJson(root: JSONObject?): PendingPaymentSnapshot? {
+        if (root == null) return null
+        val status = root.optStringOrNull(FIELD_STATUS).orEmpty()
+        val planType = root.optStringOrNull(FIELD_PLAN_TYPE).orEmpty()
+        val uniqueAmount = root.optStringOrNull(FIELD_UNIQUE_AMOUNT).orEmpty()
+        if (status.isBlank() && uniqueAmount.isBlank()) return null
+        return PendingPaymentSnapshot(
+            deviceId = root.optStringOrNull(FIELD_DEVICE_ID).orEmpty(),
+            planType = planType,
+            baseAmount = root.optIntOrNull(FIELD_BASE_AMOUNT) ?: 0,
+            uniqueAmount = uniqueAmount,
+            durationDays = root.optIntOrNull(FIELD_DURATION_DAYS) ?: 0,
+            txnRef = root.optStringOrNull(FIELD_TXN_REF).orEmpty(),
+            status = status,
+            createdAtMs = root.optLongOrNull(FIELD_CREATED_AT) ?: 0L
+        )
+    }
+
+    private fun JSONObject.optIntOrNull(key: String): Int? {
+        if (!has(key) || isNull(key)) return null
+        return when (val v = opt(key)) {
+            is Number -> v.toInt()
+            is String -> v.trim().toIntOrNull()
+            else -> null
+        }
+    }
+
+    private fun JSONObject.optLongOrNull(key: String): Long? {
+        if (!has(key) || isNull(key)) return null
+        return when (val v = opt(key)) {
+            is Number -> v.toLong()
+            is String -> v.trim().toLongOrNull()
+            else -> null
+        }
+    }
+
+    private fun JSONObject.optBooleanOrNull(key: String): Boolean? {
+        if (!has(key) || isNull(key)) return null
+        return when (val v = opt(key)) {
+            is Boolean -> v
+            is Number -> v.toInt() != 0
+            is String -> when (v.trim().lowercase()) {
+                "true", "1", "yes" -> true
+                "false", "0", "no" -> false
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    private fun JSONObject.optStringOrNull(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        val raw = opt(key)?.toString()?.trim()
+        return raw?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+    }
+
     private fun DataSnapshot.readIntOrNull(): Int? {
         return when (val v = value) {
             is Number -> v.toInt()
@@ -1131,7 +1810,7 @@ class FirebaseRemoteManager private constructor(context: Context) {
     }
 
     companion object {
-        private const val TAG = "FirebaseRemoteManager"
+        private const val TAG = "CloudRemoteSync"
         const val DATABASE_URL = "https://rakib-ai-keyboard-default-rtdb.firebaseio.com/"
 
         private const val NODE_ADMIN_CONFIG = "admin_config"

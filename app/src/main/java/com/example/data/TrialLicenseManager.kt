@@ -55,42 +55,46 @@ data class LicenseUiState(
     val isDeviceBlocked: Boolean = false,
     val adminConfig: RemoteAdminConfig = RemoteAdminConfig(),
     val deviceOverrides: DeviceRemoteOverrides = DeviceRemoteOverrides(),
-    val pendingPayment: PendingPaymentSnapshot? = null
+    val pendingPayment: PendingPaymentSnapshot? = null,
+    val isServerVerified: Boolean = true,
+    val isNetworkAvailable: Boolean = true,
+    val isVerifyingServer: Boolean = false,
+    val verificationErrorMessage: String? = null
 ) {
     /** True when admin unlocked everything globally (`globalAllFree`) or for this friend (`adminAllFree` / `adminFreeVip`). */
     val isGlobalOrAdminAllFree: Boolean
-        get() = !isDeviceBlocked && (isGlobalAllFree || isAdminGrantedVip || deviceOverrides.hasFullAdminFreeAccess)
+        get() = isServerVerified && !isDeviceBlocked && (isGlobalAllFree || isAdminGrantedVip || deviceOverrides.hasFullAdminFreeAccess)
 
     /** True ONLY when this device genuinely holds Lifetime VIP, Global All Free, or device adminAllFree. */
     val isTrueLifetimeDisplay: Boolean
-        get() = !isDeviceBlocked && (isLifetimeUnlocked || isGlobalAllFree || deviceOverrides.adminAllFree)
+        get() = isServerVerified && !isDeviceBlocked && (isLifetimeUnlocked || isGlobalAllFree || deviceOverrides.adminAllFree)
 
     /** True when user purchased Card 1 (RGB & VIP Features) as Lifetime or active timed pass. */
     val isVipFeaturesPaidActive: Boolean
-        get() = !isDeviceBlocked && (isLifetimeUnlocked || isMonthlyActive || isWeeklyActive)
+        get() = isServerVerified && !isDeviceBlocked && (isLifetimeUnlocked || isMonthlyActive || isWeeklyActive)
 
     /** True when user purchased Card 2 (Romanized Bengali) as Lifetime or active timed pass. */
     val isBanglishPaidActive: Boolean
-        get() = !isDeviceBlocked && (isBanglishLifetimeUnlocked || banglishRemainingSeconds > 0L)
+        get() = isServerVerified && !isDeviceBlocked && (isBanglishLifetimeUnlocked || banglishRemainingSeconds > 0L)
 
     /** True when both Card 1 and Card 2 are permanently unlocked (or global/admin all-free is active). */
     val isAllUnlocked: Boolean
-        get() = !isDeviceBlocked && (isGlobalOrAdminAllFree || (isLifetimeUnlocked && isBanglishLifetimeUnlocked))
+        get() = isServerVerified && !isDeviceBlocked && (isGlobalOrAdminAllFree || (isLifetimeUnlocked && isBanglishLifetimeUnlocked))
 
     /** True when user holds Paid Card 1 VIP or Global/Admin All-Free. */
     val isPaidOrAdminVip: Boolean
-        get() = !isDeviceBlocked && (isGlobalOrAdminAllFree || isVipFeaturesPaidActive)
+        get() = isServerVerified && !isDeviceBlocked && (isGlobalOrAdminAllFree || isVipFeaturesPaidActive)
 
     /** True during the active trial window OR with Paid VIP / Global or Admin All-Free. */
     val isVipActive: Boolean
-        get() = !isDeviceBlocked && (isPaidOrAdminVip || !isTrialExpired)
+        get() = isServerVerified && !isDeviceBlocked && (isPaidOrAdminVip || !isTrialExpired)
 
-    /** True after trial ends without active Card 1 VIP: keyboard defaults to Normal / Classic Black (No RGB). */
+    /** True after trial ends without active Card 1 VIP (or before initial server verification): keyboard defaults to Normal / Classic Black (No RGB). */
     val isFreeStandardMode: Boolean
-        get() = isDeviceBlocked || (!isPaidOrAdminVip && isTrialExpired)
+        get() = !isServerVerified || isDeviceBlocked || (!isPaidOrAdminVip && isTrialExpired)
 
     private fun resolveVipFeatureAccess(deviceOverride: Boolean?, globalFree: Boolean): Boolean {
-        if (isDeviceBlocked) return false
+        if (!isServerVerified || isDeviceBlocked) return false
         if (deviceOverride != null) return deviceOverride
         if (isGlobalOrAdminAllFree) return true
         return isVipFeaturesPaidActive || !isTrialExpired || globalFree
@@ -102,11 +106,11 @@ data class LicenseUiState(
 
     /**
      * Checks whether a specific theme combo, ambient animation, touch effect, banner, palette, or keycap
-     * item is unlocked via permanent free flag, active VIP/trial/override, or `/admin_config/freeThemeIds`.
+     * item is unlocked via permanent free flag, active VIP/trial/override, or server freeThemeIds.
      */
     fun isThemeItemUnlocked(themeId: String, isPermanentlyFree: Boolean = false): Boolean {
         if (isPermanentlyFree) return true
-        if (isDeviceBlocked) return false
+        if (!isServerVerified || isDeviceBlocked) return false
         if (isRgbThemesUnlocked) return true
         return themeId.isNotBlank() && adminConfig.freeThemeIds.any { it.equals(themeId, ignoreCase = true) }
     }
@@ -114,7 +118,7 @@ data class LicenseUiState(
     /** Independent Card 2 unlock check for Romanized Bengali (BN-EN): Card 1 VIP purchase excludes Banglish. */
     val isBanglishUnlocked: Boolean
         get() {
-            if (isDeviceBlocked) return false
+            if (!isServerVerified || isDeviceBlocked) return false
             val deviceOverride = deviceOverrides.allowedFeatures.banglish
             if (deviceOverride != null) return deviceOverride
             if (isGlobalOrAdminAllFree) return true
@@ -236,6 +240,7 @@ data class LicenseUiState(
     /** Flagship top-bar pill text reflecting Blocked, Global Free, Admin VIP, Lifetime VIP, Timed VIP, Trial, or Expired. */
     val formattedVipPillText: String
         get() = when {
+            !isServerVerified -> "🌐 VERIFY CONNECTION"
             isDeviceBlocked -> "🔒 BLOCKED"
             isGlobalAllFree -> "👑 ALL FREE VIP"
             isAdminGrantedVip || deviceOverrides.hasFullAdminFreeAccess -> "👑 ADMIN VIP"
@@ -354,6 +359,12 @@ class TrialLicenseManager private constructor(
     private var latestPendingPayment: PendingPaymentSnapshot? = null
 
     @Volatile
+    private var isVerifyingServerNow: Boolean = false
+
+    @Volatile
+    private var lastVerificationError: String? = null
+
+    @Volatile
     private var cachedCustomBanglishPlans: List<BanglishPlanOption> = emptyList()
 
     @Volatile
@@ -399,6 +410,7 @@ class TrialLicenseManager private constructor(
             key == KEY_REINSTALL_DETECTED ||
             key == KEY_CLOCK_ROLLBACK_DETECTED ||
             key == KEY_LOCAL_TAMPER_DETECTED ||
+            key == KEY_SERVER_VERIFIED ||
             key == KEY_ADMIN_FREE_TRIAL_DAYS ||
             key == KEY_ADMIN_VIP_PRICE ||
             key == KEY_ADMIN_VIP_DURATION_DAYS ||
@@ -428,48 +440,131 @@ class TrialLicenseManager private constructor(
             AntiTamperGuard.enforceTamperTermination(context, "Unverified VIP or subscription state")
         }
         migrateLegacyBannerTitleAndCleanState()
-        ensureLocalTrialSeededFast()
+        bootstrapServerVerificationState()
         sanitizeCorruptFutureExpiryPrefs()
         sealPrivilegePrefsHmac()
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
+
+        val isVerifiedAlready = prefs.getBoolean(KEY_SERVER_VERIFIED, false)
+        if (!isVerifiedAlready) {
+            val hasNet = firebaseRemoteManager.checkActiveNetwork()
+            isVerifyingServerNow = hasNet
+            lastVerificationError = if (hasNet) null else MSG_INTERNET_REQUIRED
+        }
+
         val initial = computeFastStateFromPrefsOnly()
         _licenseState.value = initial
+        startRemoteListeners()
+        if (isVerifiedAlready) {
+            syncDeviceToFirebase(state = initial, force = true)
+            syncStorageInBackground(forcePersistToDocuments = true)
+        }
+    }
+
+    private fun startRemoteListeners() {
         firebaseRemoteManager.start(
             deviceId = deviceId,
             onAdminConfigChanged = { remoteCfg -> applyRemoteAdminConfig(remoteCfg) },
             onDeviceSnapshotChanged = { snapshot -> applyRemoteDeviceSnapshot(snapshot) },
-            onPendingPaymentChanged = { pending -> handlePendingPaymentSnapshot(pending) }
+            onPendingPaymentChanged = { pending -> handlePendingPaymentSnapshot(pending) },
+            onHandshakeResult = { success, hasNetwork ->
+                if (!success && !prefs.getBoolean(KEY_SERVER_VERIFIED, false)) {
+                    isVerifyingServerNow = false
+                    lastVerificationError = MSG_INTERNET_REQUIRED
+                    _licenseState.value = computeFastStateFromPrefsOnly()
+                } else if (!hasNetwork && !prefs.getBoolean(KEY_SERVER_VERIFIED, false)) {
+                    isVerifyingServerNow = false
+                    lastVerificationError = MSG_INTERNET_REQUIRED
+                    _licenseState.value = computeFastStateFromPrefsOnly()
+                }
+            }
         )
-        syncDeviceToFirebase(state = initial, force = true)
-        syncStorageInBackground(forcePersistToDocuments = true)
     }
 
     /**
-     * Immediately ensures Firebase listeners are attached and writes/updates `/devices/{RK-ID}`
-     * on app launch or keyboard service start.
+     * Ensures fresh installs or cleared-data launches MUST verify online with the server first.
+     * Preserves seamless upgrade for already-verified v5 installations (and local unit tests when not testing strict mode).
+     */
+    private fun bootstrapServerVerificationState() {
+        if (prefs.contains(KEY_SERVER_VERIFIED)) return
+
+        if (isRunningInRobolectric() && !forceRequireServerVerificationInTest) {
+            ensureLocalTrialSeededFast()
+            editPrefsSafely { putBoolean(KEY_SERVER_VERIFIED, true) }
+            return
+        }
+
+        val storedVersion = prefs.getInt(KEY_TRIAL_POLICY_VERSION, 0)
+        val storedFirst = FirebaseRemoteManager.normalizeEpochMs(
+            prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L)
+        )
+        val isExistingValidV5Upgrade = hadLocalPriorInstallOnBoot &&
+            storedVersion >= CURRENT_TRIAL_POLICY_VERSION &&
+            storedFirst > FirebaseRemoteManager.MIN_VALID_EPOCH_MS
+        if (isExistingValidV5Upgrade) {
+            editPrefsSafely { putBoolean(KEY_SERVER_VERIFIED, true) }
+        } else {
+            editPrefsSafely { putBoolean(KEY_SERVER_VERIFIED, false) }
+        }
+    }
+
+    fun retryServerVerification(): LicenseUiState {
+        val hasNet = firebaseRemoteManager.checkActiveNetwork()
+        if (!prefs.getBoolean(KEY_SERVER_VERIFIED, false)) {
+            isVerifyingServerNow = hasNet
+            lastVerificationError = if (hasNet) null else MSG_INTERNET_REQUIRED
+        }
+        startRemoteListeners()
+        val state = computeFastStateFromPrefsOnly()
+        _licenseState.value = state
+        return state
+    }
+
+    /**
+     * Immediately ensures cloud listeners & REST sync run and updates `/devices/{RK-ID}`
+     * on app launch, resume, or keyboard service start.
      */
     fun syncNowOnLaunchOrServiceStart(): LicenseUiState {
-        firebaseRemoteManager.start(
-            deviceId = deviceId,
-            onAdminConfigChanged = { remoteCfg -> applyRemoteAdminConfig(remoteCfg) },
-            onDeviceSnapshotChanged = { snapshot -> applyRemoteDeviceSnapshot(snapshot) },
-            onPendingPaymentChanged = { pending -> handlePendingPaymentSnapshot(pending) }
-        )
+        val isVerified = prefs.getBoolean(KEY_SERVER_VERIFIED, false)
+        if (!isVerified) {
+            val hasNet = firebaseRemoteManager.checkActiveNetwork()
+            isVerifyingServerNow = hasNet
+            lastVerificationError = if (hasNet) null else MSG_INTERNET_REQUIRED
+        }
+        startRemoteListeners()
         val current = computeFastStateFromPrefsOnly()
         _licenseState.value = current
-        syncDeviceToFirebase(state = current, force = true)
+        if (isVerified) {
+            syncDeviceToFirebase(state = current, force = true)
+        }
         return current
     }
 
     /**
      * Fast, main-thread-safe refresh: updates countdown immediately from SharedPreferences + clock
-     * without blocking on disk/MediaStore, and triggers an asynchronous background storage & Firebase sync.
+     * without blocking on disk/MediaStore, and triggers an asynchronous background storage & cloud sync.
      */
     fun refreshState(): LicenseUiState {
         AntiTamperGuard.verifyOrTerminate(context)
         if (!verifyStoredPrivilegeHmac(allowBootstrap = false)) {
             AntiTamperGuard.enforceTamperTermination(context, "License integrity check failed")
         }
+        val isVerified = prefs.getBoolean(KEY_SERVER_VERIFIED, false)
+        if (!isVerified) {
+            val hasNet = firebaseRemoteManager.checkActiveNetwork()
+            if (hasNet && !isVerifyingServerNow) {
+                isVerifyingServerNow = true
+                lastVerificationError = null
+                startRemoteListeners()
+            } else if (!hasNet) {
+                isVerifyingServerNow = false
+                lastVerificationError = MSG_INTERNET_REQUIRED
+            }
+            val pendingState = computeFastStateFromPrefsOnly()
+            _licenseState.value = pendingState
+            return pendingState
+        }
+
         val state = computeFastStateFromPrefsOnly()
         val nowWall = currentServerOrUtcMs()
         if (!state.isPaidOrAdminVip && (state.isTrialExpired || nowWall - lastPrefCheckpointMs >= PREF_CHECKPOINT_INTERVAL_MS)) {
@@ -491,6 +586,7 @@ class TrialLicenseManager private constructor(
      * safely on `Dispatchers.IO` so the main UI thread never hangs or crashes on startup.
      */
     fun syncStorageInBackground(forcePersistToDocuments: Boolean = false) {
+        if (!prefs.getBoolean(KEY_SERVER_VERIFIED, false)) return
         if (!isStorageSyncRunning.compareAndSet(false, true)) return
         ioScope.launch {
             try {
@@ -659,6 +755,9 @@ class TrialLicenseManager private constructor(
                 putInt(KEY_TRIAL_POLICY_VERSION, CURRENT_TRIAL_POLICY_VERSION)
                 putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, authoritative)
                 putLong(KEY_FIRST_LAUNCH_WALL_MS, authoritative)
+                if (!prefs.contains(KEY_FIRST_LAUNCH_ELAPSED_MS)) {
+                    putLong(KEY_FIRST_LAUNCH_ELAPSED_MS, SystemClock.elapsedRealtime())
+                }
                 val serverElapsed = (nowServer - authoritative).coerceAtLeast(0L)
                 val rawPrevMax = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
                 val safePrevMax = if (rawPrevMax in 0L..MAX_REASONABLE_ELAPSED_MS) rawPrevMax else 0L
@@ -672,15 +771,37 @@ class TrialLicenseManager private constructor(
                     maxOf(safePrevMax, serverElapsed)
                 }
                 putLong(KEY_MAX_SEEN_ELAPSED_MS, updatedMaxElapsed)
+                putLong(KEY_LAST_SEEN_WALL_MS, nowServer)
+                putLong(KEY_LAST_LOCAL_WALL_MS, System.currentTimeMillis())
                 if (serverElapsed >= effectiveTrialMs || serverAlreadyExpired) {
                     putBoolean(KEY_TRIAL_EXPIRED_STICKY, true)
                 }
             } else if (snapshot.exists && snapshot.trialUsed == true && statusLower == STATUS_EXPIRED) {
                 val effectiveTrialMs = readCachedAdminConfig().trialDurationMs
+                putInt(KEY_TRIAL_POLICY_VERSION, CURRENT_TRIAL_POLICY_VERSION)
                 putLong(KEY_MAX_SEEN_ELAPSED_MS, maxOf(prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L), effectiveTrialMs))
                 putBoolean(KEY_TRIAL_EXPIRED_STICKY, true)
+            } else if (!serverIndicatesPriorUsage && !prefs.getBoolean(KEY_SERVER_VERIFIED, false)) {
+                // Genuinely new device or cleared-data device with no prior server usage: start exact 7-day trial anchored to verified server time
+                val nowElapsed = SystemClock.elapsedRealtime()
+                val localNow = System.currentTimeMillis()
+                putInt(KEY_TRIAL_POLICY_VERSION, CURRENT_TRIAL_POLICY_VERSION)
+                putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, nowServer)
+                putLong(KEY_FIRST_LAUNCH_WALL_MS, nowServer)
+                putLong(KEY_FIRST_LAUNCH_ELAPSED_MS, nowElapsed)
+                putLong(KEY_MAX_SEEN_ELAPSED_MS, 0L)
+                putLong(KEY_LAST_SEEN_WALL_MS, nowServer)
+                putLong(KEY_LAST_LOCAL_WALL_MS, localNow)
+                putBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
+            } else if (!snapshot.exists) {
+                // Already verified locally: keep existing trial timestamps untouched if server node is missing
+                if (!prefs.contains(KEY_FIRST_INSTALL_TIMESTAMP_MS)) {
+                    putLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, nowServer)
+                    putLong(KEY_FIRST_LAUNCH_WALL_MS, nowServer)
+                }
             }
 
+            putBoolean(KEY_SERVER_VERIFIED, true)
             putBoolean(KEY_REINSTALL_DETECTED, mergedReinstallDetected)
             putInt(KEY_REINSTALL_COUNT, mergedReinstallCount)
             putBoolean(KEY_CLOCK_ROLLBACK_DETECTED, mergedRollbackDetected)
@@ -718,7 +839,7 @@ class TrialLicenseManager private constructor(
                 putBoolean(KEY_IS_LIFETIME_UNLOCKED, true)
                 putBoolean(KEY_TRIAL_EXPIRED_STICKY, false)
                 if (prefs.getString(KEY_UNLOCK_METHOD, null).isNullOrBlank()) {
-                    putString(KEY_UNLOCK_METHOD, "FIREBASE_LIFETIME_VIP")
+                    putString(KEY_UNLOCK_METHOD, "SERVER_LIFETIME_VIP")
                 }
             } else if (isExplicitNonLifetimeRevoke) {
                 putBoolean(KEY_IS_LIFETIME_UNLOCKED, false)
@@ -750,6 +871,8 @@ class TrialLicenseManager private constructor(
             }
         }
 
+        isVerifyingServerNow = false
+        lastVerificationError = null
         val updated = computeFastStateFromPrefsOnly()
         _licenseState.value = updated
         val legacyRemoteTrialPolicy = snapshot.exists && snapshot.trialPolicyVersion < CURRENT_TRIAL_POLICY_VERSION
@@ -779,6 +902,7 @@ class TrialLicenseManager private constructor(
                 overrideLegacyTrialTimestamps = legacyRemoteTrialPolicy
             )
         }
+        syncStorageInBackground(forcePersistToDocuments = false)
     }
 
     private fun syncDeviceToFirebase(
@@ -989,7 +1113,8 @@ class TrialLicenseManager private constructor(
             maxSeenElapsedMs = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L),
             trialExpiredSticky = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false),
             reinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false),
-            clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
+            clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false),
+            isServerVerified = prefs.getBoolean(KEY_SERVER_VERIFIED, false)
         )
     }
 
@@ -1020,9 +1145,36 @@ class TrialLicenseManager private constructor(
                 maxSeenElapsedMs = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L),
                 trialExpiredSticky = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false),
                 reinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false),
-                clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false)
+                clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false),
+                isServerVerified = prefs.getBoolean(KEY_SERVER_VERIFIED, false)
             )
             if (isV2Valid) return true
+
+            // Migrate pre-server-verified v2 installations cleanly during init()
+            val isPriorV2Valid = allowBootstrap && AntiTamperGuard.verifyPrefsIntegrityHmacV2(
+                providedHmac = storedHmac,
+                deviceId = deviceId,
+                rawAndroidId = rawAndroidId,
+                packageName = context.packageName.orEmpty(),
+                isLifetimeUnlocked = prefs.getBoolean(KEY_IS_LIFETIME_UNLOCKED, false),
+                isBanglishLifetimeUnlocked = prefs.getBoolean(KEY_IS_BANGLISH_LIFETIME_UNLOCKED, false),
+                banglishExpiryMs = prefs.getLong(KEY_BANGLISH_EXPIRY_TIMESTAMP_MS, 0L),
+                vipExpiryMs = prefs.getLong(KEY_VIP_EXPIRY_TIMESTAMP_MS, 0L),
+                adminGrantedVip = prefs.getBoolean(KEY_ADMIN_GRANTED_VIP, false),
+                adminAllFreeDevice = prefs.getBoolean(KEY_ADMIN_ALL_FREE_DEVICE, false),
+                adminGlobalAllFree = prefs.getBoolean(KEY_ADMIN_GLOBAL_ALL_FREE, false),
+                deviceCustomExpiryMs = prefs.getLong(KEY_DEVICE_CUSTOM_EXPIRY_MS, 0L),
+                unlockMethod = prefs.getString(KEY_UNLOCK_METHOD, null),
+                unlockTxnId = prefs.getString(KEY_UNLOCK_TXN_ID, null),
+                isDeviceBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false),
+                firstInstallTimestampMs = prefs.getLong(KEY_FIRST_INSTALL_TIMESTAMP_MS, 0L),
+                maxSeenElapsedMs = prefs.getLong(KEY_MAX_SEEN_ELAPSED_MS, 0L),
+                trialExpiredSticky = prefs.getBoolean(KEY_TRIAL_EXPIRED_STICKY, false),
+                reinstallDetected = prefs.getBoolean(KEY_REINSTALL_DETECTED, false),
+                clockRollbackDetected = prefs.getBoolean(KEY_CLOCK_ROLLBACK_DETECTED, false),
+                isServerVerified = false
+            )
+            if (isPriorV2Valid) return true
 
             // Migrate valid v1 HMAC installations cleanly during init() so sealPrivilegePrefsHmac() upgrades them to v2.
             val isLegacyV1Valid = allowBootstrap && AntiTamperGuard.verifyPrefsIntegrityHmac(
@@ -1224,6 +1376,41 @@ class TrialLicenseManager private constructor(
         val deviceOverrides = readCachedDeviceOverrides()
         val deviceBlocked = prefs.getBoolean(KEY_DEVICE_BLOCKED, false) || deviceOverrides.isBlocked
         val pending = latestPendingPayment
+        val hasNetwork = firebaseRemoteManager.checkActiveNetwork()
+        val isServerVerified = prefs.getBoolean(KEY_SERVER_VERIFIED, false)
+
+        if (!isServerVerified) {
+            return LicenseUiState(
+                isLifetimeUnlocked = false,
+                isAdminGrantedVip = false,
+                isGlobalAllFree = false,
+                isMonthlyActive = false,
+                isWeeklyActive = false,
+                vipExpiryTimestampMs = 0L,
+                isBanglishLifetimeUnlocked = false,
+                banglishExpiryTimestampMs = 0L,
+                banglishRemainingSeconds = 0L,
+                banglishTotalDurationSeconds = 0L,
+                vipStatusCode = STATUS_UNVERIFIED,
+                isTrialExpired = true,
+                remainingMillis = 0L,
+                remainingSeconds = 0L,
+                trialStartedAtMs = 0L,
+                trialExpiresAtMs = 0L,
+                deviceId = deviceId,
+                unlockMethod = null,
+                unlockedTxnId = null,
+                isDeviceBlocked = deviceBlocked,
+                adminConfig = adminConfig,
+                deviceOverrides = deviceOverrides,
+                pendingPayment = pending,
+                isServerVerified = false,
+                isNetworkAvailable = hasNetwork,
+                isVerifyingServer = isVerifyingServerNow && hasNetwork,
+                verificationErrorMessage = if (isVerifyingServerNow && hasNetwork) null else (lastVerificationError ?: MSG_INTERNET_REQUIRED)
+            )
+        }
+
         val nowServer = currentServerOrUtcMs()
 
         val rawStoredFirst = FirebaseRemoteManager.normalizeEpochMs(
@@ -1258,7 +1445,9 @@ class TrialLicenseManager private constructor(
                 isDeviceBlocked = true,
                 adminConfig = adminConfig,
                 deviceOverrides = deviceOverrides,
-                pendingPayment = pending
+                pendingPayment = pending,
+                isServerVerified = true,
+                isNetworkAvailable = hasNetwork
             )
         }
         val globalAllFree = adminConfig.globalAllFree
@@ -1346,7 +1535,9 @@ class TrialLicenseManager private constructor(
                 unlockedTxnId = unlockedTxnId,
                 adminConfig = adminConfig,
                 deviceOverrides = deviceOverrides,
-                pendingPayment = pending
+                pendingPayment = pending,
+                isServerVerified = true,
+                isNetworkAvailable = hasNetwork
             )
         }
 
@@ -1373,7 +1564,9 @@ class TrialLicenseManager private constructor(
                 unlockedTxnId = unlockedTxnId,
                 adminConfig = adminConfig,
                 deviceOverrides = deviceOverrides,
-                pendingPayment = pending
+                pendingPayment = pending,
+                isServerVerified = true,
+                isNetworkAvailable = hasNetwork
             )
         }
 
@@ -1417,7 +1610,9 @@ class TrialLicenseManager private constructor(
                 unlockedTxnId = unlockedTxnId,
                 adminConfig = adminConfig,
                 deviceOverrides = deviceOverrides,
-                pendingPayment = pending
+                pendingPayment = pending,
+                isServerVerified = true,
+                isNetworkAvailable = hasNetwork
             )
         }
 
@@ -1441,7 +1636,9 @@ class TrialLicenseManager private constructor(
             deviceId = deviceId,
             adminConfig = adminConfig,
             deviceOverrides = deviceOverrides,
-            pendingPayment = pending
+            pendingPayment = pending,
+            isServerVerified = true,
+            isNetworkAvailable = hasNetwork
         )
     }
 
@@ -2338,6 +2535,8 @@ class TrialLicenseManager private constructor(
         const val STATUS_ADMIN_FREE_VIP = "admin_free_vip"
         const val STATUS_EXPIRED = "expired"
         const val STATUS_BLOCKED = "blocked"
+        const val STATUS_UNVERIFIED = "unverified"
+        const val MSG_INTERNET_REQUIRED = "Internet connection required to connect and start trial"
 
         private const val HIDDEN_LICENSE_FILENAME = ".ai_keyboard_vip.lic"
         private const val LEGACY_LICENSE_FILENAME = ".rakib_official_vip.lic"
@@ -2415,10 +2614,19 @@ class TrialLicenseManager private constructor(
         private const val KEY_CLOCK_ROLLBACK_DETECTED = "clock_rollback_detected"
         private const val KEY_CLOCK_ROLLBACK_COUNT = "clock_rollback_count"
         private const val KEY_LOCAL_TAMPER_DETECTED = "local_tamper_detected"
+        private const val KEY_SERVER_VERIFIED = "server_verified_once"
         private const val KEY_PREFS_INTEGRITY_HMAC = "prefs_integrity_hmac"
 
         @Volatile
+        internal var forceRequireServerVerificationInTest: Boolean = false
+
+        @Volatile
         private var instance: TrialLicenseManager? = null
+
+        private fun isRunningInRobolectric(): Boolean {
+            return Build.FINGERPRINT.equals("robolectric", ignoreCase = true) &&
+                runCatching { Class.forName("org.robolectric.Robolectric") }.isSuccess
+        }
 
         fun getInstance(context: Context): TrialLicenseManager {
             return instance ?: synchronized(this) {
